@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Farmacia Davalsi — Sistema Omnicanal & Control de Inventario Unificado (RD$)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#0d9488" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        fontSize: {
+          'xs': ['14px', { lineHeight: '20px' }],
+          'sm': ['16px', { lineHeight: '23px' }],
+          'base': ['18px', { lineHeight: '26px' }],
+          'lg': ['20px', { lineHeight: '28px' }],
+          'xl': ['22px', { lineHeight: '30px' }],
+          '2xl': ['26px', { lineHeight: '34px' }],
+          '3xl': ['32px', { lineHeight: '38px' }],
+        },
+        extend: {
+          colors: {
+            davalsi: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              200: '#99f6e4',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+
+  <!-- Banner de Instalacion de la App Movil en Celulares -->
+  <div id="pwa-install-banner" class="hidden bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white px-3 py-2 sm:px-4 sm:py-2.5 flex items-center justify-between shadow-lg sticky top-0 z-50 text-xs font-bold">
+    <div class="flex items-center gap-2">
+      <span class="text-xl">📲</span>
+      <div>
+        <p class="font-black leading-tight text-white">Instalar App Farmacia Davalsi</p>
+        <p class="text-[11px] text-teal-100 font-normal">Accede rápido a medicamentos y pedidos desde tu celular</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" onclick="triggerPwaInstall()" class="px-3 py-1.5 rounded-lg bg-white text-teal-900 font-black text-xs shadow hover:bg-teal-50 transition cursor-pointer">
+        Instalar Gratis
+      </button>
+      <button type="button" onclick="dismissPwaBanner()" class="text-teal-200 hover:text-white px-1 text-sm font-bold">
+        ✕
+      </button>
+    </div>
+  </div>
+
+
+  <!-- =====================================================================
+       PANTALLA DE ACCESO POR CLAVE PARA PACIENTES (PATIENT LOGIN GATE)
+       ===================================================================== -->
+  <div id="patient-auth-gate-screen" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+      <div class="bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white p-6 text-center relative">
+        <div class="w-12 h-12 mx-auto rounded-2xl bg-white/20 flex items-center justify-center mb-3 shadow">
+          <span class="text-2xl">🔐</span>
+        </div>
+        <h2 class="text-xl font-extrabold tracking-tight">Acceso Seguro de Pacientes</h2>
+        <p class="text-xs text-teal-100 mt-1">Farmacia Davalsi • App Móvil de Salud</p>
+      </div>
+
+      <div class="p-6 space-y-4">
+        <!-- Selector Modo: Iniciar Sesión vs Registro -->
+        <div class="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+          <button type="button" id="tab-patient-login" onclick="switchPatientAuthMode('login')" class="flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition">
+            Iniciar Sesión
+          </button>
+          <button type="button" id="tab-patient-register" onclick="switchPatientAuthMode('register')" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition">
+            Crear Cuenta Nueva
+          </button>
+        </div>
+
+        <!-- Formulario Iniciar Sesión -->
+        <form id="form-patient-login" onsubmit="handlePatientLogin(event)" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Teléfono Móvil o Cédula *</label>
+            <input id="pac-login-id" type="text" required placeholder="Ej. 8095558490" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Clave de Acceso o PIN *</label>
+            <input id="pac-login-password" type="password" required placeholder="Ingresa tu clave secreta..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
+          </div>
+          <div id="pac-login-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
+          <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow transition">
+            Entrar a la App ➜
+          </button>
+        </form>
+
+        <!-- Formulario Crear Cuenta -->
+        <form id="form-patient-register" onsubmit="handlePatientRegister(event)" class="hidden space-y-3">
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Nombre Completo *</label>
+            <input id="pac-reg-nombre" type="text" required placeholder="Ej. Juan Pérez" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Teléfono Móvil *</label>
+              <input id="pac-reg-tel" type="tel" required placeholder="809-555-1234" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            </div>
+            <div>
+              <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Cédula</label>
+              <input id="pac-reg-cedula" type="text" placeholder="001-XXXXXXX-X" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Clave de Acceso o PIN *</label>
+            <input id="pac-reg-clave" type="password" required placeholder="Mínimo 4 caracteres" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Dirección de Entrega</label>
+            <input id="pac-reg-dir" type="text" placeholder="Calle, sector, referencia..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+          </div>
+          <div id="pac-reg-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
+          <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow transition">
+            Registrarme y Entrar
+          </button>
+        </form>
+
+        <!-- Enlace Directo al Sistema POS de la Farmacia -->
+        <div class="pt-3 border-t border-slate-200 text-center">
+          <a href="/sistema" class="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow flex items-center justify-center gap-2 transition">
+            <span>🏪</span> <span>¿Eres de la farmacia? <strong>Ir al Sistema POS de Cobro</strong> ➜</span>
+          </a>
+        </div>
+
+        <!-- Acceso Rápido con Cuenta Demo -->
+        <div class="pt-3 border-t border-slate-200">
+          <p class="text-[11px] font-extrabold uppercase text-teal-700 mb-2">🔑 Paciente Demo (Clic para entrar directo):</p>
+          <button type="button" onclick="autoLoginDemoPatient('8095558490', 'paciente123')" class="w-full p-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-left transition flex items-center justify-between">
+            <div>
+              <p class="font-extrabold text-teal-900 text-xs">María Fernanda Almonte</p>
+              <p class="text-[10px] text-teal-700">Tel: 8095558490 • Clave: paciente123</p>
+            </div>
+            <span class="text-xs font-extrabold text-teal-700 bg-white px-2 py-1 rounded-lg border border-teal-300">Entrar ➜</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- BARRA SUPERIOR DE ARQUITECTURA OMNICANAL (CONMUTADOR DE MÓDULOS) -->
+  <header class="sticky top-0 z-40 bg-slate-900 text-white shadow-lg border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
+      <!-- Branding Principal -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 flex items-center justify-center shadow-md shadow-teal-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-base sm:text-lg tracking-tight text-white">FARMACIA DAVALSI</span>
+            <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+              Omnicanal • RD$
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-400">Stock Unificado por Unidad Mínima (Caja ⇄ Blíster ⇄ Unidad)</p>
+        </div>
+      </div>
+
+      <!-- Acceso Rápido al Sistema POS -->
+      <a href="/sistema" class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-extrabold shadow transition">
+        <span>🏪</span> <span>Sistema POS Mostrador</span>
+      </a>
+      <!-- Selector de Módulo Activo -->
+      
+      <!-- Perfil de Paciente Autenticado -->
+      <div id="patient-auth-badge" class="hidden flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl">
+        <span class="text-xs text-teal-300 font-bold flex items-center gap-1">
+          <span>👤</span> <span id="header-patient-name">Paciente</span>
+        </span>
+        <button type="button" onclick="handlePatientLogout()" title="Cerrar Sesión de Paciente" class="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 pl-2 border-l border-slate-700">
+          Salir
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <a href="/descargar-apk" download="Farmacia_Davalsi_App_Movil.apk" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-extrabold border border-emerald-500/40 flex items-center gap-1.5 transition">
+          <span>📲</span> <span class="hidden sm:inline">Instalar APK Móvil</span>
+        </a>
+        <button type="button" onclick="configurePosServerIp()" title="Conectar con IP del servidor POS en red o usar Modo Autónomo" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold border border-slate-700 flex items-center gap-1 transition cursor-pointer">
+          <span>🌐</span> <span class="hidden md:inline">Red POS</span>
+        </button>
+        <button onclick="toggleCartDrawer()" class="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg transition">
+          <span>🛒</span> <span id="app-cart-badge-text">RD$ 0.00</span>
+          <span id="app-cart-count" class="px-1.5 py-0.2 bg-white text-teal-900 rounded-full text-[10px] font-black">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- CONTENEDOR PRINCIPAL -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6">
+
+    <!-- ===================================================================
+         MÓDULO 1: APP CLIENTE (INTERFAZ PACIENTE MOBILE-FIRST)
+         =================================================================== -->
+    <section id="module-app" class="space-y-5 pb-24">
+      <!-- Hero Header estilo App Móvil Farmacia Davalsi -->
+      <div class="relative rounded-3xl bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white p-5 sm:p-7 shadow-xl overflow-hidden">
+        <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div class="space-y-1.5 max-w-xl">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm text-xs font-semibold">
+              <span class="w-2 h-2 rounded-full bg-emerald-300 animate-ping"></span>
+              <span>Disponibilidad en Tiempo Real conectada al Mostrador Físico</span>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Tu salud a un toque en Farmacia Davalsi</h1>
+            <p class="text-xs sm:text-sm text-teal-100">
+              Compra por <strong>Caja completa</strong>, <strong>Blíster</strong> o <strong>Unidades sueltas</strong> con precios en <strong>RD$</strong>. Pagos con Tarjeta o Depósito Bancario y entrega a domicilio.
+            </p>
+          </div>
+
+          <!-- Buscador Inteligente Interactivo -->
+          <div class="w-full md:w-96">
+            <div class="relative">
+              <input
+                id="app-search-input"
+                type="text"
+                oninput="handleAppSearch()"
+                placeholder="Buscar por nombre comercial o principio activo..."
+                class="w-full pl-11 pr-10 py-3.5 rounded-2xl bg-white text-slate-900 placeholder-slate-400 text-sm font-medium shadow-lg focus:outline-none focus:ring-4 focus:ring-teal-300"
+              />
+              <svg class="w-5 h-5 text-teal-600 absolute left-3.5 top-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 103.5 10.5a7.5 7.5 0 0013.15 6.15z" />
+              </svg>
+              <button onclick="clearAppSearch()" id="btn-clear-search" class="hidden absolute right-3 top-3 text-slate-400 hover:text-slate-600 text-xs font-bold bg-slate-100 px-2 py-1 rounded-lg">
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CINTILLO EN VIVO DE DISPONIBILIDAD DE SERVICIOS (CONTROLADO DESDE EL POS) -->
+      <div class="bg-white rounded-2xl px-4 py-3 shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-teal-500 animate-pulse"></span>
+          <span class="font-extrabold text-slate-800">Estado de Servicios en Sucursal (Tiempo Real):</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="app-top-status-card" class="px-2.5 py-1 rounded-full font-extrabold text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-300">
+            💳 Pago con Tarjeta: Disponible
+          </span>
+          <span id="app-top-status-delivery" class="px-2.5 py-1 rounded-full font-extrabold text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-300">
+            🛵 Envío a Domicilio: Disponible
+          </span>
+          <span id="app-top-status-ars" class="px-2.5 py-1 rounded-full font-extrabold text-[11px] bg-emerald-100 text-emerald-800 border border-emerald-300">
+            🛡️ Seguro Médico (ARS): Disponible
+          </span>
+        </div>
+      </div>
+
+      <!-- Sección de Navegación Rápida por Síntomas: "¿Qué sientes hoy?" (Sin botón redundante, con barra de desplazamiento visible) -->
+      <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200/80 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base sm:text-lg font-extrabold text-slate-800 flex items-center gap-2">
+              <span>🩺</span> <span>¿Qué sientes hoy?</span>
+            </h2>
+            <p class="text-xs text-slate-500">Desliza la barra inferior o usa las flechas para explorar todas las opciones de sintomatología</p>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button type="button" onclick="scrollSymptomsBar(-260)" title="Desplazar síntomas a la izquierda" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-300 font-extrabold text-xs transition cursor-pointer">
+              ◀ Anterior
+            </button>
+            <button type="button" onclick="scrollSymptomsBar(260)" title="Desplazar síntomas a la derecha" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-300 font-extrabold text-xs transition cursor-pointer">
+              Siguiente ▶
+            </button>
+          </div>
+        </div>
+
+        <div id="symptom-pills-container" onscroll="syncSymptomScrollRange()" class="flex items-center gap-2.5 symptom-scrollbar">
+          <button onclick="selectSymptom('todos')" data-symptom="todos" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold border transition flex items-center gap-2 bg-teal-600 text-white border-teal-600 shadow-sm cursor-pointer">
+            <span>✨</span> <span>Todos</span>
+          </button>
+          <button onclick="selectSymptom('fiebre')" data-symptom="fiebre" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🌡️</span> <span>Fiebre</span>
+          </button>
+          <button onclick="selectSymptom('dolor de cabeza')" data-symptom="dolor de cabeza" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🤕</span> <span>Dolor de cabeza</span>
+          </button>
+          <button onclick="selectSymptom('dolor muscular')" data-symptom="dolor muscular" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>💪</span> <span>Dolor muscular</span>
+          </button>
+          <button onclick="selectSymptom('infeccion')" data-symptom="infeccion" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🦠</span> <span>Infección / Garganta</span>
+          </button>
+          <button onclick="selectSymptom('acidez')" data-symptom="acidez" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🔥</span> <span>Acidez / Estómago</span>
+          </button>
+          <button onclick="selectSymptom('alergia')" data-symptom="alergia" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🤧</span> <span>Alergia / Gripe</span>
+          </button>
+          <button onclick="selectSymptom('presion arterial')" data-symptom="presion arterial" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>❤️</span> <span>Presión Arterial</span>
+          </button>
+          <button onclick="selectSymptom('higiene')" data-symptom="higiene" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🧴</span> <span>Cuidado Personal / Higiene</span>
+          </button>
+          <button onclick="selectSymptom('primeros auxilios')" data-symptom="primeros auxilios" class="symptom-pill shrink-0 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold border transition flex items-center gap-2 bg-slate-50 text-slate-700 border-slate-200 hover:border-teal-400 cursor-pointer">
+            <span>🩹</span> <span>Primeros Auxilios</span>
+          </button>
+        </div>
+
+        <!-- Barra interactiva adicional de desplazamiento para facilitar visualización en móviles y adultos mayores -->
+        <div class="flex items-center gap-3 pt-1">
+          <span class="text-[11px] font-bold text-slate-500 shrink-0">Desplazar opciones:</span>
+          <input
+            id="symptom-scroll-slider"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            oninput="onSymptomSliderInput(this.value)"
+            class="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-teal-600"
+          />
+        </div>
+      </div>
+
+      <!-- Catálogo de Productos con Selector Dinámico de Presentación (Caja / Blíster / Unidad) -->
+      <div id="app-products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <!-- Renderizado dinámicamente por app.js -->
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         MÓDULO 2: POS DE MOSTRADOR FÍSICO & BANDEJA DE PEDIDOS WEB/APP
+         =================================================================== -->
+  </main>
+
+  <!-- ===================================================================
+       BOTÓN FLOTANTE DEL CARRITO DE COMPRAS (APP PACIENTE)
+       =================================================================== -->
+  <div id="floating-cart-bar" class="fixed bottom-4 inset-x-0 z-30 px-4 pointer-events-none flex justify-center">
+    <button
+      onclick="openCartDrawer()"
+      class="pointer-events-auto w-full max-w-lg bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3.5 shadow-2xl border border-slate-700 flex items-center justify-between transition transform hover:scale-[1.01]"
+    >
+      <div class="flex items-center gap-3">
+        <div class="relative w-10 h-10 rounded-xl bg-teal-500 text-slate-950 font-extrabold flex items-center justify-center text-sm" id="floating-cart-count">
+          0
+        </div>
+        <div class="text-left">
+          <p class="text-xs font-bold uppercase tracking-wider text-teal-300">Tu Carrito Davalsi</p>
+          <p id="floating-cart-subtitle" class="text-[11px] text-slate-300">Agrega medicamentos por Caja, Blíster o Unidad</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="floating-cart-total" class="text-base sm:text-lg font-extrabold text-white">RD$ 0.00</span>
+        <span class="px-3 py-1.5 rounded-xl bg-teal-500 text-slate-950 font-extrabold text-xs">Ver Pedido →</span>
+      </div>
+    </button>
+  </div>
+
+  <!-- ===================================================================
+       DRAWER / MODAL DE CARRITO, SUBIDA DE RECETA MÉDICA Y PAGO (RD$)
+       =================================================================== -->
+  <div id="cart-drawer-backdrop" class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs hidden flex justify-end">
+    <div class="w-full max-w-lg bg-white h-full flex flex-col shadow-2xl overflow-hidden">
+      <!-- Header del Carrito -->
+      <div class="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between">
+        <div>
+          <h3 class="text-base sm:text-lg font-extrabold">Confirmar Pedido — Farmacia Davalsi</h3>
+          <p class="text-xs text-teal-300">Descuento automático en inventario unificado</p>
+        </div>
+        <button onclick="closeCartDrawer()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold">✕</button>
+      </div>
+
+      <!-- Contenido Scrollable del Carrito -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+        <!-- Lista de Ítems -->
+        <div>
+          <h4 class="text-xs font-extrabold uppercase text-slate-500 mb-2">1. Medicamentos y Presentación Seleccionada</h4>
+          <div id="app-cart-items-list" class="space-y-2.5">
+            <!-- Renderizado por app.js -->
+          </div>
+        </div>
+
+        <!-- Bloque Obligatorio de Receta Médica (Se activa automáticamente si requiere_receta = true) -->
+        <div id="app-prescription-box" class="hidden rounded-2xl border-2 border-amber-400 bg-amber-50/70 p-4 space-y-3">
+          <div class="flex items-start gap-2.5">
+            <span class="text-xl">🩺</span>
+            <div>
+              <h4 class="text-xs sm:text-sm font-extrabold text-amber-950">RECETA MÉDICA OBLIGATORIA REQUERIDA</h4>
+              <p class="text-xs text-amber-800">
+                Tu carrito incluye medicamentos regulados. Toma una foto con tu cámara o sube la imagen de la indicación médica para que nuestro farmacéutico valide el despacho.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <label class="flex-1 min-w-[140px] cursor-pointer py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs text-center shadow transition">
+              📷 Subir Foto / Cámara
+              <input id="app-rx-file-input" type="file" accept="image/*" capture="environment" onchange="handlePrescriptionFileChange(event)" class="hidden" />
+            </label>
+            <button type="button" onclick="useSamplePrescription()" class="py-2.5 px-3 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-400 font-bold text-xs transition">
+              📄 Usar Receta Médica de Prueba
+            </button>
+          </div>
+
+          <div id="app-rx-preview-wrap" class="hidden pt-2">
+            <div class="flex items-center justify-between text-xs font-bold text-emerald-800 mb-1">
+              <span>✅ Receta adjuntada lista para validación:</span>
+              <button type="button" onclick="clearPrescriptionUpload()" class="text-rose-600 underline">Quitar</button>
+            </div>
+            <img id="app-rx-preview-img" src="" alt="Vista previa de receta" class="w-full max-h-44 object-contain rounded-xl border border-amber-300 bg-white p-1" />
+          </div>
+        </div>
+
+        <!-- Datos de Entrega del Paciente y Modalidad de Entrega (Domicilio vs Retiro) -->
+        <div class="space-y-3 pt-2 border-t border-slate-200">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase text-slate-500">2. Datos del Paciente y Modalidad de Entrega</h4>
+            <span id="app-drawer-delivery-badge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">🛵 Delivery Activo</span>
+          </div>
+
+          <!-- Selector de Modalidad de Entrega -->
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="btn-delivery-domicilio" onclick="selectAppDeliveryMode('DOMICILIO')" class="p-2.5 rounded-xl border-2 border-teal-600 bg-teal-50/70 text-left transition flex items-center gap-2">
+              <span class="text-lg">🛵</span>
+              <div>
+                <div class="text-xs font-extrabold text-slate-900">Envío a Domicilio</div>
+                <div id="sub-delivery-domicilio" class="text-[10px] text-slate-500">Entrega en tu casa</div>
+              </div>
+            </button>
+            <button type="button" id="btn-delivery-retiro" onclick="selectAppDeliveryMode('RETIRO_FARMACIA')" class="p-2.5 rounded-xl border-2 border-slate-200 bg-white text-left transition flex items-center gap-2">
+              <span class="text-lg">🏪</span>
+              <div>
+                <div class="text-xs font-extrabold text-slate-900">Retirar en Farmacia</div>
+                <div class="text-[10px] text-slate-500">Pasar por sucursal</div>
+              </div>
+            </button>
+          </div>
+
+          <!-- Aviso cuando Envío a Domicilio está bloqueado desde el POS -->
+          <div id="app-delivery-blocked-banner" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-start gap-2">
+            <span>🚫</span>
+            <span>El servicio de <strong>Envío a Domicilio</strong> se encuentra temporalmente deshabilitado por la farmacia. Tu pedido será preparado para <strong>Retiro en Sucursal</strong>.</span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Nombre Completo del Paciente *</label>
+            <input id="app-client-name" type="text" value="Carlos Eduardo Gómez" placeholder="Ej. Juan Pérez" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Número de WhatsApp (Para recibir confirmación de orden) *</label>
+            <input id="app-client-phone" type="tel" value="18095558291" placeholder="Ej. 18095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-mono font-semibold" />
+          </div>
+          <div id="app-address-field-wrap">
+            <label id="app-address-label" class="block text-xs font-bold text-slate-700 mb-1">Dirección Exacta de Entrega a Domicilio *</label>
+            <input id="app-client-address" type="text" value="Calle Polibio Díaz #44, Evaristo Morales, Santo Domingo" placeholder="Sector, calle, número de casa o edificio..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
+          </div>
+        </div>
+
+        <!-- Seguro Médico (ARS) para Usuarios en Casa -->
+        <div class="space-y-2.5 pt-2 border-t border-slate-200">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase text-slate-500">3. Seguro Médico / Cobertura ARS</h4>
+            <span id="app-drawer-ars-badge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">🛡️ ARS Disponible</span>
+          </div>
+
+          <div id="app-ars-blocked-banner" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-center gap-2">
+            <span>🔒</span>
+            <span>La opción de <strong>Seguro Médico (ARS)</strong> está temporalmente deshabilitada por la farmacia.</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Seleccionar ARS</label>
+              <select id="app-insurance-ars" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold bg-white">
+                <option value="Sin Seguro">Sin Seguro Médico</option>
+                <option value="ARS Humano">ARS Humano</option>
+                <option value="Senasa">ARS Senasa</option>
+                <option value="ARS Universal">ARS Universal</option>
+                <option value="Mapfre Salud">Mapfre Salud</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">No. Afiliado / Carné (Opcional)</label>
+              <input id="app-insurance-affiliate" type="text" placeholder="Ej. 001928374" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Método de Pago en Pesos Dominicanos (RD$) -->
+        <div class="space-y-3 pt-2 border-t border-slate-200">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase text-slate-500">4. Método de Pago (Pesos Dominicanos RD$)</h4>
+            <span id="app-drawer-card-badge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">💳 Tarjeta Disponible</span>
+          </div>
+
+          <div id="app-card-blocked-banner" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-center gap-2">
+            <span>🔒</span>
+            <span>El <strong>Pago con Tarjeta</strong> se encuentra temporalmente deshabilitado. Puedes pagar en <strong>Efectivo</strong> o por <strong>Depósito / Transferencia</strong>.</span>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" onclick="selectAppPaymentMethod('EFECTIVO')" id="btn-pay-efectivo" class="p-2.5 sm:p-3 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-left transition">
+              <div class="text-base sm:text-lg">💵</div>
+              <div class="text-xs font-extrabold text-slate-900 mt-0.5">Efectivo</div>
+              <div class="text-[9px] sm:text-[10px] text-slate-500">Contra Entrega</div>
+            </button>
+            <button type="button" onclick="selectAppPaymentMethod('TARJETA')" id="btn-pay-tarjeta" class="p-2.5 sm:p-3 rounded-xl border-2 border-slate-200 bg-white text-left transition relative">
+              <div class="text-base sm:text-lg">💳</div>
+              <div class="text-xs font-extrabold text-slate-900 mt-0.5">Con Tarjeta</div>
+              <div id="sub-pay-tarjeta" class="text-[9px] sm:text-[10px] text-slate-500">Crédito / Débito</div>
+            </button>
+            <button type="button" onclick="selectAppPaymentMethod('DEPOSITO_CUENTA')" id="btn-pay-deposito" class="p-2.5 sm:p-3 rounded-xl border-2 border-slate-200 bg-white text-left transition">
+              <div class="text-base sm:text-lg">🏦</div>
+              <div class="text-xs font-extrabold text-slate-900 mt-0.5">Depósito</div>
+              <div class="text-[9px] sm:text-[10px] text-slate-500">Transferencia</div>
+            </button>
+          </div>
+
+          <!-- Detalles de Efectivo con cálculo de cambio -->
+          <div id="payment-box-efectivo" class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                <span>💵</span> <span>Pago en Efectivo al Recibir</span>
+              </span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-bold">Contra Entrega</span>
+            </div>
+            <p class="text-[11px] text-emerald-800">
+              Pagas en efectivo cuando el repartidor te entregue tus medicamentos en tu dirección.
+            </p>
+            <div>
+              <label class="block font-bold text-emerald-950 mb-1">¿Con cuánto vas a pagar? (Para llevarte el cambio exacto en RD$):</label>
+              <div class="relative">
+                <span class="absolute left-3 top-2 font-bold text-slate-500">RD$</span>
+                <input id="app-cash-amount" type="number" step="0.01" min="0" oninput="calculateCashChange()" placeholder="Ej. 1000" class="w-full pl-12 pr-3 py-2 rounded-lg border border-emerald-300 font-mono font-bold text-xs bg-white" />
+              </div>
+              <div id="app-cash-change-info" class="mt-1.5 text-[11px] font-bold text-emerald-900 flex items-center justify-between bg-white/70 p-2 rounded-lg border border-emerald-200">
+                <span>Cambio a devolver:</span>
+                <span id="app-cash-change-val" class="font-mono text-emerald-700 text-xs font-extrabold">RD$ 0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detalles de Tarjeta -->
+          <div id="payment-box-tarjeta" class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-slate-700">Terminal Azul / CardNet RD</span>
+              <span class="text-[11px] text-emerald-700 font-bold">🔒 Transacción Segura</span>
+            </div>
+            <input id="app-card-ref" type="text" value="VISA-****-4920" placeholder="Últimos 4 dígitos o referencia" class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs bg-white" />
+          </div>
+
+          <!-- Detalles de Depósito a Cuenta Bancaria -->
+          <div id="payment-box-deposito" class="hidden p-3 rounded-xl bg-sky-50 border border-sky-200 space-y-2 text-xs">
+            <p class="font-extrabold text-sky-950">🏦 Cuentas Bancarias Farmacia Davalsi (RD$):</p>
+            <p class="text-[11px] text-sky-900 font-mono bg-white p-2 rounded-lg border border-sky-200">
+              • Banco Popular: 789-451230-9<br/>
+              • Banreservas: 960-112233-4<br/>
+              • RNC: 1-31-99887-2 (Farmacia Davalsi SRL)
+            </p>
+            <div>
+              <label class="block font-bold text-sky-950 mb-1">Número de Comprobante / Referencia de Depósito *</label>
+              <input id="app-deposit-ref" type="text" value="DEP-POPULAR-77410" placeholder="Ej. 00948122" class="w-full px-3 py-2 rounded-lg border border-sky-300 font-mono text-xs bg-white" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer del Carrito -->
+      <div class="p-4 sm:p-5 bg-slate-100 border-t border-slate-200 space-y-3">
+        <div class="flex items-center justify-between text-xs text-slate-600">
+          <span>Impacto total en inventario unificado:</span>
+          <span id="app-cart-total-units" class="font-mono font-bold text-slate-900">0 unidades mínimas</span>
+        </div>
+        <div class="flex items-baseline justify-between">
+          <span class="text-sm font-extrabold text-slate-800">TOTAL A PAGAR:</span>
+          <span id="app-cart-total-rd" class="text-2xl font-extrabold text-teal-700">RD$ 0.00</span>
+        </div>
+        <button onclick="submitAppOrder()" id="btn-submit-app-order" class="w-full py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow-lg transition flex items-center justify-center gap-2">
+          <span>📲 Confirmar Pedido y Notificar por WhatsApp API</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================
+       MODAL VISOR DE RECETA MÉDICA Y APROBACIÓN FARMACÉUTICA
+       =================================================================== -->
+  <div id="rx-viewer-modal" class="fixed inset-0 z-50 bg-slate-950/75 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+      <div class="p-4 bg-slate-900 text-white flex items-center justify-between">
+        <div>
+          <h3 id="rx-modal-title" class="text-base font-extrabold">Validación de Receta Médica</h3>
+          <p id="rx-modal-subtitle" class="text-xs text-teal-300"></p>
+        </div>
+        <button onclick="closePrescriptionModal()" class="w-8 h-8 rounded-lg bg-slate-800 text-white font-bold">✕</button>
+      </div>
+      <div class="p-4 overflow-y-auto flex-1 space-y-4">
+        <div class="bg-slate-100 rounded-2xl p-3 flex justify-center border border-slate-300">
+          <img id="rx-modal-img" src="" alt="Receta Médica del Paciente" class="max-h-[420px] object-contain rounded-xl" />
+        </div>
+        <div id="rx-modal-actions" class="space-y-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Observaciones del Farmacéutico Regente (Se enviará por WhatsApp al paciente)</label>
+            <input id="rx-pharmacist-note" type="text" placeholder="Ej. Receta verificada con sello y exequátur válido." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <button onclick="submitPrescriptionReview('APROBAR')" class="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow">
+              ✅ Aprobar Receta y Despachar
+            </button>
+            <button onclick="submitPrescriptionReview('RECHAZAR')" class="py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow">
+              ❌ Rechazar y Reintegrar Stock
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================
+       MODAL DE REABASTECIMIENTO DE STOCK (CAJA / BLÍSTER / UNIDAD)
+       =================================================================== -->
+  
+        <div class="grid grid-cols-2 gap-3 items-center">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Precio Base por Unidad Mínima (RD$)</label>
+            <input id="np-price" type="number" step="0.01" min="1" required value="20.00" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold" />
+          </div>
+          <label class="flex items-center gap-2 font-bold text-amber-900 bg-amber-50 p-3 rounded-xl border border-amber-300 cursor-pointer mt-4">
+            <input id="np-rx" type="checkbox" class="rounded text-amber-600" />
+            <span>🩺 Requiere Receta Médica</span>
+          </label>
+        </div>
+        <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold">
+          Guardar Medicamento en Catálogo
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================================
+       MODAL DE CONFIRMACIÓN DE ORDEN Y DESPACHO AUTOMÁTICO WHATSAPP API
+       =================================================================== -->
+  <div id="order-success-modal" class="fixed inset-0 z-50 bg-slate-950/75 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+      <div class="p-5 bg-gradient-to-r from-teal-700 to-emerald-600 text-white flex items-center justify-between">
+        <div>
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-white/20 uppercase">Transacción Completada & API Disparada</span>
+          <h3 id="success-modal-title" class="text-lg font-extrabold mt-1">¡Orden #DAV-0000 Procesada!</h3>
+        </div>
+        <button onclick="closeOrderSuccessModal()" class="w-8 h-8 rounded-lg bg-white/20 text-white font-bold">✕</button>
+      </div>
+      <div id="order-success-body" class="p-5 overflow-y-auto space-y-4 text-xs">
+        <!-- Renderizado por app.js con las 2 notificaciones de WhatsApp API enviadas -->
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast-container" class="fixed top-16 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+  <script src="/app.js"></script>
+
+<script>
+let pwaDeferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  pwaDeferredPrompt = e;
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) banner.classList.remove('hidden');
+});
+
+function triggerPwaInstall() {
+  if (pwaDeferredPrompt) {
+    pwaDeferredPrompt.prompt();
+    pwaDeferredPrompt.userChoice.then((choice) => {
+      if (choice.outcome === 'accepted') {
+        dismissPwaBanner();
+      }
+      pwaDeferredPrompt = null;
+    });
+  } else {
+    alert("📱 Para instalar en tu celular:\n\n• En Android (Chrome): Toca los 3 puntos (⋮) arriba a la derecha y selecciona 'Instalar aplicación' o 'Agregar a la pantalla principal'.\n\n• En iPhone (Safari): Toca el botón Compartir (cuadrado con flecha hacia arriba) y selecciona 'Agregar a pantalla de inicio'.");
+  }
+}
+
+function dismissPwaBanner() {
+  const banner = document.getElementById('pwa-install-banner');
+  if (banner) banner.classList.add('hidden');
+}
+</script>
+</body>
+
+</html>

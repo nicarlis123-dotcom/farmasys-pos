@@ -1,0 +1,24 @@
+{
+  "name": "Farmacia Davalsi — App Móvil de Pacientes",
+  "short_name": "Farmacia Davalsi",
+  "description": "Catálogo de Medicamentos y Cuidado Personal por Caja, Blíster y Unidad con Envío a Domicilio y Seguro ARS.",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0d9488",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
