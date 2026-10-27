@@ -1,15 +1,17 @@
 
 /* =========================================================================
-   CONTROLADOR DE PANTALLA DE CARGA FARMASYS (PASTILLA ANIMADA)
+   CONTROLADOR DE PANTALLA DE CARGA FARMASYS (SEGURO Y SIN BLOQUEOS)
    ========================================================================= */
-function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Sincronizando farmacia e inventario seguro") {
+function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Un momento por favor...") {
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     const tEl = document.getElementById('farmasys-loader-title');
     const sEl = document.getElementById('farmasys-loader-sub');
     if (tEl) tEl.textContent = title;
     if (sEl) sEl.textContent = sub;
-    el.classList.remove('opacity-0', 'pointer-events-none');
+    el.style.display = 'flex';
+    el.style.pointerEvents = 'auto';
+    el.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
     el.classList.add('opacity-100');
   }
 }
@@ -17,10 +19,23 @@ function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Sincronizando
 function hideFarmasysLoader() {
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
+    el.style.pointerEvents = 'none';
     el.classList.add('opacity-0', 'pointer-events-none');
     el.classList.remove('opacity-100');
+    setTimeout(() => {
+      el.style.display = 'none';
+      el.classList.add('hidden');
+    }, 250);
   }
 }
+
+// Asegurar desbloqueo inmediato al arrancar
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', hideFarmasysLoader);
+} else {
+  hideFarmasysLoader();
+}
+window.addEventListener('load', hideFarmasysLoader);
 
 window.addEventListener('load', () => {
   setTimeout(hideFarmasysLoader, 450);
