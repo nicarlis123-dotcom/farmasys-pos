@@ -31,6 +31,37 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen flex flex-col bg-slate-100 text-slate-900">
+  <!-- =====================================================================
+       PANTALLA DE CARGA OFICIAL FARMASYS (PASTILLA ANIMADA 3D)
+       ===================================================================== -->
+  <div id="farmasys-global-loader" class="fixed inset-0 z-[9999] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center transition-opacity duration-300 pointer-events-auto">
+    <div class="relative flex items-center justify-center mb-6">
+      <div class="w-24 h-24 rounded-full border-4 border-slate-800 border-t-teal-400 border-r-emerald-500 animate-spin"></div>
+      <div class="absolute inset-0 w-24 h-24 rounded-full bg-teal-500/20 blur-xl animate-pulse"></div>
+      <div class="absolute flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 border border-teal-500/40 shadow-inner">
+        <div class="farmasys-pill-loader">
+          <svg class="w-9 h-9" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M14 24C14 18.4772 18.4772 14 24 14C29.5228 14 34 18.4772 34 24H14Z" fill="#14b8a6"/>
+            <path d="M14 24H34V28C34 33.5228 29.5228 38 24 38C18.4772 38 14 33.5228 14 28V24Z" fill="#f8fafc"/>
+            <path d="M18 18C20 16 23 16 24 16" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+            <line x1="14" y1="24" x2="34" y2="24" stroke="#0f766e" stroke-width="1.5"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="text-center space-y-1.5 px-4">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        <span class="text-[11px] font-black tracking-widest text-emerald-300 uppercase">FARMASYS</span>
+      </div>
+      <h3 id="farmasys-loader-title" class="text-white font-extrabold text-base tracking-tight">Cargando Sistema...</h3>
+      <p id="farmasys-loader-sub" class="text-slate-400 text-xs font-medium">Sincronizando farmacia e inventario seguro</p>
+    </div>
+    <div class="w-48 h-1 bg-slate-800 rounded-full mt-5 overflow-hidden">
+      <div class="farmasys-loader-bar h-full bg-gradient-to-r from-teal-400 via-emerald-300 to-teal-400"></div>
+    </div>
+  </div>
+
 
   <!-- =====================================================================
        PANTALLA DE ACCESO POR CLAVE (LOGIN GATE MULTI-FARMACIA)

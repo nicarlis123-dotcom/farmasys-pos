@@ -269,3 +269,47 @@ body {
   border-left: 4px solid #0d9488 !important;
 }
 
+
+
+/* =========================================================================
+   ANIMACION DE CARGA OFICIAL FARMASYS (PASTILLA / CAPSULA GIRATORIA)
+   ========================================================================= */
+@keyframes farmasysPillSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(90deg) scale(1.08);
+  }
+  50% {
+    transform: rotate(180deg) scale(1);
+  }
+  75% {
+    transform: rotate(270deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+.farmasys-pill-loader {
+  animation: farmasysPillSpin 2.2s cubic-bezier(0.4, 0.0, 0.2, 1) infinite;
+  filter: drop-shadow(0 4px 10px rgba(20, 184, 166, 0.45));
+}
+
+@keyframes farmasysBarIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.farmasys-loader-bar {
+  width: 50%;
+  animation: farmasysBarIndeterminate 1.8s ease-in-out infinite;
+}

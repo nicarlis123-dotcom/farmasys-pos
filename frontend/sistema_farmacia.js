@@ -1,3 +1,31 @@
+
+/* =========================================================================
+   CONTROLADOR DE PANTALLA DE CARGA FARMASYS (PASTILLA ANIMADA)
+   ========================================================================= */
+function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Sincronizando farmacia e inventario seguro") {
+  const el = document.getElementById('farmasys-global-loader');
+  if (el) {
+    const tEl = document.getElementById('farmasys-loader-title');
+    const sEl = document.getElementById('farmasys-loader-sub');
+    if (tEl) tEl.textContent = title;
+    if (sEl) sEl.textContent = sub;
+    el.classList.remove('opacity-0', 'pointer-events-none');
+    el.classList.add('opacity-100');
+  }
+}
+
+function hideFarmasysLoader() {
+  const el = document.getElementById('farmasys-global-loader');
+  if (el) {
+    el.classList.add('opacity-0', 'pointer-events-none');
+    el.classList.remove('opacity-100');
+  }
+}
+
+window.addEventListener('load', () => {
+  setTimeout(hideFarmasysLoader, 450);
+});
+
 /**
  * Sistema Privado de Venta y Gestión Multi-Farmacia — Farmacia Davalsi / FarmaSys (RD$)
  * Incluye todas las funciones solicitadas y las mostradas en las capturas:
@@ -184,6 +212,7 @@ async function loadPharmaciesForLogin() {
   const data = await res.json();
   if (!data.ok) return;
   sysState.pharmacies = data.pharmacies || [];
+  hideFarmasysLoader();
 
   const sel = document.getElementById('login-pharmacy-select');
   const demoList = document.getElementById('demo-credentials-list');

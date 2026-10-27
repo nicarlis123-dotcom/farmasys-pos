@@ -1,3 +1,31 @@
+
+/* =========================================================================
+   CONTROLADOR DE PANTALLA DE CARGA FARMASYS (PASTILLA ANIMADA)
+   ========================================================================= */
+function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Sincronizando farmacia e inventario seguro") {
+  const el = document.getElementById('farmasys-global-loader');
+  if (el) {
+    const tEl = document.getElementById('farmasys-loader-title');
+    const sEl = document.getElementById('farmasys-loader-sub');
+    if (tEl) tEl.textContent = title;
+    if (sEl) sEl.textContent = sub;
+    el.classList.remove('opacity-0', 'pointer-events-none');
+    el.classList.add('opacity-100');
+  }
+}
+
+function hideFarmasysLoader() {
+  const el = document.getElementById('farmasys-global-loader');
+  if (el) {
+    el.classList.add('opacity-0', 'pointer-events-none');
+    el.classList.remove('opacity-100');
+  }
+}
+
+window.addEventListener('load', () => {
+  setTimeout(hideFarmasysLoader, 450);
+});
+
 /**
  * Lógica Frontend Reactiva Omnicanal — Farmacia Davalsi (República Dominicana RD$)
  * Conecta App Móvil Paciente, POS de Mostrador, Backoffice e Integración WhatsApp Business API.
