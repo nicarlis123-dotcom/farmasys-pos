@@ -1,0 +1,2 @@
+# FarmaSys POS & App Movil - Dependencias de Python
+# 100% Python Standard Library nativa (Sin paquetes externos requeridos)
