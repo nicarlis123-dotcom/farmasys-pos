@@ -24,6 +24,7 @@ Soporta:
 
 
 
+from __future__ import annotations
 import os
 
 import uuid
@@ -38,7 +39,7 @@ from contextlib import contextmanager
 
 from datetime import datetime, timedelta
 
-from typing import Dict, Any, List, Optional, Iterator
+from typing import Dict, Any, List, Optional, Iterator, Union, Tuple
 
 
 
