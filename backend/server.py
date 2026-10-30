@@ -171,6 +171,52 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "debtors": debtors})
                 return
 
+            if path == "/api/chronic-patients":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                filter_status = query.get("filter_status", [None])[0]
+                telefono = query.get("telefono", [None])[0]
+                patients = db.list_chronic_patients(farmacia_id=farmacia_id, filter_status=filter_status, telefono=telefono)
+                self._send_json(200, {"ok": True, "patients": patients})
+                return
+
+            if path == "/api/promotional-kits":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                only_active = query.get("only_active", ["0"])[0] in ("1", "true", "True")
+                kits = db.list_promotional_kits(farmacia_id=farmacia_id, only_active=only_active)
+                self._send_json(200, {"ok": True, "kits": kits})
+                return
+
+            if path == "/api/pharmaceutical-care":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                pac_id_raw = query.get("paciente_cronico_id", [None])[0]
+                pac_id = int(pac_id_raw) if pac_id_raw and str(pac_id_raw).isdigit() else None
+                tariffs = db.get_pharmaceutical_care_tariffs(farmacia_id=farmacia_id)
+                records = db.list_pharmaceutical_care_records(farmacia_id=farmacia_id, paciente_cronico_id=pac_id)
+                self._send_json(200, {"ok": True, "tariffs": tariffs, "records": records})
+                return
+
+            if path == "/api/frequent-plans":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                plans = db.list_patient_plans(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "plans": plans})
+                return
+
+            if path == "/api/patient/search-checkout":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                q = query.get("q", [""])[0]
+                result = db.search_patient_for_checkout(farmacia_id=farmacia_id, query=q)
+                self._send_json(200, result)
+                return
+
+            if path == "/api/products/substitutes":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                prod_id_str = query.get("producto_id", [None])[0]
+                producto_id = int(prod_id_str) if prod_id_str and prod_id_str != "null" else None
+                q = query.get("q", [""])[0]
+                subs = db.get_intelligent_substitutions(farmacia_id=farmacia_id, producto_id=producto_id, query=q)
+                self._send_json(200, {"ok": True, "substitutes": subs})
+                return
+
             if path == "/api/products":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
                 search = query.get("search", [""])[0]
@@ -292,6 +338,9 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 else (ctype or "application/octet-stream"),
             )
             self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(content)
 
@@ -394,6 +443,73 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 deudor_id = int(body.get("deudor_id", 0))
                 remind_res = whatsapp_engine.send_debtor_reminder(farmacia_id, deudor_id)
                 self._send_json(200, remind_res)
+                return
+
+            if path == "/api/chronic-patients":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                saved = db.create_or_update_chronic_patient(farmacia_id=farmacia_id, data=body)
+                self._send_json(200, {"ok": True, "patient": saved})
+                return
+
+            if path == "/api/chronic-patients/renew":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                paciente_id = int(body.get("paciente_id", 0))
+                dias = int(body.get("dias_agregados", 30))
+                renewed = db.renew_chronic_patient_dispensation(farmacia_id=farmacia_id, paciente_cronico_id=paciente_id, days_added=dias)
+                self._send_json(200, {"ok": True, "patient": renewed})
+                return
+
+            if path == "/api/chronic-patients/delete":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                paciente_id = int(body.get("paciente_id", 0))
+                res = db.delete_chronic_patient(farmacia_id=farmacia_id, paciente_cronico_id=paciente_id)
+                self._send_json(200, {"ok": True, "deleted": res})
+                return
+
+            if path == "/api/promotional-kits":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                saved = db.create_or_update_promotional_kit(farmacia_id=farmacia_id, data=body)
+                self._send_json(200, {"ok": True, "kit": saved})
+                return
+
+            if path == "/api/promotional-kits/delete":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                kit_id = int(body.get("kit_id", 0))
+                res = db.delete_promotional_kit(farmacia_id=farmacia_id, kit_id=kit_id)
+                self._send_json(200, {"ok": True, "deleted": res})
+                return
+
+            if path == "/api/pharmaceutical-care":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                saved = db.create_pharmaceutical_care_record(farmacia_id=farmacia_id, data=body)
+                self._send_json(200, {"ok": True, "record": saved})
+                return
+
+            if path == "/api/pharmaceutical-care/tariffs":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                tariffs = body.get("tariffs", [])
+                updated = db.update_pharmaceutical_care_tariffs(farmacia_id=farmacia_id, tariffs=tariffs)
+                self._send_json(200, {"ok": True, "tariffs": updated})
+                return
+
+            if path == "/api/pharmaceutical-care/delete":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                record_id = int(body.get("record_id", 0))
+                res = db.delete_pharmaceutical_care_record(farmacia_id=farmacia_id, record_id=record_id)
+                self._send_json(200, {"ok": True, "deleted": res})
+                return
+
+            if path == "/api/frequent-plans":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                saved = db.create_or_update_patient_plan(farmacia_id=farmacia_id, data=body)
+                self._send_json(200, {"ok": True, "plan": saved})
+                return
+
+            if path == "/api/frequent-plans/delete":
+                farmacia_id = int(body.get("farmacia_id", 1))
+                plan_id = int(body.get("plan_id", 0))
+                res = db.delete_patient_plan(farmacia_id=farmacia_id, plan_id=plan_id)
+                self._send_json(200, {"ok": True, "deleted": res})
                 return
 
             if path == "/api/pharmacy/config":

@@ -119,9 +119,44 @@ body {
 }
 
 /* Forzar que .hidden tenga máxima prioridad sobre .flex o .grid de Tailwind */
-.hidden {
+.hidden:not(.sys-desktop-nav):not(.sys-dropdown-container):not(.sys-dropdown-menu) {
   display: none !important;
 }
+/* ==========================================================================
+   NAVEGACIÓN MODULAR Y MENÚS DESPLEGABLES (HOVER + CLICK)
+   ========================================================================== */
+@media (max-width: 900px) {
+  .sys-desktop-nav {
+    display: none !important;
+  }
+  .sys-mobile-hamburger {
+    display: inline-flex !important;
+  }
+}
+@media (min-width: 901px) {
+  .sys-desktop-nav {
+    display: flex !important;
+  }
+  .sys-mobile-hamburger {
+    display: none !important;
+  }
+}
+
+.sys-dropdown-container {
+  position: relative;
+}
+.sys-dropdown-menu {
+  display: none;
+}
+.sys-dropdown-container:hover > .sys-dropdown-menu,
+.sys-dropdown-container.open > .sys-dropdown-menu {
+  display: block !important;
+}
+.sys-dropdown-container.open .dropdown-arrow,
+.sys-dropdown-container:hover .dropdown-arrow {
+  transform: rotate(180deg);
+}
+
 
 /* Modales y pantallas fijas */
 .sys-modal-active {

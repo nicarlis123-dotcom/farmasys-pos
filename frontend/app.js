@@ -47,6 +47,7 @@ window.addEventListener('load', () => {
  */
 
 const state = {
+  promotionalKits: [],
   activeModule: 'app',
   products: [],
   filteredProducts: [],
@@ -156,6 +157,7 @@ async function refreshAllData() {
     loadDashboardMetrics(),
     loadTransactions(),
     loadWhatsAppLogs(),
+    loadPromotionalKits(),
   ]);
 }
 
@@ -328,6 +330,16 @@ function renderAppProductsGrid() {
 
             <h3 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">${p.nombre_comercial}</h3>
             <p class="text-xs font-semibold text-teal-700">${p.principio_activo} • ${p.concentracion}</p>
+            ${p.principio_activo ? `
+              <button 
+                type="button" 
+                onclick="openAppSubstitutesModal(${p.id}, '${escapeQuote(p.nombre_comercial)}', '${escapeQuote(p.principio_activo)}')" 
+                class="mt-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-lg transition inline-flex items-center gap-1 cursor-pointer"
+                title="Ver medicamentos genéricos o de menor precio con el mismo principio activo"
+              >
+                <span>💡</span> <span>Ver alternativas y ahorro</span>
+              </button>
+            ` : ''}
             <p class="text-[11px] text-slate-400 mt-0.5">${p.laboratorio} • ${p.categoria}</p>
 
             <!-- Caja de equivalencia de stock en tiempo real -->
@@ -412,6 +424,20 @@ function renderAppProductsGrid() {
 function addToAppCart(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
+    // Verificación de duplicidad farmacológica en la app del paciente
+  const paNew = (product.principio_activo || '').trim().toLowerCase();
+  if (paNew) {
+    const duplicate = state.appCart.find(i => {
+      if (i.product.id === productId) return false;
+      const paExist = (i.product.principio_activo || '').trim().toLowerCase();
+      return paExist && (paNew === paExist || paNew.includes(paExist) || paExist.includes(paNew));
+    });
+    if (duplicate) {
+      const ok = confirm(`⚠️ Aviso de Farmacia Davalsi:\n\nYa tienes '${duplicate.product.nombre_comercial}' en tu carrito con el mismo principio activo (${product.principio_activo}).\n\n¿Deseas agregar '${product.nombre_comercial}' de todos modos?`);
+      if (!ok) return;
+    }
+  }
+
   const pres = state.cardPresentationSelection[productId] || 'CAJA';
 
   // Verificar cuántas unidades mínimas ya están comprometidas en el carrito para este producto
@@ -470,20 +496,25 @@ function updateAppCartQty(index, delta) {
 function updateFloatingCartUI() {
   const totalItems = state.appCart.reduce((acc, i) => acc + i.cantidad, 0);
   const totalUnits = state.appCart.reduce(
-    (acc, i) => acc + calcMinUnits(i.product, i.presentacion, i.cantidad),
+    (acc, i) => acc + (i.es_kit ? (i.items_desglose ? i.items_desglose.length * i.cantidad : i.cantidad) : calcMinUnits(i.product, i.presentacion, i.cantidad)),
     0
   );
   const totalRD = state.appCart.reduce(
-    (acc, i) => acc + i.product.precios_presentacion[i.presentacion] * i.cantidad,
+    (acc, i) => acc + (i.es_kit ? i.precio_oferta * i.cantidad : (i.product.precios_presentacion[i.presentacion] || i.product.precio_base) * i.cantidad),
     0
   );
 
-  document.getElementById('floating-cart-count').textContent = totalItems;
-  document.getElementById('floating-cart-total').textContent = formatRD(totalRD);
-  document.getElementById('floating-cart-subtitle').textContent =
-    totalItems > 0
-      ? `${totalItems} presentación(es) • Equivalente a ${totalUnits} unidades mínimas`
-      : 'Agrega medicamentos por Caja, Blíster o Unidad';
+  const countEl = document.getElementById('floating-cart-count');
+  if (countEl) countEl.textContent = totalItems;
+  const totalEl = document.getElementById('floating-cart-total');
+  if (totalEl) totalEl.textContent = formatRD(totalRD);
+  const subEl = document.getElementById('floating-cart-subtitle');
+  if (subEl) {
+    subEl.textContent =
+      totalItems > 0
+        ? `${totalItems} artículo(s) • Total: ${formatRD(totalRD)}`
+        : 'Agrega medicamentos por Caja, Blíster o Kits en 1 Clic';
+  }
 }
 
 function openCartDrawer() {
@@ -528,6 +559,47 @@ function renderCartDrawerItems() {
 
   list.innerHTML = state.appCart
     .map((item, idx) => {
+      if (item.es_kit) {
+        const sub = item.precio_oferta * item.cantidad;
+        const compCount = item.items_desglose ? item.items_desglose.length : 3;
+        totalUnits += compCount * item.cantidad;
+        totalRD += sub;
+        const compsHtml = (item.items_desglose || []).map(c => `
+          <div class="flex items-center justify-between text-[11px] text-slate-700 bg-white/80 px-2 py-0.5 rounded border border-amber-200">
+            <span>${c.icono || '🔹'} <strong>${c.cantidad}x ${c.presentacion}</strong> ${c.nombre_comercial}</span>
+            <span class="text-slate-400 font-mono">RD$ ${Number(c.precio_unitario * c.cantidad).toFixed(2)}</span>
+          </div>
+        `).join('');
+
+        return `
+          <div class="p-3.5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-amber-500/10 border-2 border-amber-400/60 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">⚡ KIT OFERTA</span>
+                <span class="text-xs font-black text-slate-900">${item.nombre_comercial}</span>
+              </div>
+              <div class="text-right">
+                <p class="text-xs font-black text-slate-900">${formatRD(sub)}</p>
+                <p class="text-[10px] text-slate-400 line-through">Reg: RD$ ${(item.precio_regular * item.cantidad).toFixed(2)}</p>
+              </div>
+            </div>
+            <div class="space-y-1 pt-1 border-t border-amber-300/40">
+              <p class="text-[10px] font-black uppercase text-amber-800 tracking-wider">📦 Consta de este kit:</p>
+              ${compsHtml}
+            </div>
+            <div class="flex items-center justify-between pt-1">
+              <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                ¡Ahorro: RD$ ${(item.ahorro * item.cantidad).toFixed(2)}!
+              </span>
+              <div class="inline-flex items-center gap-1 bg-white border border-amber-300 rounded-lg px-1 py-0.5">
+                <button type="button" onclick="updateAppCartQty(${idx}, -1)" class="w-5 h-5 rounded text-xs font-extrabold text-slate-700 hover:bg-slate-100">-</button>
+                <span class="text-xs font-bold px-1.5">${item.cantidad}</span>
+                <button type="button" onclick="updateAppCartQty(${idx}, 1)" class="w-5 h-5 rounded text-xs font-extrabold text-slate-700 hover:bg-slate-100">+</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
       const p = item.product;
       if (p.requiere_receta) requiresRx = true;
       const unitPrice = p.precios_presentacion[item.presentacion];
@@ -626,7 +698,7 @@ function selectAppPaymentMethod(method) {
 
 function calculateCashChange() {
   const total = state.appCart.reduce((sum, item) => {
-    const unitPrice = item.product.precios_presentacion[item.presentacion] || item.product.precio_base;
+    const unitPrice = item.es_kit ? item.precio_oferta : (item.product.precios_presentacion[item.presentacion] || item.product.precio_base);
     return sum + unitPrice * item.cantidad;
   }, 0);
 
@@ -758,11 +830,21 @@ async function submitAppOrder() {
     seguro_ars: seguroArs,
     referencia_pago: referenciaPago,
     receta_imagen_url: state.uploadedPrescriptionUrl,
-    items: state.appCart.map((i) => ({
-      producto_id: i.product.id,
-      presentacion: i.presentacion,
-      cantidad: i.cantidad,
-    })),
+    items: state.appCart.map((i) => {
+      if (i.es_kit) {
+        return {
+          es_kit: true,
+          kit_id: i.kit_id || i.codigo_kit,
+          cantidad: i.cantidad,
+          presentacion: 'KIT'
+        };
+      }
+      return {
+        producto_id: i.product.id,
+        presentacion: i.presentacion,
+        cantidad: i.cantidad,
+      };
+    }),
   };
 
   const res = await fetch('/api/sales', {
@@ -2256,3 +2338,606 @@ function configurePosServerIp() {
     });
   };
 })();
+
+
+
+// =============================================================================
+// PROGRAMA DE PACIENTES CRÓNICOS Y MEDICACIÓN CONTINUA (APP PACIENTE)
+// =============================================================================
+
+function openChronicPatientModal() {
+  const modal = document.getElementById('modal-app-chronic-register');
+  if (!modal) return;
+
+  const nameInput = document.getElementById('pac-chronic-name');
+  const phoneInput = document.getElementById('pac-chronic-phone');
+  const cedulaInput = document.getElementById('pac-chronic-cedula');
+  const dateInput = document.getElementById('pac-chronic-date');
+
+  // Prellenar si hay paciente autenticado o datos previos
+  if (typeof currentPatient !== 'undefined' && currentPatient) {
+    if (nameInput && currentPatient.nombre_completo) nameInput.value = currentPatient.nombre_completo;
+    if (phoneInput && currentPatient.telefono) phoneInput.value = currentPatient.telefono;
+    if (cedulaInput && currentPatient.cedula) cedulaInput.value = currentPatient.cedula;
+  } else {
+    const savedPhone = localStorage.getItem('davalsi_chronic_phone');
+    if (savedPhone && phoneInput && !phoneInput.value) phoneInput.value = savedPhone;
+    const savedName = localStorage.getItem('davalsi_chronic_name');
+    if (savedName && nameInput && !nameInput.value) nameInput.value = savedName;
+  }
+
+  // Fecha de inicio por defecto: HOY
+  if (dateInput && !dateInput.value) {
+    dateInput.value = new Date().toISOString().split('T')[0];
+  }
+
+  updateChronicRefillCalc();
+
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+}
+
+function closeChronicPatientModal() {
+  const modal = document.getElementById('modal-app-chronic-register');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+  }
+}
+
+function handleChronicDiagChange(val) {
+  const customInput = document.getElementById('pac-chronic-diag-custom');
+  if (!customInput) return;
+  if (val === 'OTRO') {
+    customInput.classList.remove('hidden');
+    customInput.focus();
+  } else {
+    customInput.classList.add('hidden');
+  }
+}
+
+function handleChronicMedSearch(query) {
+  const val = (query || '').trim().toLowerCase();
+  const suggestionsBox = document.getElementById('pac-chronic-med-suggestions');
+  if (!suggestionsBox) return;
+
+  if (val.length < 2) {
+    suggestionsBox.classList.add('hidden');
+    suggestionsBox.innerHTML = '';
+    return;
+  }
+
+  const products = (typeof state !== 'undefined' && state.products) ? state.products : [];
+  const matches = products.filter(p => 
+    (p.nombre || '').toLowerCase().includes(val) || 
+    (p.principio_activo || '').toLowerCase().includes(val)
+  ).slice(0, 6);
+
+  if (matches.length === 0) {
+    suggestionsBox.innerHTML = `
+      <div class="px-3 py-2 text-slate-500 text-[11px] italic">
+        No encontrado en catálogo. Puedes continuar escribiendo el nombre manualmente.
+      </div>
+    `;
+    suggestionsBox.classList.remove('hidden');
+    return;
+  }
+
+  suggestionsBox.innerHTML = matches.map(p => `
+    <div onclick="selectChronicMedSuggestion(${p.id}, '${escapeJsQuotes(p.nombre)}', '${escapeJsQuotes(p.principio_activo || '')}')" class="px-3 py-2 rounded-xl hover:bg-purple-50 hover:text-purple-900 cursor-pointer flex items-center justify-between transition border-b border-slate-100 last:border-b-0">
+      <div>
+        <p class="font-extrabold text-slate-900 text-xs">${p.nombre}</p>
+        <p class="text-[10px] text-purple-700 font-semibold">${p.principio_activo || 'Principio activo no indicado'}</p>
+      </div>
+      <span class="text-[10px] font-bold text-slate-400 font-mono">RD$ ${Number(p.precio_unidad || 0).toFixed(2)}</span>
+    </div>
+  `).join('');
+  suggestionsBox.classList.remove('hidden');
+}
+
+function selectChronicMedSuggestion(id, nombre, pa) {
+  const medInput = document.getElementById('pac-chronic-med');
+  const paInput = document.getElementById('pac-chronic-pa');
+  const prodIdInput = document.getElementById('pac-chronic-prod-id');
+  const suggestionsBox = document.getElementById('pac-chronic-med-suggestions');
+
+  if (medInput) medInput.value = nombre;
+  if (paInput) paInput.value = pa;
+  if (prodIdInput) prodIdInput.value = id;
+  if (suggestionsBox) {
+    suggestionsBox.classList.add('hidden');
+    suggestionsBox.innerHTML = '';
+  }
+}
+
+function updateChronicRefillCalc() {
+  const dateInput = document.getElementById('pac-chronic-date');
+  const daysSelect = document.getElementById('pac-chronic-days');
+  const calcEndEl = document.getElementById('calc-chronic-end-date');
+  const calcAlertEl = document.getElementById('calc-chronic-alert-date');
+
+  if (!dateInput || !daysSelect || !calcEndEl || !calcAlertEl) return;
+
+  const dateVal = dateInput.value;
+  const days = parseInt(daysSelect.value || '30', 10);
+
+  if (!dateVal) {
+    calcEndEl.textContent = '-';
+    calcAlertEl.textContent = '-';
+    return;
+  }
+
+  const parts = dateVal.split('-');
+  const startDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  
+  const endDate = new Date(startDate.getTime());
+  endDate.setDate(endDate.getDate() + days);
+
+  const alertDate = new Date(endDate.getTime());
+  alertDate.setDate(alertDate.getDate() - 10);
+
+  const formatOptions = { day: '2-digit', month: 'short', year: 'numeric' };
+  calcEndEl.textContent = endDate.toLocaleDateString('es-DO', formatOptions);
+  calcAlertEl.textContent = alertDate.toLocaleDateString('es-DO', formatOptions);
+}
+
+async function submitChronicPatientFromApp(event) {
+  if (event && event.preventDefault) event.preventDefault();
+
+  const nameVal = document.getElementById('pac-chronic-name').value.trim();
+  const phoneVal = document.getElementById('pac-chronic-phone').value.trim();
+  const cedulaVal = document.getElementById('pac-chronic-cedula').value.trim();
+  const diagSelect = document.getElementById('pac-chronic-diag').value;
+  const diagCustom = document.getElementById('pac-chronic-diag-custom').value.trim();
+  const diagVal = diagSelect === 'OTRO' ? (diagCustom || 'Condición Crónica') : diagSelect;
+  const medVal = document.getElementById('pac-chronic-med').value.trim();
+  const paVal = document.getElementById('pac-chronic-pa').value.trim();
+  const prodId = parseInt(document.getElementById('pac-chronic-prod-id').value || '0', 10);
+  const doseVal = document.getElementById('pac-chronic-dose').value.trim();
+  const daysVal = parseInt(document.getElementById('pac-chronic-days').value || '30', 10);
+  const dateVal = document.getElementById('pac-chronic-date').value;
+  const notesVal = document.getElementById('pac-chronic-notes').value.trim();
+  const errEl = document.getElementById('pac-chronic-error');
+  const submitBtn = document.getElementById('btn-submit-chronic-app');
+
+  if (errEl) errEl.classList.add('hidden');
+
+  if (!nameVal || !phoneVal || !diagVal || !medVal) {
+    if (errEl) {
+      errEl.textContent = 'Por favor completa tu nombre, teléfono, diagnóstico y medicamento.';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>⏳</span> <span>Guardando en Sistema...</span>';
+  }
+
+  try {
+    const payload = {
+      farmacia_id: 1,
+      paciente_nombre: nameVal,
+      paciente_telefono: phoneVal,
+      paciente_cedula: cedulaVal,
+      diagnostico_cronico: diagVal,
+      medicamento_nombre: medVal,
+      producto_id: prodId,
+      principio_activo: paVal,
+      dosis_diaria: doseVal || '1 comprimido diario',
+      duracion_dias: daysVal,
+      fecha_ultimo_despacho: dateVal || new Date().toISOString().split('T')[0],
+      notas: notesVal ? `${notesVal} (Inscrito desde App Móvil)` : 'Inscrito desde App Móvil'
+    };
+
+    const res = await fetch('/api/chronic-patients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (!data.ok) {
+      throw new Error(data.error || 'No se pudo guardar la inscripción.');
+    }
+
+    // Guardar teléfono para consultas futuras
+    localStorage.setItem('davalsi_chronic_phone', phoneVal);
+    localStorage.setItem('davalsi_chronic_name', nameVal);
+
+    showToast(`¡Inscripción exitosa! Estás registrado en el Programa Crónico de Farmacia Davalsi.`);
+    closeChronicPatientModal();
+
+    // Abrir automáticamente la vista de "Mis Tratamientos"
+    setTimeout(() => {
+      openMyChronicTreatmentsModal(phoneVal);
+    }, 400);
+
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message || 'Error de conexión al registrar.';
+      errEl.classList.remove('hidden');
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>✅</span> <span>Completar Inscripción</span>';
+    }
+  }
+}
+
+function openMyChronicTreatmentsModal(preferredPhone) {
+  const modal = document.getElementById('modal-app-my-chronic');
+  if (!modal) return;
+
+  const phoneInput = document.getElementById('my-chronic-phone-input');
+  const targetPhone = preferredPhone || 
+    (typeof currentPatient !== 'undefined' && currentPatient ? currentPatient.telefono : '') || 
+    localStorage.getItem('davalsi_chronic_phone') || '';
+
+  if (phoneInput && targetPhone) {
+    phoneInput.value = targetPhone;
+  }
+
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+
+  loadMyChronicTreatments();
+}
+
+function closeMyChronicTreatmentsModal() {
+  const modal = document.getElementById('modal-app-my-chronic');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+  }
+}
+
+async function loadMyChronicTreatments() {
+  const container = document.getElementById('my-chronic-treatments-container');
+  const phoneInput = document.getElementById('my-chronic-phone-input');
+  if (!container) return;
+
+  const phone = phoneInput ? phoneInput.value.trim() : '';
+
+  if (!phone) {
+    container.innerHTML = `
+      <div class="p-6 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+        <p class="text-2xl mb-1">📱</p>
+        <p class="font-bold">Escribe tu número de teléfono para ver tus tratamientos registrados.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="p-6 text-center text-slate-500">
+      <div class="inline-block animate-spin text-xl mb-1">⏳</div>
+      <p>Consultando tratamientos en la farmacia...</p>
+    </div>
+  `;
+
+  try {
+    const res = await fetch(`/api/chronic-patients?farmacia_id=1&telefono=${encodeURIComponent(phone)}`);
+    const data = await res.json();
+
+    const patients = (data.patients && data.patients.patients) ? data.patients.patients : [];
+
+    if (patients.length === 0) {
+      container.innerHTML = `
+        <div class="p-6 text-center text-slate-500 bg-purple-50/50 rounded-2xl border border-purple-200 space-y-2">
+          <p class="text-3xl">🩺</p>
+          <p class="font-extrabold text-slate-800 text-sm">No encontramos tratamientos asociados a este teléfono.</p>
+          <p class="text-xs text-slate-500">¿Tomas algún medicamento todos los meses? Inscríbete ahora para apartar tu stock y recibir recordatorio 10 días antes.</p>
+          <button type="button" onclick="closeMyChronicTreatmentsModal(); openChronicPatientModal();" class="mt-2 px-4 py-2 rounded-xl bg-purple-700 text-white font-bold text-xs shadow">
+            ➕ Inscribir Medicamento Ahora
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = patients.map(p => {
+      const dias = p.dias_restantes;
+      let badgeHtml = '';
+      let borderClass = 'border-slate-200';
+
+      if (dias < 0) {
+        badgeHtml = `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">🔴 Agotado hace ${Math.abs(dias)} día(s)</span>`;
+        borderClass = 'border-rose-300 bg-rose-50/30';
+      } else if (dias <= 10) {
+        badgeHtml = `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">🟡 Alerta: Quedan ${dias} día(s)</span>`;
+        borderClass = 'border-amber-300 bg-amber-50/40';
+      } else {
+        badgeHtml = `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">🟢 Vigente (${dias} días restantes)</span>`;
+        borderClass = 'border-emerald-200 bg-emerald-50/20';
+      }
+
+      return `
+        <div class="p-3.5 rounded-2xl border ${borderClass} bg-white shadow-xs space-y-2">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-base">💊</span>
+                <h4 class="font-extrabold text-sm text-slate-900">${p.medicamento_nombre}</h4>
+              </div>
+              <p class="text-[11px] text-purple-700 font-semibold">${p.principio_activo ? 'Principio Activo: ' + p.principio_activo : ''} • Condición: ${p.diagnostico_cronico}</p>
+            </div>
+            <div>
+              ${badgeHtml}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+            <div>
+              <span class="text-slate-400 block text-[10px]">Dosis diaria:</span>
+              <span class="font-bold text-slate-800">${p.dosis_diaria || '1 comprimido diario'}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 block text-[10px]">Próxima reposición:</span>
+              <span class="font-bold font-mono text-slate-800">${p.fecha_proximo_vencimiento_tratamiento}</span>
+            </div>
+            <div class="col-span-2 sm:col-span-1">
+              <span class="text-slate-400 block text-[10px]">Ciclo:</span>
+              <span class="font-bold text-slate-800">Cada ${p.duracion_dias} días</span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <span class="text-[10px] text-slate-400">Paciente: <strong>${p.paciente_nombre}</strong></span>
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="orderChronicViaWhatsApp('${escapeJsQuotes(p.paciente_nombre)}', '${escapeJsQuotes(p.medicamento_nombre)}', ${p.dias_restantes})" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition">
+                <span>📲</span> <span>Pedir por WhatsApp</span>
+              </button>
+              <button type="button" onclick="renewMyChronicTreatment(${p.id}, ${p.duracion_dias})" title="Confirmar que compraste tu medicina para extender el calendario otros ${p.duracion_dias} días" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-200 font-bold text-xs transition">
+                🔄 Renovar Ciclo
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    container.innerHTML = `
+      <div class="p-4 text-center text-rose-700 bg-rose-50 rounded-2xl border border-rose-200">
+        Error al cargar los tratamientos: ${err.message}
+      </div>
+    `;
+  }
+}
+
+function orderChronicViaWhatsApp(pacienteNombre, medNombre, diasRestantes) {
+  const farmaciaPhone = '18492831899'; // Teléfono oficial Farmacia Davalsi
+  let msg = `Hola Farmacia Davalsi, soy ${pacienteNombre}. Estoy inscrito en su Programa de Pacientes Crónicos. Deseo coordinar la reposición de mi medicamento continuo: ${medNombre}.`;
+  if (diasRestantes <= 10) {
+    msg += ` (A mi tratamiento le quedan ${diasRestantes > 0 ? diasRestantes : 0} días).`;
+  }
+  msg += ` ¿Tienen disponibilidad para retiro o envío a domicilio?`;
+
+  const url = `https://wa.me/${farmaciaPhone}?text=${encodeURIComponent(msg)}`;
+  window.open(url, '_blank');
+}
+
+async function renewMyChronicTreatment(patientId, duracionDias) {
+  if (!confirm(`¿Deseas renovar el ciclo de tratamiento por ${duracionDias} días más?`)) return;
+
+  try {
+    const res = await fetch('/api/chronic-patients/renew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: 1,
+        paciente_id: patientId,
+        dias_agregados: duracionDias
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al renovar.');
+
+    showToast('¡Tratamiento renovado con éxito! Se ha actualizado la fecha de tu próxima alerta.');
+    loadMyChronicTreatments();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function escapeJsQuotes(str) {
+  return String(str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+window.openChronicPatientModal = openChronicPatientModal;
+window.closeChronicPatientModal = closeChronicPatientModal;
+window.handleChronicDiagChange = handleChronicDiagChange;
+window.handleChronicMedSearch = handleChronicMedSearch;
+window.selectChronicMedSuggestion = selectChronicMedSuggestion;
+window.updateChronicRefillCalc = updateChronicRefillCalc;
+window.submitChronicPatientFromApp = submitChronicPatientFromApp;
+window.openMyChronicTreatmentsModal = openMyChronicTreatmentsModal;
+window.closeMyChronicTreatmentsModal = closeMyChronicTreatmentsModal;
+window.loadMyChronicTreatments = loadMyChronicTreatments;
+window.orderChronicViaWhatsApp = orderChronicViaWhatsApp;
+window.renewMyChronicTreatment = renewMyChronicTreatment;
+
+
+/* =========================================================================
+   KITS ALIVIO EN 1 CLIC — OFERTAS SEMANALES EN LA APP DEL PACIENTE
+   ========================================================================= */
+async function loadPromotionalKits() {
+  try {
+    const res = await fetch('/api/promotional-kits?farmacia_id=1');
+    const data = await res.json();
+    if (data.ok) {
+      state.promotionalKits = data.kits || [];
+      renderAppPromotionalKits();
+    }
+  } catch (err) {
+    console.error('Error al cargar kits promocionales:', err);
+  }
+}
+
+function renderAppPromotionalKits() {
+  const container = document.getElementById('app-kits-grid');
+  if (!container) return;
+
+  const kits = state.promotionalKits || [];
+  if (!kits.length) {
+    container.innerHTML = `
+      <div class="col-span-full p-6 rounded-2xl bg-white/80 border border-amber-200 text-center text-xs text-slate-500 font-semibold">
+        Cargando kits armados con medicamentos en inventario...
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = kits.map(kit => {
+    const isAvailable = kit.disponible !== false && (kit.kits_disponibles == null || kit.kits_disponibles > 0);
+    const hasOffer = Number(kit.ahorro_monto || 0) > 0;
+    const compsHtml = (kit.items || []).map(comp => {
+      const unitLabel = comp.presentacion === 'BLISTER'
+        ? 'Blíster'
+        : (comp.presentacion === 'CAJA' ? 'Caja' : (comp.unidad_minima_nombre || 'Unid.'));
+      return `
+        <div class="flex items-center justify-between text-xs py-1.5 px-2.5 rounded-lg bg-white/95 border border-amber-200/70 shadow-2xs">
+          <div class="flex items-center gap-1.5 font-bold text-slate-800">
+            <span>${comp.icono || '💊'}</span>
+            <span>${comp.cantidad}x ${unitLabel} <strong>${comp.nombre_comercial}</strong></span>
+          </div>
+          <span class="text-[11px] font-mono font-bold text-slate-700">RD$ ${Number(comp.precio_unitario * comp.cantidad).toFixed(2)}</span>
+        </div>
+      `;
+    }).join('');
+
+    const priceHeaderHtml = hasOffer ? `
+      <div class="flex items-baseline justify-between">
+        <div>
+          <span class="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Precio por unidad de lo solicitado:</span>
+          <span class="text-xs text-slate-400 line-through font-mono font-bold">${formatRD(kit.precio_regular_total)}</span>
+        </div>
+        <div class="text-right">
+          <span class="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider block">Oferta Especial del Vendedor:</span>
+          <span class="text-xl font-black text-slate-900">${formatRD(kit.precio_oferta_kit)}</span>
+        </div>
+      </div>
+    ` : `
+      <div class="flex items-baseline justify-between">
+        <div>
+          <span class="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block">Modalidad del Paquete:</span>
+          <span class="text-xs text-teal-800 font-extrabold">Precio por unidad de lo solicitado</span>
+        </div>
+        <div class="text-right">
+          <span class="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider block">Precio Total del Kit:</span>
+          <span class="text-xl font-black text-slate-900">${formatRD(kit.precio_oferta_kit)}</span>
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="bg-white rounded-3xl p-5 shadow-sm hover:shadow-md transition border-2 ${isAvailable ? 'border-amber-300 hover:border-amber-400' : 'border-slate-200 opacity-75'} flex flex-col justify-between space-y-4">
+        <div>
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <span class="text-3xl">${kit.icono || '⚡'}</span>
+              <div>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-xs">
+                  ${hasOffer ? 'OFERTA DEL VENDEDOR ⚡' : 'KIT ALIVIO EN 1 CLIC ⚡'}
+                </span>
+                <h3 class="text-base font-black text-slate-900 mt-1">${kit.nombre_kit}</h3>
+              </div>
+            </div>
+            ${hasOffer ? `
+              <span class="px-2.5 py-1 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                ¡Ahorras RD$ ${Number(kit.ahorro_monto).toFixed(2)}!
+              </span>
+            ` : `
+              <span class="px-2.5 py-1 rounded-full text-[10px] font-black bg-teal-50 text-teal-800 border border-teal-200 shrink-0">
+                Precio por Unidad
+              </span>
+            `}
+          </div>
+
+          <p class="text-xs text-slate-600 font-medium mt-2 leading-relaxed">${kit.descripcion}</p>
+
+          <!-- Desglose: De qué consta el kit y precios por unidad -->
+          <div class="mt-3.5 space-y-1.5 p-3 rounded-2xl bg-amber-50/70 border border-amber-200">
+            <div class="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-amber-900 mb-1">
+              <span>📦 Medicamentos incluidos (Por Unidad):</span>
+              <span class="text-slate-500 lowercase font-medium">precio unidad</span>
+            </div>
+            ${compsHtml}
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 space-y-3">
+          ${priceHeaderHtml}
+
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onclick="addKitToAppCart('${kit.id}', false)"
+              ${!isAvailable ? 'disabled' : ''}
+              class="px-3 py-2.5 rounded-xl border border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-800 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <span>🛒</span> <span>+ Agregar</span>
+            </button>
+            <button
+              type="button"
+              onclick="addKitToAppCart('${kit.id}', true)"
+              ${!isAvailable ? 'disabled' : ''}
+              class="px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+            >
+              <span>⚡</span> <span>Pedir en 1 Clic</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function addKitToAppCart(kitId, openCheckoutImmediately = false) {
+  const kit = (state.promotionalKits || []).find(k => String(k.id) === String(kitId) || k.codigo_kit === kitId);
+  if (!kit) {
+    showToast('Kit no encontrado', 'error');
+    return;
+  }
+
+  const existing = state.appCart.find(i => i.es_kit && (String(i.kit_id) === String(kit.id) || i.codigo_kit === kit.codigo_kit));
+  if (existing) {
+    existing.cantidad += 1;
+  } else {
+    state.appCart.push({
+      es_kit: true,
+      kit_id: kit.id,
+      codigo_kit: kit.codigo_kit,
+      nombre_comercial: `[KIT] ${kit.nombre_kit}`,
+      product: {
+        id: 0,
+        nombre_comercial: kit.nombre_kit,
+        principio_activo: 'Kit Alivio en 1 Clic (Semanal)',
+        precios_presentacion: { KIT: kit.precio_oferta_kit },
+        precio_base: kit.precio_oferta_kit,
+        unidad_minima_nombre: 'Kit',
+        inventario: { stock_total_unidades: kit.kits_disponibles || 50 }
+      },
+      presentacion: 'KIT',
+      cantidad: 1,
+      precio_oferta: kit.precio_oferta_kit,
+      precio_regular: kit.precio_regular_total,
+      ahorro: kit.ahorro_monto,
+      items_desglose: kit.items
+    });
+  }
+
+  updateFloatingCartUI();
+  showToast(`⚡ ¡${kit.nombre_kit} agregado al carrito! Ahorro: ${formatRD(kit.ahorro_monto)}`);
+
+  if (openCheckoutImmediately) {
+    openCartDrawer();
+  }
+}
+
+window.loadPromotionalKits = loadPromotionalKits;
+window.renderAppPromotionalKits = renderAppPromotionalKits;
+window.addKitToAppCart = addKitToAppCart;

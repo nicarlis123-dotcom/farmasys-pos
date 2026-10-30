@@ -180,46 +180,117 @@
         </div>
       </div>
 
-      <!-- Botón Hamburguesa Móvil -->
-      <button type="button" onclick="toggleMobileNavDrawer()" class="md:hidden p-2 rounded-xl bg-slate-800 text-white font-bold text-base border border-slate-700">
+            <!-- Botón Hamburguesa Móvil (Visible < 900px) -->
+      <button type="button" onclick="toggleMobileNavDrawer()" class="sys-mobile-hamburger p-2 rounded-xl bg-slate-800 text-white font-bold text-base border border-slate-700 cursor-pointer">
         ☰
       </button>
 
-      <!-- Menú de Módulos del Sistema -->
-      <nav class="hidden md:flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto max-w-full no-scrollbar">
-        <button onclick="switchSysTab('pos')" id="sys-tab-pos" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-teal-600 text-white shadow">
-          <span>🛒</span> <span>Sistema POS</span>
+      <!-- Menú Desplegable Agrupado por Tipo de Función (Visible >= 901px) -->
+      <nav id="sys-desktop-nav" class="sys-desktop-nav items-center gap-2 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700">
+        
+        <!-- 1. ACCESO DIRECTO EN PRIMERA INSTANCIA: VENTA DE MEDICAMENTOS (POS) -->
+        <button
+          type="button"
+          id="sys-nav-pos-btn"
+          onclick="switchSysTab('pos');"
+          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer"
+        >
+          <span class="text-sm">🖥️</span>
+          <span>Venta Mostrador (POS)</span>
+          <span class="text-[10px] text-teal-200 font-mono bg-teal-700/60 px-1.5 py-0.5 rounded">F1</span>
         </button>
-        <button onclick="switchSysTab('inventario')" id="sys-tab-inventario" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>📦</span> <span>Inventario</span>
-          <span id="badge-sys-low-stock" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+
+        <!-- 2. ACCESO DIRECTO EN PRIMERA INSTANCIA: PEDIDOS POR WHATSAPP Y APP -->
+        <button
+          type="button"
+          id="sys-nav-pedidos-btn"
+          onclick="switchSysTab('solicitudes');"
+          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer"
+        >
+          <span class="text-sm">📱</span>
+          <span>Pedidos WhatsApp / App</span>
+          <span id="badge-sys-pending-app" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-black rounded-full text-[10px] animate-pulse">0</span>
         </button>
-        <button onclick="switchSysTab('vencimientos')" id="sys-tab-vencimientos" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>⚠️</span> <span>Vencimientos (≤7m)</span>
-          <span id="badge-sys-expiry" class="hidden px-1.5 py-0.2 bg-orange-500 text-white font-extrabold rounded-full text-[10px]">0</span>
-        </button>
-        <button onclick="switchSysTab('deudores')" id="sys-tab-deudores" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>👥</span> <span>Deudores</span>
-          <span id="badge-sys-debtors" class="hidden px-1.5 py-0.2 bg-emerald-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-        </button>
-        <button onclick="switchSysTab('whatsapp')" id="sys-tab-whatsapp" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>📱</span> <span>Medicamentos WhatsApp</span>
-          <span id="badge-sys-wa-count" class="px-1.5 py-0.2 bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 font-bold rounded-full text-[10px]">0</span>
-        </button>
-        <button onclick="switchSysTab('solicitudes')" id="sys-tab-solicitudes" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>📥</span> <span>Pedidos App</span>
-          <span id="badge-sys-pending-app" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-        </button>
-        <button onclick="switchSysTab('recetas')" id="sys-tab-recetas" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>🩺</span> <span>Recetas IA</span>
-          <span id="badge-sys-pending-rx" class="hidden px-1.5 py-0.2 bg-sky-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-        </button>
-        <button onclick="switchSysTab('reportes')" id="sys-tab-reportes" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>📊</span> <span>Reportes</span>
-        </button>
-        <button onclick="switchSysTab('config')" id="sys-tab-config" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white">
-          <span>⚙️</span> <span>Configuración</span>
-        </button>
+
+        <!-- 3. MENÚ DESPLEGABLE CON LAS DEMÁS FUNCIONES ADMINISTRATIVAS -->
+        <div id="sys-grp-container-master" class="sys-dropdown-container relative">
+          <button
+            type="button"
+            id="sys-grp-btn-master"
+            onclick="toggleSysDropdown('sys-grp-container-master')"
+            class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60"
+          >
+            <span>☰</span>
+            <span>Menú de Funciones</span>
+            <span id="badge-master-menu" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+            <svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          
+          <div class="sys-dropdown-menu absolute right-0 top-full pt-1.5 w-[620px] max-w-[90vw] z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 grid grid-cols-1 md:grid-cols-3 gap-3 divide-y md:divide-y-0 md:divide-x divide-slate-800">
+              
+              <!-- Columna 1: INVENTARIO Y STOCK -->
+              <div class="space-y-1">
+                <span class="text-[10px] font-black uppercase tracking-wider text-teal-400 px-2 block mb-1">📦 Inventario y Stock</span>
+                <button onclick="switchSysTab('inventario'); closeAllSysDropdowns();" id="sys-tab-inventario" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>📦</span> <span>Catálogo Inventario</span></span>
+                  <span id="badge-sys-low-stock" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+                </button>
+                <button onclick="switchSysTab('vencimientos'); closeAllSysDropdowns();" id="sys-tab-vencimientos" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-orange-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>⚠️</span> <span>Vencimientos (≤7m)</span></span>
+                  <span id="badge-sys-expiry" class="hidden px-1.5 py-0.2 bg-orange-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+                </button>
+                <button onclick="filterSlowMovingProducts();" id="sys-tab-sinsalida" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer" title="Productos sin rotación (≤50 unds/mes). Excluye medicamentos crónicos.">
+                  <span class="flex items-center gap-1.5"><span>📉</span> <span>Sin Salida Real</span></span>
+                </button>
+                <button onclick="filterChronicMonthlyProducts();" id="sys-tab-cronicos-inv" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer" title="Medicamentos continuos con salida mensual de pacientes crónicos.">
+                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Uso Crónico Mensual</span></span>
+                </button>
+                <button onclick="switchSysTab('kits'); closeAllSysDropdowns();" id="sys-tab-kits" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>⚡</span> <span>Kits & Ofertas Semanales</span></span>
+                  <span class="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-extrabold rounded-full text-[10px]">4 Kits</span>
+                </button>
+              </div>
+
+              <!-- Columna 2: PACIENTES Y FIDELIZACIÓN -->
+              <div class="space-y-1 md:pl-2">
+                <span class="text-[10px] font-black uppercase tracking-wider text-amber-400 px-2 block mb-1">👥 Pacientes y Clientes</span>
+                <button onclick="switchSysTab('cronicos'); closeAllSysDropdowns();" id="sys-tab-cronicos" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Crónicos & Alerta 10d</span></span>
+                  <span id="badge-sys-chronic-alerts" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+                </button>
+                <button onclick="switchSysTab('planes'); closeAllSysDropdowns();" id="sys-tab-planes" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>🎁</span> <span>Planes Frecuentes</span></span>
+                </button>
+                <button onclick="switchSysTab('deudores'); closeAllSysDropdowns();" id="sys-tab-deudores" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-emerald-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>📒</span> <span>Deudores (Cobros)</span></span>
+                  <span id="badge-sys-debtors" class="hidden px-1.5 py-0.2 bg-emerald-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+                </button>
+              </div>
+
+              <!-- Columna 3: REPORTES Y GESTIÓN -->
+              <div class="space-y-1 md:pl-2">
+                <span class="text-[10px] font-black uppercase tracking-wider text-sky-400 px-2 block mb-1">📊 Reportes y Gestión</span>
+                <button onclick="switchSysTab('reportes'); closeAllSysDropdowns();" id="sys-tab-reportes" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>📈</span> <span>Reportes de Ventas</span></span>
+                </button>
+                <button onclick="switchSysTab('recetas'); closeAllSysDropdowns();" id="sys-tab-recetas" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Recetas IA</span></span>
+                  <span id="badge-sys-pending-rx" class="hidden px-1.5 py-0.2 bg-sky-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+                </button>
+                <button onclick="switchSysTab('whatsapp'); closeAllSysDropdowns();" id="sys-tab-whatsapp" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-emerald-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>💬</span> <span>Historial WhatsApp</span></span>
+                  <span id="badge-sys-wa-count" class="px-1.5 py-0.2 bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 font-bold rounded-full text-[10px]">0</span>
+                </button>
+                <button onclick="switchSysTab('config'); closeAllSysDropdowns();" id="sys-tab-config" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                  <span class="flex items-center gap-1.5"><span>⚙️</span> <span>Configuración Farmacia</span></span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
       </nav>
 
       <div class="flex items-center gap-2 relative">
@@ -264,40 +335,68 @@
           </div>
           <button onclick="toggleMobileNavDrawer()" class="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white font-bold">✕</button>
         </div>
-        <div class="space-y-1.5 text-xs font-bold">
-          <button id="mob-tab-pos" onclick="switchSysTab('pos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>🖥️ POS Mostrador</span>
-          </button>
-          <button id="mob-tab-solicitudes" onclick="switchSysTab('solicitudes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>📱 Solicitudes App</span>
-            <span id="badge-mobile-pending-app" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span>
-          </button>
-          <button id="mob-tab-recetas" onclick="switchSysTab('recetas'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>📋 Recetas médicas</span>
-            <span id="badge-mobile-pending-rx" class="hidden px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 text-[10px]">0</span>
-          </button>
-          <button id="mob-tab-inventario" onclick="switchSysTab('inventario'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>📦 Inventario</span>
-            <span id="badge-mobile-low-stock" class="hidden px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px]">0</span>
-          </button>
-          <button id="mob-tab-vencimientos" onclick="switchSysTab('vencimientos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>⏳ Vencimientos</span>
-            <span id="badge-mobile-expiry" class="hidden px-2 py-0.5 rounded-full bg-orange-500 text-white text-[10px]">0</span>
-          </button>
-          <button id="mob-tab-deudores" onclick="switchSysTab('deudores'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-            <span>📒 Deudores (Créditos)</span>
-            <span id="badge-mobile-debtors" class="hidden px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px]">0</span>
-          </button>
-          <button id="mob-tab-reportes" onclick="switchSysTab('reportes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-            <span>📈 Reportes de ventas</span>
-          </button>
-          <button id="mob-tab-whatsapp" onclick="switchSysTab('whatsapp'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-            <span>💬 WhatsApp Business API</span>
-          </button>
-          <button id="mob-tab-config" onclick="switchSysTab('config'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2.5 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-            <span>⚙️ Configuración y Personal</span>
-          </button>
-        </div>
+                <div class="space-y-3 text-xs font-bold">
+          
+          <!-- Sección 1: Ventas y Caja -->
+          <div class="space-y-1">
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">🛒 Ventas y Caja</span>
+            <button id="mob-tab-pos" onclick="switchSysTab('pos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>🖥️ POS Mostrador</span>
+            </button>
+            <button id="mob-tab-solicitudes" onclick="switchSysTab('solicitudes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>📱 Solicitudes App</span>
+              <span id="badge-mobile-pending-app" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span>
+            </button>
+            <button id="mob-tab-recetas" onclick="switchSysTab('recetas'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>📋 Recetas médicas IA</span>
+              <span id="badge-mobile-pending-rx" class="hidden px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 text-[10px]">0</span>
+            </button>
+          </div>
+
+          <!-- Sección 2: Inventario y Stock -->
+          <div class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">📦 Inventario y Stock</span>
+            <button id="mob-tab-inventario" onclick="switchSysTab('inventario'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>📦 Inventario General</span>
+              <span id="badge-mobile-low-stock" class="hidden px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px]">0</span>
+            </button>
+            <button id="mob-tab-vencimientos" onclick="switchSysTab('vencimientos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>⏳ Vencimientos ≤7m</span>
+              <span id="badge-mobile-expiry" class="hidden px-2 py-0.5 rounded-full bg-orange-500 text-white text-[10px]">0</span>
+            </button>
+          </div>
+
+          <!-- Sección 3: Pacientes y Fidelización -->
+          <div class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">👥 Pacientes y Clientes</span>
+            <button id="mob-tab-cronicos" onclick="switchSysTab('cronicos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>🩺 Crónicos & Alerta 10d</span>
+              <span id="badge-mobile-chronic" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span>
+            </button>
+            <button id="mob-tab-planes" onclick="switchSysTab('planes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>🎁 Planes y Bonificación</span>
+            </button>
+            <button id="mob-tab-deudores" onclick="switchSysTab('deudores'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
+              <span>📒 Deudores (Créditos)</span>
+              <span id="badge-mobile-debtors" class="hidden px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px]">0</span>
+            </button>
+          </div>
+
+          <!-- Sección 4: Reportes y Gestión -->
+          <div class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">📊 Reportes y Gestión</span>
+            <button id="mob-tab-reportes" onclick="switchSysTab('reportes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
+              <span>📈 Reportes de ventas</span>
+            </button>
+            <button id="mob-tab-whatsapp" onclick="switchSysTab('whatsapp'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
+              <span>💬 WhatsApp Business API</span>
+            </button>
+            <button id="mob-tab-config" onclick="switchSysTab('config'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
+              <span>⚙️ Configuración y Personal</span>
+            </button>
+          </div>
+
+        </div></div>
       </div>
       <div class="pt-4 border-t border-slate-800 space-y-2">
         <a href="/app" target="_blank" class="w-full block text-center py-2.5 rounded-xl bg-teal-600/20 text-teal-300 font-bold text-xs border border-teal-500/30">
@@ -342,14 +441,7 @@
 
       <!-- Ventanas Rápidas del Sistema y Badge de Carrito POS -->
       <div class="flex items-center gap-2 flex-wrap">
-        <div class="hidden xl:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
-          <button type="button" onclick="switchSysTab('pos')" id="sys-winpill-pos" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-teal-900 bg-white shadow-2xs transition">🛒 POS</button>
-          <button type="button" onclick="switchSysTab('inventario')" id="sys-winpill-inventario" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">📦 Inventario</button>
-          <button type="button" onclick="switchSysTab('vencimientos')" id="sys-winpill-vencimientos" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">⚠️ Vencimientos ≤7m</button>
-          <button type="button" onclick="switchSysTab('deudores')" id="sys-winpill-deudores" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">👥 Deudores</button>
-          <button type="button" onclick="switchSysTab('reportes')" id="sys-winpill-reportes" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">📊 Ventas Diaria/Mensual</button>
-          <button type="button" onclick="switchSysTab('whatsapp')" id="sys-winpill-whatsapp" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:text-slate-900 transition">📱 WhatsApp</button>
-        </div>
+        
 
         <!-- Indicador de Carrito POS Activo -->
         <div id="sys-pos-cart-status-pill" onclick="switchSysTab('pos')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold cursor-pointer transition shadow-2xs" title="Clic para regresar a tu venta activa en el Mostrador">
@@ -366,7 +458,29 @@
       <!-- =====================================================================
            BARRA DE MÉTRICAS Y ESTADÍSTICAS COMPARATIVAS DE VENTA (FARMASYS POS)
            ===================================================================== -->
-      <div id="pos-comparative-stats-bar" class="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-teal-800/60 space-y-3">
+      <!-- Barra Plegable de Rendimiento Comercial y Alertas Críticas (Compacta para dejar la venta lista) -->
+      <div id="pos-stats-summary-bar" class="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white rounded-2xl p-2.5 sm:p-3 border border-teal-800/60 shadow-xs flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2.5">
+          <span class="text-sm">📊</span>
+          <span class="text-xs font-black uppercase tracking-wider text-teal-400">Rendimiento FarmaSys POS:</span>
+          <span id="pos-banner-today-summary" class="text-xs font-extrabold text-white">Hoy: RD$ 0.00</span>
+          <span class="text-slate-500 font-bold hidden sm:inline">|</span>
+          <span id="pos-banner-alerts-summary" class="text-xs text-amber-300 hidden sm:inline">Alertas en vivo</span>
+        </div>
+        <button
+          type="button"
+          onclick="togglePosStatsCollapsible()"
+          id="btn-toggle-pos-stats"
+          class="px-2.5 py-1 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-400/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+        >
+          <span id="btn-toggle-pos-stats-text">Mostrar Métricas y Alertas</span>
+          <span id="arrow-toggle-pos-stats">▾</span>
+        </button>
+      </div>
+
+      <!-- Contenedor Plegable (Oculto por defecto para dejar la venta de medicamentos lista de inmediato) -->
+      <div id="pos-stats-collapsible-body" class="hidden space-y-4">
+        <div id="pos-comparative-stats-bar" class="bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-teal-800/60 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
           <div class="flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center font-bold text-sm">
@@ -527,6 +641,9 @@
           <div class="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-lg">💬</div>
         </div>
       </div>
+      
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <!-- Terminal POS Físico -->
         <div class="lg:col-span-7 bg-white rounded-3xl p-5 shadow-sm border border-slate-200 space-y-4">
@@ -545,6 +662,26 @@
               <button type="button" onclick="openQuickReplenishModal()" class="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-extrabold text-xs transition border border-indigo-200 shadow-xs flex items-center gap-1.5 cursor-pointer">
                 <span>📦</span> <span>Entrada de Compra / Sumar Stock</span>
               </button>
+              <button type="button" onclick="openPharmaCareModal()" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer">
+                <span>🩺</span> <span>Toma de Presión / Glicemia</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- BARRA DE ACCESO RÁPIDO A KITS ALIVIO EN 1 CLIC (DESPACHO POS) -->
+          <div class="p-3.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-teal-500/15 rounded-2xl border border-amber-400/50 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow">⚡</span>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h4 class="text-xs font-black text-slate-900 uppercase tracking-wide">Kits Alivio en 1 Clic (Con Medicamentos Existentes)</h4>
+                  <button type="button" onclick="openKitBuilderModal()" class="px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 font-extrabold text-[10px] transition cursor-pointer">+ Armar Kit</button>
+                </div>
+                <p class="text-[11px] text-slate-600 font-medium">Precio calculado por unidad de lo solicitado • La oferta queda a decisión del vendedor.</p>
+              </div>
+            </div>
+            <div id="pos-quick-kits-container" class="flex flex-wrap items-center gap-1.5">
+              <!-- Botones dinámicos de kits cargados por sistema_farmacia.js -->
             </div>
           </div>
 
@@ -619,6 +756,46 @@
               <tbody id="pos-cart-tbody" class="divide-y divide-slate-200 text-xs"></tbody>
             </table>
           </div>
+
+          
+          <!-- Fidelización, Paciente Frecuente y Bonificación con Decisión Opcional -->
+          <div class="p-3.5 bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 rounded-2xl border border-teal-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-black uppercase text-teal-900 flex items-center gap-1.5">
+                <span>🎁</span> <span>Fidelización y Pacientes Frecuentes</span>
+              </span>
+              <span id="pos-patient-plan-badge" class="hidden text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-600 text-white shadow-2xs">
+                Plan Activo
+              </span>
+            </div>
+            
+            <div class="flex gap-2 items-center">
+              <div class="relative flex-1">
+                <input
+                  id="pos-patient-search"
+                  type="text"
+                  placeholder="🔍 Buscar paciente por Cédula, Teléfono o Nombre..."
+                  oninput="handlePosPatientSearch(this.value)"
+                  class="w-full pl-8 pr-3 py-2 rounded-xl border border-teal-300 text-xs font-semibold bg-white focus:outline-none focus:border-teal-600"
+                />
+                <span class="absolute left-2.5 top-2.5 text-xs text-teal-600">🔍</span>
+                <div id="pos-patient-search-results" class="hidden absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-slate-200 z-30 max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs"></div>
+              </div>
+              <button type="button" onclick="clearSelectedPosPatient()" id="pos-btn-clear-patient" class="hidden px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition">✕ Quitar</button>
+            </div>
+            
+            <!-- Panel de Bonificación Opcional si el cliente tiene plan -->
+            <div id="pos-plan-bonus-container" class="hidden p-2.5 rounded-xl bg-white border border-teal-300 flex items-center justify-between shadow-2xs">
+              <div class="flex items-center gap-2">
+                <input type="checkbox" id="pos-apply-bonus-check" onchange="togglePosBonusApplication()" class="w-4 h-4 text-teal-600 rounded cursor-pointer" checked />
+                <label for="pos-apply-bonus-check" class="text-xs font-bold text-slate-800 cursor-pointer">
+                  Aplicar Bonificación / Descuento (<span id="pos-bonus-pct-label" class="text-teal-700 font-extrabold">0%</span>)
+                </label>
+              </div>
+              <span id="pos-bonus-discount-amount" class="text-xs font-extrabold text-emerald-700 font-mono">-RD$ 0.00</span>
+            </div>
+          </div>
+
 
           <!-- Datos de Cliente, Pago y Seguro Médico (ARS) -->
           <div class="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
@@ -732,7 +909,15 @@
                 <span id="pos-total-min-units" class="font-mono font-bold text-teal-400">0 unid.</span>
               </div>
               <div class="flex justify-between items-baseline">
-                <span class="text-xs font-bold uppercase">Total a Cobrar:</span>
+                <div id="pos-row-subtotal" class="flex justify-between text-xs text-slate-400">
+                <span>Subtotal venta:</span>
+                <span id="pos-subtotal-val" class="font-mono font-bold text-slate-200">RD$ 0.00</span>
+              </div>
+              <div id="pos-row-bonus-discount" class="hidden flex justify-between text-xs text-emerald-400 font-extrabold">
+                <span>Bonificación Paciente (<span id="pos-discount-pct-summary">0%</span>):</span>
+                <span id="pos-discount-amount-summary" class="font-mono">-RD$ 0.00</span>
+              </div>
+              <span class="text-xs font-bold uppercase">Total a Cobrar:</span>
                 <span id="pos-total-amount" class="text-2xl font-extrabold text-emerald-400">RD$ 0.00</span>
               </div>
               <button onclick="submitPosSale()" class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs shadow-lg transition">
@@ -1025,8 +1210,18 @@
                 onclick="setInventoryFilterPill('SIN_SALIDA')"
                 id="inv-pill-SIN_SALIDA"
                 class="px-4 py-2 rounded-2xl text-xs font-bold transition bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 cursor-pointer"
+                title="Baja rotación real: solo productos no crónicos con ≤50 unidades vendidas en 30 días."
               >
-                📉 Sin Salida ≤50 (<span id="cnt-inv-sin-salida">0</span>)
+                📉 Sin Salida Real ≤50 (<span id="cnt-inv-sin-salida">0</span>)
+              </button>
+              <button
+                type="button"
+                onclick="setInventoryFilterPill('CRONICOS')"
+                id="inv-pill-CRONICOS"
+                class="px-4 py-2 rounded-2xl text-xs font-bold transition bg-purple-50 text-purple-900 border border-purple-300 hover:bg-purple-100 cursor-pointer"
+                title="Medicamentos de uso crónico continuo con salida mensual programada. Demanda asegurada."
+              >
+                🩺 Uso Crónico Mensual (<span id="cnt-inv-cronicos">0</span>)
               </button>
             </div>
             <span id="inv-showing-counter" class="text-[11px] font-bold text-slate-500">Mostrando todo el inventario</span>
@@ -1277,6 +1472,197 @@
         <!-- =====================================================================
          5. PESTAÑA REPORTES DE VENTAS: VENTA DIARIA, MENSUAL E IMPRESIÓN FORMAL
          ===================================================================== -->
+    
+    <!-- =====================================================================
+         NUEVA VISTA: PACIENTES CRÓNICOS & ALERTA 10 DÍAS DE ANTICIPACIÓN
+         ===================================================================== -->
+    <section id="view-cronicos" class="hidden space-y-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <button type="button" onclick="goSysBack()" class="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">← Atrás</button>
+            <button type="button" onclick="switchSysTab('pos')" class="px-3 py-1 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-extrabold transition">🛒 Mostrador (POS)</button>
+          </div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+            <span>🩺</span> <span>Pacientes con Enfermedades Crónicas</span>
+          </h1>
+          <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Monitoreo preventivo con <strong>alerta de 10 días de anticipación</strong> para abastecer medicamentos en farmacia y contactar al paciente por WhatsApp o llamada.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="loadChronicPatients()" class="px-4 py-2.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 border-2 border-slate-300 font-extrabold text-xs shadow-xs flex items-center gap-2 cursor-pointer">
+            <span>🔄</span> <span>Actualizar</span>
+          </button>
+          <button type="button" onclick="openPharmaCareTariffsModal()" class="px-3.5 py-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 border-2 border-amber-300 font-extrabold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer">
+            <span>💲</span> <span>Configurar Precios (Presión / Glicemia)</span>
+          </button>
+          <button type="button" onclick="openPharmaCareModal()" class="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow flex items-center gap-1.5 cursor-pointer">
+            <span>🩺</span> <span>Toma de Presión / Glicemia</span>
+          </button>
+          <button type="button" onclick="openNewChronicPatientModal()" class="px-4 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer">
+            <span>➕</span> <span>Registrar Paciente Crónico</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Cards: Total, Alerta 10 Días (⚠️), Vencidos (🚨), Vigentes (✅) -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div class="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-col justify-between">
+          <span class="text-[11px] sm:text-xs font-bold uppercase text-slate-500">TOTAL MONITOREADOS</span>
+          <p id="chronic-kpi-total" class="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2">0</p>
+          <span class="text-[10px] text-slate-400 mt-1">Pacientes registrados</span>
+        </div>
+        <div class="bg-white p-4 sm:p-5 rounded-3xl border-2 border-amber-300 bg-amber-50/30 shadow-xs flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] sm:text-xs font-black uppercase text-amber-800">⚠️ ALERTA 10 DÍAS</span>
+            <span class="relative flex h-2.5 w-2.5">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+          </div>
+          <p id="chronic-kpi-alerta" class="text-2xl sm:text-3xl font-extrabold text-amber-600 mt-2">0</p>
+          <span class="text-[10px] text-amber-900 font-bold mt-1">Por vencer ≤ 10 días (Contactar & Comprar)</span>
+        </div>
+        <div class="bg-white p-4 sm:p-5 rounded-3xl border-2 border-rose-200 bg-rose-50/20 shadow-xs flex flex-col justify-between">
+          <span class="text-[11px] sm:text-xs font-bold uppercase text-rose-700">🚨 TRATAMIENTO VENCIDO</span>
+          <p id="chronic-kpi-vencidos" class="text-2xl sm:text-3xl font-extrabold text-rose-600 mt-2">0</p>
+          <span class="text-[10px] text-rose-800 font-bold mt-1">Medicación agotada</span>
+        </div>
+        <div class="bg-white p-4 sm:p-5 rounded-3xl border border-emerald-200 bg-emerald-50/20 shadow-xs flex flex-col justify-between">
+          <span class="text-[11px] sm:text-xs font-bold uppercase text-emerald-800">✅ EN TRATAMIENTO VIGENTE</span>
+          <p id="chronic-kpi-vigentes" class="text-2xl sm:text-3xl font-extrabold text-emerald-600 mt-2">0</p>
+          <span class="text-[10px] text-emerald-700 mt-1">> 10 días de suministro</span>
+        </div>
+      </div>
+
+      <!-- Buscador y Filtros Rápidos -->
+      <div class="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-xs font-extrabold uppercase text-slate-500 mr-1">Filtrar por:</span>
+            <button type="button" onclick="filterChronicByStatus('TODOS')" id="chronic-filter-TODOS" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-900 text-white shadow-xs">Todos</button>
+            <button type="button" onclick="filterChronicByStatus('ALERTA_10_DIAS')" id="chronic-filter-ALERTA_10_DIAS" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300">⚠️ Alerta 10 Días</button>
+            <button type="button" onclick="filterChronicByStatus('VENCIDO')" id="chronic-filter-VENCIDO" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300">🚨 Vencidos</button>
+            <button type="button" onclick="filterChronicByStatus('VIGENTE')" id="chronic-filter-VIGENTE" class="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300">✅ Vigentes</button>
+          </div>
+          <div class="relative w-full sm:w-72">
+            <span class="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+            <input
+              id="chronic-search-input"
+              type="text"
+              oninput="handleChronicSearch(this.value)"
+              placeholder="Buscar por nombre, cédula o medicamento..."
+              class="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold focus:outline-none focus:border-teal-600"
+            />
+          </div>
+        </div>
+
+        <!-- Tabla de Pacientes Crónicos -->
+        <div class="overflow-x-auto rounded-2xl border border-slate-200">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 border-b border-slate-200 text-[11px] font-black uppercase text-slate-600">
+              <tr>
+                <th class="py-3 px-3">Paciente & Cédula</th>
+                <th class="py-3 px-3">Diagnóstico / Condición</th>
+                <th class="py-3 px-3">Medicamento & Dosis</th>
+                <th class="py-3 px-3 text-center">Suministro & Fechas</th>
+                <th class="py-3 px-3 text-center">Estado / Alerta</th>
+                <th class="py-3 px-3 text-right">Acciones Rápidas</th>
+              </tr>
+            </thead>
+            <tbody id="chronic-table-tbody" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="6" class="py-8 text-center text-slate-400">Cargando pacientes crónicos...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- =====================================================================
+         NUEVA VISTA: PLANES DE PACIENTES FRECUENTES, BONIFICACIÓN Y DESCUENTOS
+         ===================================================================== -->
+    <section id="view-planes" class="hidden space-y-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <button type="button" onclick="goSysBack()" class="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">← Atrás</button>
+            <button type="button" onclick="switchSysTab('pos')" class="px-3 py-1 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-extrabold transition">🛒 Mostrador (POS)</button>
+          </div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+            <span>🎁</span> <span>Planes de Pacientes Frecuentes & Bonificaciones</span>
+          </h1>
+          <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Configuración de fidelización con <strong>descuento y bonificación opcional</strong>. En el mostrador de ventas, el cajero decide si aplica la bonificación con 1 solo clic.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="openNewPlanModal()" class="px-4 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer">
+            <span>➕</span> <span>Crear Nuevo Plan</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tarjetas explicativas de cómo funciona la bonificación opcional -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-gradient-to-br from-teal-50 to-emerald-50 border border-teal-200 p-4 rounded-3xl space-y-1.5">
+          <div class="flex items-center gap-2 text-teal-900 font-black text-sm">
+            <span>🎯</span> <span>1. Asignación al Paciente</span>
+          </div>
+          <p class="text-xs text-slate-600">
+            Cada cliente puede estar suscrito a un plan (ej. Adulto Mayor, Paciente Frecuente o Familia Davalsi).
+          </p>
+        </div>
+        <div class="bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200 p-4 rounded-3xl space-y-1.5">
+          <div class="flex items-center gap-2 text-sky-900 font-black text-sm">
+            <span>🛒</span> <span>2. Decisión en Mostrador (POS)</span>
+          </div>
+          <p class="text-xs text-slate-600">
+            Al escanear al cliente en POS, el sistema detecta su plan y ofrece una casilla de verificación opcional para autorizar la bonificación.
+          </p>
+        </div>
+        <div class="bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 p-4 rounded-3xl space-y-1.5">
+          <div class="flex items-center gap-2 text-purple-900 font-black text-sm">
+            <span>⭐</span> <span>3. Puntos y Descuento %</span>
+          </div>
+          <p class="text-xs text-slate-600">
+            Los clientes acumulan puntos por cada RD$ gastado y reciben el porcentaje de ahorro acordado en sus medicamentos.
+          </p>
+        </div>
+      </div>
+
+      <!-- Tabla / Lista de Planes Activos -->
+      <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-extrabold text-slate-900">Planes de Lealtad Configurados en Sucursal</h2>
+          <span class="text-xs text-slate-400 font-bold" id="plans-count-badge">3 Planes</span>
+        </div>
+        <div class="overflow-x-auto rounded-2xl border border-slate-200">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 border-b border-slate-200 text-[11px] font-black uppercase text-slate-600">
+              <tr>
+                <th class="py-3 px-3">Nombre del Plan</th>
+                <th class="py-3 px-3">Bonificación / Descuento</th>
+                <th class="py-3 px-3">Puntos Fidelidad</th>
+                <th class="py-3 px-3">Descripción</th>
+                <th class="py-3 px-3 text-center">Estado</th>
+                <th class="py-3 px-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="plans-table-tbody" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="6" class="py-8 text-center text-slate-400">Cargando planes...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
     <section id="view-reportes" class="hidden space-y-6">
       <!-- Encabezado de la Ventana de Reportes con Botones de Retorno -->
       <div class="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
@@ -2282,7 +2668,145 @@
       </div>
     </section>
 
-  </main>
+    <!-- =====================================================================
+       MODAL: DESGLOSE Y DESPACHO DE KIT PROMOCIONAL (SISTEMA POS)
+       ===================================================================== -->
+  <div id="modal-pos-kit-detail" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="max-w-2xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 my-8">
+      <div class="bg-gradient-to-r from-amber-600 via-orange-600 to-slate-900 text-white p-5 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-2xl shadow" id="modal-pos-kit-icon">
+            ⚡
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span id="modal-pos-kit-tag" class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-white/20 text-amber-200">OFERTA SEMANAL ⚡</span>
+              <span id="modal-pos-kit-avail" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white">Disponible</span>
+            </div>
+            <h3 id="modal-pos-kit-title" class="text-base sm:text-lg font-black mt-0.5">Kit Resfriado & Gripe Express</h3>
+          </div>
+        </div>
+        <button onclick="closePosKitDetailModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center transition cursor-pointer">✕</button>
+      </div>
+
+      <div class="p-5 sm:p-6 space-y-4 text-xs">
+        <p id="modal-pos-kit-desc" class="text-slate-600 font-medium leading-relaxed"></p>
+
+        <!-- Tabla: De qué consta el kit y precios individuales -->
+        <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <div class="bg-slate-100 px-4 py-2 border-b border-slate-200 flex items-center justify-between font-black text-slate-800">
+            <span>📦 MEDICAMENTOS Y COMPONENTES QUE CONTIENE EL KIT</span>
+            <span class="text-[11px] text-slate-500 font-medium">Desglose Físico</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left">
+              <thead class="bg-slate-50 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th class="py-2 px-3">Medicamento / Principio Activo</th>
+                  <th class="py-2 px-2 text-center">Presentación</th>
+                  <th class="py-2 px-2 text-center">Cant.</th>
+                  <th class="py-2 px-2 text-center">Stock Físico</th>
+                  <th class="py-2 px-3 text-right">Precio Regular</th>
+                  <th class="py-2 px-3 text-right">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody id="modal-pos-kit-table-body" class="divide-y divide-slate-100 font-medium text-slate-800">
+                <!-- Filas de componentes renderizadas dinámicamente -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Resumen Financiero: Precio por Unidad de lo Solicitado y Oferta a Decisión del Vendedor -->
+        <div class="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-3">
+          <div class="flex items-center justify-between text-slate-800 font-bold">
+            <span>Precio del Kit (por unidad de lo solicitado):</span>
+            <span id="modal-pos-kit-reg-price" class="font-mono text-base font-black text-slate-900">RD$ 0.00</span>
+          </div>
+
+          <div class="p-3 rounded-xl bg-white border border-amber-300 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <label class="block text-[11px] font-black uppercase text-amber-900">🏷️ Oferta / Precio Final (A decisión del vendedor):</label>
+                <span class="text-[10px] text-slate-500">Por defecto cobra la suma por unidad solicitada. El vendedor puede aplicar oferta aquí:</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="font-black text-xs text-slate-700">RD$</span>
+                <input
+                  id="modal-pos-kit-seller-price-input"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  oninput="handlePosKitSellerPriceChange(this.value)"
+                  class="w-28 px-2.5 py-1.5 rounded-xl border-2 border-teal-600 font-mono font-black text-sm text-teal-900 text-right focus:outline-none"
+                />
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 pt-1">
+              <span class="text-[10px] font-bold text-slate-500 mr-1">Ajuste rápido del vendedor:</span>
+              <button type="button" onclick="applyPosKitSellerQuickDiscount(0)" class="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[10px] cursor-pointer">Precio por Unidad (Sin descuento)</button>
+              <button type="button" onclick="applyPosKitSellerQuickDiscount(5)" class="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[10px] cursor-pointer">-5% Oferta</button>
+              <button type="button" onclick="applyPosKitSellerQuickDiscount(10)" class="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[10px] cursor-pointer">-10% Oferta</button>
+              <button type="button" onclick="applyPosKitSellerQuickDiscount(15)" class="px-2 py-0.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold text-[10px] cursor-pointer">-15% Oferta</button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-slate-900 font-extrabold text-base pt-1">
+            <span class="text-amber-900">Precio Final a Cobrar por el Kit:</span>
+            <span id="modal-pos-kit-offer-price" class="font-black text-xl text-teal-700">RD$ 0.00</span>
+          </div>
+          <div class="flex items-center justify-between pt-1 border-t border-amber-200 text-xs font-bold text-emerald-700">
+            <span>Estado de Oferta del Vendedor:</span>
+            <span id="modal-pos-kit-savings" class="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 font-black">Precio exacto por unidad</span>
+          </div>
+        </div>
+
+        <!-- Botones de Acción -->
+        <div class="pt-2 flex items-center justify-end gap-2.5">
+          <button type="button" onclick="closePosKitDetailModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition cursor-pointer">
+            Cancelar
+          </button>
+          <button type="button" id="btn-modal-add-kit-to-pos" onclick="executeAddKitFromModal()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg transition flex items-center gap-2 cursor-pointer transform active:scale-95">
+            <span>➕</span> <span>Cargar Kit al Mostrador (POS)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       VISTA: KITS Y PAQUETES SEMANALES DE OFERTA (FARMASYS ADMIN)
+       ===================================================================== -->
+  <section id="view-kits" class="hidden space-y-6">
+    <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300">
+          ⚡ GESTIÓN DE OFERTAS & COMBOS SEMANALES
+        </span>
+        <h2 class="text-xl font-black text-slate-900 mt-1 flex items-center gap-2">
+          <span>📦</span> Kits Alivio en 1 Clic — Ofertas Semanales
+        </h2>
+        <p class="text-xs text-slate-500 font-medium">
+          Administración de paquetes promocionales para la App de pacientes y despacho rápido en POS físico.
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" onclick="openKitBuilderModal()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer">
+          <span>➕</span> <span>Armar Kit con Medicamentos Existentes</span>
+        </button>
+        <button onclick="switchSysTab('pos')" class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer">
+          <span>🖥️</span> <span>Ir al Mostrador (POS)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Grid de Kits para Backoffice -->
+    <div id="kits-management-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Renderizado dinámicamente -->
+    </div>
+  </section>
+
+</main>
 
   <!-- MODAL NUEVO VENDEDOR (Captura 5) -->
   <div id="new-seller-modal" class="fixed inset-0 z-[100] bg-slate-950/70 hidden items-center justify-center p-4">
@@ -3395,5 +3919,582 @@
   </div>
 
   <div id="sys-print-stage" class="hidden"></div>
+
+  <!-- =====================================================================
+       MODAL: REGISTRAR / EDITAR PACIENTE CRÓNICO
+       ===================================================================== -->
+  <div id="modal-chronic-patient" class="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5">
+    <div class="w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[92vh]">
+      <div class="p-5 bg-gradient-to-r from-teal-800 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">🩺</span>
+          <div>
+            <h3 id="modal-chronic-title" class="font-black text-base">Registrar Paciente Crónico</h3>
+            <p class="text-xs text-teal-200">Seguimiento preventivo con alerta de 10 días de anticipación</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeChronicPatientModal()" class="text-white/70 hover:text-white font-extrabold text-lg p-1">✕</button>
+      </div>
+
+      <form onsubmit="handleSaveChronicPatient(event)" class="p-5 space-y-3.5 overflow-y-auto flex-1 text-xs font-bold text-slate-700">
+        <input type="hidden" id="chronic-form-id" value="" />
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Nombre Completo *</label>
+            <input id="chronic-form-nombre" type="text" required placeholder="Ej. Doña Carmen Rodríguez" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-semibold" />
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Cédula / Identificación</label>
+            <input id="chronic-form-cedula" type="text" placeholder="001-1234567-8" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-mono" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Teléfono / WhatsApp *</label>
+            <input id="chronic-form-telefono" type="tel" required placeholder="809-555-1234" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-mono" />
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Plan de Paciente Frecuente</label>
+            <select id="chronic-form-plan" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 bg-white">
+              <option value="">Sin plan específico</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase text-slate-500 mb-1">Diagnóstico / Enfermedad Crónica *</label>
+          <input id="chronic-form-diagnostico" type="text" required placeholder="Ej. Hipertensión Arterial Grado II / Diabetes Tipo 2" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-semibold" />
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Medicamento Crónico Habitual *</label>
+            <input id="chronic-form-medicamento" type="text" required placeholder="Ej. Losartán Potásico 50mg" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-semibold" />
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Dosis Diaria / Posología</label>
+            <input id="chronic-form-dosis" type="text" placeholder="Ej. 1 tableta cada 24 horas por la mañana" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-semibold" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Días de Suministro por Despacho *</label>
+            <input id="chronic-form-dias" type="number" min="1" max="180" value="30" required class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-mono" />
+            <p class="text-[10px] text-slate-400 mt-0.5">Comúnmente 30 días para tratamientos mensuales</p>
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Fecha de Última Entrega / Despacho *</label>
+            <input id="chronic-form-fecha" type="date" required class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-mono" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase text-slate-500 mb-1">Notas Médicas / Observaciones</label>
+          <textarea id="chronic-form-notas" rows="2" placeholder="Notas sobre alergias, médico tratante o preferencias de entrega..." class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-teal-600 font-medium"></textarea>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" onclick="closeChronicPatientModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition">Cancelar</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold transition shadow-md">Guardar Paciente</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: CREAR / EDITAR PLAN DE PACIENTE FRECUENTE
+       ===================================================================== -->
+  <div id="modal-patient-plan" class="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col">
+      <div class="p-5 bg-gradient-to-r from-purple-800 to-indigo-950 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">🎁</span>
+          <div>
+            <h3 id="modal-plan-title" class="font-black text-base">Plan de Pacientes Frecuentes</h3>
+            <p class="text-xs text-purple-200">Bonificación y descuentos de fidelidad</p>
+          </div>
+        </div>
+        <button type="button" onclick="closePatientPlanModal()" class="text-white/70 hover:text-white font-extrabold text-lg p-1">✕</button>
+      </div>
+
+      <form onsubmit="handleSavePatientPlan(event)" class="p-5 space-y-3.5 text-xs font-bold text-slate-700">
+        <input type="hidden" id="plan-form-id" value="" />
+
+        <div>
+          <label class="block text-[11px] uppercase text-slate-500 mb-1">Nombre del Plan *</label>
+          <input id="plan-form-nombre" type="text" required placeholder="Ej. Plan Adulto Mayor / Crónicos" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-purple-600 font-semibold" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Descuento / Bono (%) *</label>
+            <input id="plan-form-descuento" type="number" step="0.5" min="0" max="100" value="10" required class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-purple-600 font-mono" />
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase text-slate-500 mb-1">Puntos por RD$ 100</label>
+            <input id="plan-form-puntos" type="number" min="0" value="1" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-purple-600 font-mono" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase text-slate-500 mb-1">Descripción / Beneficios</label>
+          <textarea id="plan-form-desc" rows="2" placeholder="Beneficios del plan para clientes frecuentes..." class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-purple-600 font-medium"></textarea>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" onclick="closePatientPlanModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition">Cancelar</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-extrabold transition shadow-md">Guardar Plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: ALERTA DE DUPLICIDAD FARMACOLÓGICA / MISMA FAMILIA EN POS
+       ===================================================================== -->
+  <div id="modal-duplicity-warning" class="fixed inset-0 z-[120] bg-slate-950/75 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5">
+    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border-2 border-rose-300 animate-in zoom-in-95 duration-150">
+      <div class="p-5 bg-gradient-to-r from-rose-600 to-amber-700 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-3xl">⚠️</span>
+          <div>
+            <h3 class="font-black text-base sm:text-lg">Alerta Clínica de Duplicidad</h3>
+            <p class="text-xs text-rose-100">Medicamentos de la misma familia o principio activo</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeDuplicityModal()" class="text-white/80 hover:text-white font-black text-xl p-1">✕</button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs">
+        <div class="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 space-y-2">
+          <p class="font-extrabold text-sm">
+            🚨 ¡Atención Farmacéutica!
+          </p>
+          <p id="duplicity-explanation-text" class="text-xs leading-relaxed text-slate-700">
+            Ya existe un medicamento en la orden con el mismo principio activo o grupo terapéutico.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-slate-800">
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+            <span class="text-[10px] font-black uppercase text-slate-400">En la Venta Actual:</span>
+            <p id="duplicity-current-item" class="font-bold text-slate-900">-</p>
+            <p id="duplicity-current-pa" class="text-[11px] text-teal-700 font-semibold">-</p>
+          </div>
+          <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
+            <span class="text-[10px] font-black uppercase text-amber-700">Producto a Agregar:</span>
+            <p id="duplicity-new-item" class="font-bold text-slate-900">-</p>
+            <p id="duplicity-new-pa" class="text-[11px] text-amber-800 font-semibold">-</p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2">
+          <button type="button" onclick="closeDuplicityModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold transition">
+            ✕ Cancelar y No Agregar
+          </button>
+          <button type="button" id="duplicity-confirm-btn" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold transition shadow">
+            ⚠️ Autorizar y Agregar de Todos Modos
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: SUSTITUCIÓN INTELIGENTE Y BIOEQUIVALENTES CON AHORRO
+       ===================================================================== -->
+  <div id="modal-substitutes" class="fixed inset-0 z-[115] bg-slate-950/70 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5">
+    <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+      <div class="p-5 bg-gradient-to-r from-teal-700 to-indigo-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">💡</span>
+          <div>
+            <h3 class="font-black text-base">Sustitución Inteligente & Bioequivalentes</h3>
+            <p class="text-xs text-teal-200">Alternativas por principio activo y opciones con mayor ahorro</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeSubstitutesModal()" class="text-white/70 hover:text-white font-extrabold text-lg p-1">✕</button>
+      </div>
+
+      <div class="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+        <!-- Medicamento Original de Referencia -->
+        <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-black uppercase text-slate-400">Medicamento Solicitado / Referencia:</span>
+            <h4 id="sub-orig-name" class="font-extrabold text-sm text-slate-900">-</h4>
+            <p id="sub-orig-pa" class="text-xs text-teal-700 font-bold">-</p>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] uppercase text-slate-400 font-bold">Precio Actual</span>
+            <p id="sub-orig-price" class="text-base font-black text-slate-900 font-mono">RD$ 0.00</p>
+          </div>
+        </div>
+
+        <!-- Lista de Sustitutos y Genéricos -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-black uppercase text-slate-600 text-[11px]">Alternativas Disponibles en Inventario:</span>
+            <span id="sub-count-badge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800">0 encontrados</span>
+          </div>
+          <div id="substitutes-list-container" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+            <!-- Renders via JS -->
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+        <button type="button" onclick="closeSubstitutesModal()" class="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+
+  <!-- =====================================================================
+       MODAL: ARMAR / EDITAR KIT CON MEDICAMENTOS EXISTENTES (OFERTA A DECISIÓN DEL VENDEDOR)
+       ===================================================================== -->
+  <div id="modal-kit-builder" class="fixed inset-0 z-[125] bg-slate-950/75 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5 overflow-y-auto">
+    <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 my-8">
+      <div class="p-5 bg-gradient-to-r from-slate-900 via-amber-900 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">📦</span>
+          <div>
+            <span class="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-black text-[10px] uppercase">MEDICAMENTOS EXISTENTES EN INVENTARIO</span>
+            <h3 id="kit-builder-modal-title" class="font-black text-base sm:text-lg mt-0.5">Armar / Configurar Kit de Venta</h3>
+          </div>
+        </div>
+        <button type="button" onclick="closeKitBuilderModal()" class="text-white/80 hover:text-white font-black text-lg p-1 cursor-pointer">✕</button>
+      </div>
+
+      <form onsubmit="submitKitBuilderForm(event)" class="p-5 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+        <input type="hidden" id="kit-builder-id" value="" />
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="block font-extrabold text-slate-700 mb-1">Nombre del Kit *</label>
+            <input id="kit-builder-name" type="text" required placeholder="Ej. Kit Resfriado & Gripe" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold" />
+          </div>
+          <div>
+            <label class="block font-extrabold text-slate-700 mb-1">Categoría / Ícono</label>
+            <div class="flex gap-1.5">
+              <input id="kit-builder-icon" type="text" value="🤧" class="w-12 px-2 py-2 rounded-xl border border-slate-300 text-center text-base" />
+              <input id="kit-builder-cat" type="text" value="Alivio en 1 Clic" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold" />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-extrabold text-slate-700 mb-1">Descripción corta de lo que contiene</label>
+          <input id="kit-builder-desc" type="text" placeholder="Ej. 1 Antigripal + 1 Vitamina C + 1 Sobre de Rehidratación Oral" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+        </div>
+
+        <!-- Selector de Medicamentos Existentes -->
+        <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+          <label class="block font-black uppercase text-slate-700 text-[11px]">💊 1. Seleccionar Medicamentos Existentes en el Sistema (Por Unidad Solicitada)</label>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+            <div class="sm:col-span-7">
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Medicamento del Inventario</label>
+              <select id="kit-builder-prod-select" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold bg-white">
+                <!-- Se llena con sysState.products -->
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Unidades Solicitadas</label>
+              <input id="kit-builder-prod-qty" type="number" min="1" value="1" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-black text-center bg-white" />
+            </div>
+            <div class="sm:col-span-3">
+              <button type="button" onclick="addProductToKitBuilder()" class="w-full py-2 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold transition shadow-xs cursor-pointer">
+                ➕ Añadir Unidad
+              </button>
+            </div>
+          </div>
+
+          <!-- Tabla de medicamentos agregados al kit -->
+          <div class="border border-slate-200 rounded-xl bg-white overflow-hidden">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-100 text-[10px] font-black uppercase text-slate-600">
+                <tr>
+                  <th class="py-2 px-3">Medicamento Existente</th>
+                  <th class="py-2 px-2 text-center">Cant. Solicitada</th>
+                  <th class="py-2 px-3 text-right">Precio por Unidad</th>
+                  <th class="py-2 px-3 text-right">Subtotal</th>
+                  <th class="py-2 px-2 text-center">Quitar</th>
+                </tr>
+              </thead>
+              <tbody id="kit-builder-items-tbody" class="divide-y divide-slate-100">
+                <tr><td colspan="5" class="py-4 text-center text-slate-400">Añada medicamentos existentes al kit.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Precio por Unidad Solicitada vs Oferta a Decisión del Vendedor -->
+        <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="font-black text-slate-900 uppercase text-[11px] block">💰 2. Precio del Kit por Unidad de lo Solicitado (Automático):</span>
+              <span class="text-[10px] text-slate-500">Suma exacta de las unidades solicitadas según el inventario actual</span>
+            </div>
+            <span id="kit-builder-unit-sum-display" class="text-lg font-black font-mono text-slate-900">RD$ 0.00</span>
+          </div>
+
+          <div class="pt-2 border-t border-amber-200 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex-1">
+              <label class="block font-black text-amber-900 uppercase text-[11px]">🏷️ Oferta del Vendedor (Opcional — A decisión del vendedor):</label>
+              <p class="text-[10px] text-slate-600">Déjelo vacío o igual al precio por unidad para cobrar el precio exacto por unidad. Si desea aplicar una oferta, coloque el precio promocional aquí.</p>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-bold text-slate-700">RD$</span>
+              <input id="kit-builder-seller-offer" type="number" step="0.01" min="0" placeholder="Sin oferta (Precio unidad)" class="w-36 px-3 py-2 rounded-xl border-2 border-amber-400 bg-white font-mono font-black text-sm text-right" />
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-2 flex items-center justify-end gap-2">
+          <button type="button" onclick="closeKitBuilderModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer">Cancelar</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-md cursor-pointer">💾 Guardar Kit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: REGISTRO DE ATENCIÓN FARMACÉUTICA (TOMA DE PRESIÓN O GLICEMIA)
+       ===================================================================== -->
+  <div id="modal-pharma-care-register" class="fixed inset-0 z-[125] bg-slate-950/75 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5 overflow-y-auto">
+    <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-rose-200 my-8">
+      <div class="p-5 bg-gradient-to-r from-rose-700 via-rose-600 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-3xl">🩺</span>
+          <div>
+            <span class="px-2 py-0.5 rounded-full bg-white/20 text-rose-100 font-black text-[10px] uppercase">SERVICIO SECUNDARIO • PACIENTES CRÓNICOS</span>
+            <h3 class="font-black text-base sm:text-lg mt-0.5">Atención Farmacéutica: Toma de Presión Arterial / Glicemia</h3>
+          </div>
+        </div>
+        <button type="button" onclick="closePharmaCareModal()" class="text-white/80 hover:text-white font-black text-lg p-1 cursor-pointer">✕</button>
+      </div>
+
+      <form onsubmit="submitPharmaCareRecord(event)" class="p-5 space-y-4 text-xs max-h-[84vh] overflow-y-auto">
+        <!-- 1. Selección de Paciente Crónico -->
+        <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <label class="font-black uppercase text-slate-700 text-[11px]">👤 1. Datos del Paciente Crónico</label>
+            <select id="pc-select-chronic-patient" onchange="handleSelectChronicPatientForCare(this.value)" class="px-3 py-1.5 rounded-xl border border-teal-400 bg-teal-50/50 text-teal-950 font-bold text-xs">
+              <option value="">-- Seleccionar Paciente Crónico Registrado --</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="sm:col-span-1">
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Nombre del Paciente *</label>
+              <input id="pc-patient-name" type="text" required placeholder="Nombre y Apellido" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold bg-white" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Cédula / ID</label>
+              <input id="pc-patient-cedula" type="text" placeholder="001-0000000-0" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono bg-white" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Teléfono / WhatsApp</label>
+              <input id="pc-patient-phone" type="text" placeholder="809-555-0000" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono bg-white" />
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Condición / Diagnóstico Crónico</label>
+              <input id="pc-patient-diag" type="text" placeholder="Ej. Hipertensión Arterial / Diabetes Tipo 2" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Medicamento Crónico Habitual</label>
+              <input id="pc-patient-med" type="text" placeholder="Ej. Losartán 50mg / Metformina 850mg" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Servicio Secundario, Precio Configurable y Fecha/Hora Exacta de Toma -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200">
+          <div class="sm:col-span-5">
+            <label class="block font-black uppercase text-amber-900 text-[10px] mb-1">🩺 Servicio Secundario a Adquirir *</label>
+            <select id="pc-service-type" onchange="handlePharmaCareServiceTypeChange(this.value)" class="w-full px-3 py-2 rounded-xl border border-amber-300 bg-white font-extrabold text-slate-900">
+              <option value="TOMA_PRESION">🩺 Toma de Presión Arterial (PA + Pulso)</option>
+              <option value="TOMA_GLICEMIA">🩸 Toma de Glicemia Capilar (Glucometría)</option>
+              <option value="COMBO_PRESION_GLICEMIA">❤️‍🩹 Control Completo: Presión + Glicemia</option>
+              <option value="ATENCION_FARMACEUTICA">📋 Atención Farmacéutica y Control de Peso</option>
+            </select>
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block font-black uppercase text-amber-900 text-[10px] mb-1">💲 Precio Servicio (RD$)</label>
+            <input id="pc-service-price" type="number" step="0.01" min="0" required class="w-full px-3 py-2 rounded-xl border-2 border-amber-400 bg-white font-mono font-black text-sm text-teal-900" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block font-black uppercase text-slate-700 text-[10px] mb-1">📅 Fecha de Toma *</label>
+            <input id="pc-date" type="date" required class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block font-black uppercase text-slate-700 text-[10px] mb-1">⏰ Hora de Toma *</label>
+            <input id="pc-time" type="text" required placeholder="08:30 AM" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-center" />
+          </div>
+        </div>
+
+        <!-- 3. Valores de Toma de Presión y Glicemia -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- Bloque Presión Arterial -->
+          <div id="pc-box-presion" class="p-3.5 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-black text-rose-900 uppercase text-[11px]">🩺 Toma de Presión Arterial</span>
+              <span id="pc-live-pa-badge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-600 border border-slate-200">Sin medir</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Sistólica (mmHg)</label>
+                <input id="pc-pa-sys" type="number" min="40" max="300" placeholder="120" oninput="updateLivePharmaCareClassification()" class="w-full px-2.5 py-2 rounded-xl border border-rose-300 bg-white font-mono font-black text-sm text-center" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Diastólica (mmHg)</label>
+                <input id="pc-pa-dia" type="number" min="30" max="200" placeholder="80" oninput="updateLivePharmaCareClassification()" class="w-full px-2.5 py-2 rounded-xl border border-rose-300 bg-white font-mono font-black text-sm text-center" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Pulso (lpm)</label>
+                <input id="pc-pulso" type="number" min="30" max="250" placeholder="72" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-center" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Brazo de Toma</label>
+                <select id="pc-brazo" class="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold">
+                  <option value="Brazo Izquierdo">Brazo Izquierdo</option>
+                  <option value="Brazo Derecho">Brazo Derecho</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Postura</label>
+                <select id="pc-postura" class="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold">
+                  <option value="Sentado (5 min reposo)">Sentado (5 min reposo)</option>
+                  <option value="Acostado / Decúbito">Acostado / Decúbito</option>
+                  <option value="De pie">De pie</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bloque Glicemia Capilar -->
+          <div id="pc-box-glicemia" class="p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-black text-indigo-900 uppercase text-[11px]">🩸 Toma de Glicemia Capilar</span>
+              <span id="pc-live-glic-badge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-600 border border-slate-200">Sin medir</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Glicemia (mg/dL)</label>
+                <input id="pc-glicemia" type="number" step="0.1" min="20" max="800" placeholder="95" oninput="updateLivePharmaCareClassification()" class="w-full px-2.5 py-2 rounded-xl border border-indigo-300 bg-white font-mono font-black text-sm text-center" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Condición de la Toma</label>
+                <select id="pc-condicion-ayuno" onchange="updateLivePharmaCareClassification()" class="w-full px-2 py-2 rounded-xl border border-indigo-300 bg-white font-bold">
+                  <option value="En Ayunas (8h+)">En Ayunas (8h+)</option>
+                  <option value="Postprandial (2h tras comida)">Postprandial (2h)</option>
+                  <option value="Casual / Aleatoria">Casual / Aleatoria</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Peso (kg - Opcional)</label>
+                <input id="pc-peso" type="number" step="0.1" placeholder="70.5" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Saturación SpO2 (%)</label>
+                <input id="pc-spo2" type="number" min="50" max="100" placeholder="98" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Observaciones, Farmacéutico y Método de Pago -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Método de Pago del Servicio</label>
+            <select id="pc-payment-method" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold bg-white">
+              <option value="EFECTIVO">💵 Efectivo (Pagado en Caja)</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+              <option value="CORTESIA">🎁 Cortesía Paciente Crónico (RD$ 0)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Realizado / Atendido por</label>
+            <input id="pc-attended-by" type="text" placeholder="Farmacéutico de Turno" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-semibold" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Observaciones / Recomendación</label>
+            <input id="pc-notes" type="text" placeholder="Ej. Control en 7 días, mantener adherencia" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <button type="button" onclick="closePharmaCareModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer">
+            Cancelar
+          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" onclick="submitPharmaCareRecord(event, true)" class="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold shadow transition flex items-center gap-1.5 cursor-pointer">
+              <span>🛒</span> <span>Guardar y Cargar al Carrito POS</span>
+            </button>
+            <button type="submit" class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black shadow-lg transition flex items-center gap-1.5 cursor-pointer">
+              <span>🖨️</span> <span>Guardar, Cobrar e Imprimir para el Paciente</span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: CONFIGURAR PRECIOS DE TOMA DE PRESIÓN Y GLICEMIA
+       ===================================================================== -->
+  <div id="modal-pharma-care-tariffs" class="fixed inset-0 z-[130] bg-slate-950/75 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+      <div class="p-5 bg-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-2xl">💲</span>
+          <div>
+            <h3 class="font-black text-base">Configurar Precios de Atención Farmacéutica</h3>
+            <p class="text-[11px] text-slate-300">Servicios secundarios de Toma de Presión Arterial y Glicemia</p>
+          </div>
+        </div>
+        <button type="button" onclick="closePharmaCareTariffsModal()" class="text-white/70 hover:text-white font-bold text-lg cursor-pointer">✕</button>
+      </div>
+      <form onsubmit="submitPharmaCareTariffsForm(event)" class="p-5 space-y-3 text-xs">
+        <div id="pharma-care-tariffs-form-list" class="space-y-3">
+          <!-- Renderizado dinámicamente -->
+        </div>
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" onclick="closePharmaCareTariffsModal()" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold cursor-pointer">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black shadow cursor-pointer">💾 Guardar Precios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: REPORTE IMPRIMIBLE DE TOMA DE PRESIÓN / GLICEMIA PARA EL PACIENTE
+       ===================================================================== -->
+  <div id="modal-pharma-care-print" class="fixed inset-0 z-[135] bg-slate-950/80 backdrop-blur-xs hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 space-y-4 my-8">
+      <div id="printable-pharma-care-area" class="p-5 rounded-2xl border-2 border-dashed border-rose-400 bg-white text-xs space-y-3 text-slate-900">
+        <!-- Contenido imprimible renderizado por JS -->
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 pt-2">
+        <button type="button" onclick="printCurrentPharmaCareReport()" class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs flex items-center gap-1.5 shadow-lg cursor-pointer">
+          <span>🖨️</span> <span>Imprimir Comprobante para el Paciente</span>
+        </button>
+        <button type="button" onclick="closePharmaCarePrintModal()" class="px-4 py-2.5 rounded-xl bg-slate-900 text-white font-bold text-xs cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

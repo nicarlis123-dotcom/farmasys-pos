@@ -1,4 +1,51 @@
 
+// =============================================================================
+// CONTROL DE MENÚS DESPLEGABLES AGRUPADOS (HOVER + CLICK)
+// =============================================================================
+function toggleSysDropdown(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const wasOpen = container.classList.contains('open');
+  closeAllSysDropdowns();
+  if (!wasOpen) {
+    container.classList.add('open');
+  }
+}
+
+function closeAllSysDropdowns() {
+  document.querySelectorAll('.sys-dropdown-container').forEach(el => el.classList.remove('open'));
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.sys-dropdown-container')) {
+    closeAllSysDropdowns();
+  }
+});
+
+window.toggleSysDropdown = toggleSysDropdown;
+window.closeAllSysDropdowns = closeAllSysDropdowns;
+
+function togglePosStatsCollapsible() {
+  const body = document.getElementById('pos-stats-collapsible-body');
+  const btnText = document.getElementById('btn-toggle-pos-stats-text');
+  const arrow = document.getElementById('arrow-toggle-pos-stats');
+  if (!body) return;
+  const isHidden = body.classList.contains('hidden');
+  if (isHidden) {
+    body.classList.remove('hidden');
+    if (btnText) btnText.textContent = 'Ocultar Métricas y Alertas';
+    if (arrow) arrow.textContent = '▴';
+  } else {
+    body.classList.add('hidden');
+    if (btnText) btnText.textContent = 'Mostrar Métricas y Alertas';
+    if (arrow) arrow.textContent = '▾';
+  }
+}
+window.togglePosStatsCollapsible = togglePosStatsCollapsible;
+
+
+function escapeQuote(str) { return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
 /* =========================================================================
    CONTROLADOR DE PANTALLA DE CARGA FARMASYS (SEGURO Y SIN BLOQUEOS)
    ========================================================================= */
@@ -53,6 +100,7 @@ window.addEventListener('load', () => {
  */
 
 const sysState = {
+  promotionalKits: [],
   pharmacies: [],
   authenticatedPharmacy: null,
   sessionToken: null,
@@ -139,6 +187,11 @@ function updatePosActiveCartPills() {
 }
 
 
+
+function formatMoneyRD(val) {
+  const num = Number(val || 0);
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 function formatRD(amount) {
   const num = Number(amount || 0);
@@ -360,6 +413,7 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
   sysState.authenticatedPharmacy = pharmacy;
   sysState.sessionToken = token;
   sysState.posCart = [];
+    clearSelectedPosPatient();
   sessionStorage.setItem('davalsi_sys_auth', JSON.stringify({ pharmacy, token }));
 
   const gate = document.getElementById('auth-gate-screen');
@@ -376,11 +430,8 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
 
   applyRolePermissions(pharmacy.rol_actual || 'ADMINISTRADOR');
   applyOperationalServiceFlags(pharmacy);
-  if (pharmacy.rol_actual === 'VENDEDOR') {
-    switchSysTab('pos');
-  } else {
-    refreshPharmacyWorkspace();
-  }
+  switchSysTab('pos');
+  refreshPharmacyWorkspace();
 }
 
 function applyRolePermissions(role) {
@@ -402,6 +453,7 @@ function logoutPharmacy() {
   sysState.authenticatedPharmacy = null;
   sysState.sessionToken = null;
   sysState.posCart = [];
+    clearSelectedPosPatient();
   sessionStorage.removeItem('davalsi_sys_auth');
   document.getElementById('login-password-input').value = '';
 
@@ -557,10 +609,12 @@ function switchSysTab(tab, pushToHistory = true) {
 
   updateSysWindowHeaders(tab);
 
-  const allTabs = ['pos', 'solicitudes', 'recetas', 'inventario', 'vencimientos', 'deudores', 'reportes', 'config', 'whatsapp'];
+  closeAllSysDropdowns();
+  const allTabs = ['pos', 'solicitudes', 'recetas', 'inventario', 'vencimientos', 'deudores', 'reportes', 'config', 'whatsapp', 'cronicos', 'planes', 'kits'];
   allTabs.forEach((t) => {
     const view = document.getElementById(`view-${t}`);
     const btn = document.getElementById(`sys-tab-${t}`);
+    const mobBtn = document.getElementById(`mob-tab-${t}`);
     if (view) {
       if (t === tab) {
         view.classList.remove('hidden');
@@ -572,14 +626,59 @@ function switchSysTab(tab, pushToHistory = true) {
     }
     if (btn) {
       if (t === tab) {
-        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-teal-600 text-white shadow-xs';
+        btn.classList.add('bg-teal-600/30', 'text-teal-300');
+        btn.classList.remove('text-slate-200');
       } else {
-        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white';
+        btn.classList.remove('bg-teal-600/30', 'text-teal-300');
+        btn.classList.add('text-slate-200');
+      }
+    }
+    if (mobBtn) {
+      if (t === tab) {
+        mobBtn.classList.add('bg-teal-600/30', 'text-teal-300');
+        mobBtn.classList.remove('text-slate-200');
+      } else {
+        mobBtn.classList.remove('bg-teal-600/30', 'text-teal-300');
+        mobBtn.classList.add('text-slate-200');
       }
     }
   });
 
-  if (tab === 'reportes') {
+  // Resaltado visual en la barra de navegación superior (Listo para Venta y WhatsApp en Primera Instancia)
+  const posBtn = document.getElementById('sys-nav-pos-btn');
+  const pedidosBtn = document.getElementById('sys-nav-pedidos-btn');
+  const masterGrpBtn = document.getElementById('sys-grp-btn-master');
+
+  if (posBtn) {
+    if (tab === 'pos') {
+      posBtn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer';
+    } else {
+      posBtn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer';
+    }
+  }
+
+  if (pedidosBtn) {
+    if (tab === 'solicitudes') {
+      pedidosBtn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer';
+    } else {
+      pedidosBtn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer';
+    }
+  }
+
+  if (masterGrpBtn) {
+    const isMasterTab = !['pos', 'solicitudes'].includes(tab);
+    if (isMasterTab) {
+      masterGrpBtn.className = 'px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer border border-teal-500';
+    } else {
+      masterGrpBtn.className = 'px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60';
+    }
+  }
+
+  if (tab === 'cronicos') {
+    loadChronicPatients();
+  } else if (tab === 'planes') {
+    loadFrequentPlans();
+  } else if (tab === 'reportes') {
     initSalesReportsView();
   } else if (tab === 'pos') {
     setTimeout(() => {
@@ -652,6 +751,7 @@ async function refreshPharmacyWorkspace() {
     loadSysDebtors(fid),
     loadSysWhatsAppLogs(fid),
     loadAndRenderComparativeStats(fid),
+    loadPromotionalKits(fid),
   ]);
 }
 
@@ -705,6 +805,21 @@ async function loadSysDashboardAndReports(fid) {
   } else bDeb.classList.add('hidden');
 
   // KPIs de Vencimiento
+  
+  const bannerAlerts = document.getElementById('pos-banner-alerts-summary');
+  if (bannerAlerts && m) {
+    const totalAlerts = (m.alertas_stock_bajo_count || 0) + (m.vencimientos?.total_alertas_vencimiento || 0) + (m.deudores_pendientes_count || 0) + (m.pedidos_web_pendientes || 0);
+    bannerAlerts.textContent = `${totalAlerts} alertas pendientes`;
+    const masterBadge = document.getElementById('badge-master-menu');
+    if (masterBadge) {
+      if (totalAlerts > 0) {
+        masterBadge.textContent = totalAlerts;
+        masterBadge.classList.remove('hidden');
+      } else {
+        masterBadge.classList.add('hidden');
+      }
+    }
+  }
   document.getElementById('exp-kpi-vencidos').textContent = `${m.vencimientos.vencidos_count} lote(s)`;
   document.getElementById('exp-kpi-criticos').textContent = `${m.vencimientos.criticos_30d_count} lote(s)`;
   document.getElementById('exp-kpi-preventivos').textContent = `${m.vencimientos.preventivos_90d_count} lote(s)`;
@@ -974,9 +1089,18 @@ function handlePosSearchKeydown(event) {
   }
 }
 
-function addPosItemDirect(productId, presentation) {
+function addPosItemDirect(productId, presentation, force = false) {
   const p = sysState.products.find((x) => x.id === productId);
   if (!p) return;
+
+  // Verificación de Duplicidad Farmacológica / Misma Familia antes de agregar
+  if (!force) {
+    const dup = checkCartDuplicity(p);
+    if (dup) {
+      showDuplicityWarningModal(dup.itemExistente, p, presentation || 'UNIDAD');
+      return;
+    }
+  }
   if (p.vencimiento && p.vencimiento.vencido) {
     showToast(
       `⛔ BLOQUEO SANITARIO: El producto está VENCIDO (${p.vencimiento.fecha_vencimiento}). No se puede vender.`,
@@ -1174,6 +1298,76 @@ function renderPosCart() {
   let totalRD = 0;
   tbody.innerHTML = sysState.posCart
     .map((item, idx) => {
+      if (item.is_pharma_service) {
+        const sub = Number(item.unit_price || 0) * item.cantidad;
+        totalU += item.cantidad;
+        totalRD += sub;
+        return `
+          <tr class="bg-rose-50/50 border-b border-rose-200/70">
+            <td class="py-2.5 px-3">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-black px-1.5 py-0.2 rounded bg-rose-600 text-white shadow-2xs">🩺 SERVICIO SECUNDARIO</span>
+                <p class="font-extrabold text-slate-900">${item.nombre_comercial}</p>
+              </div>
+              <p class="text-[10px] text-rose-900 font-bold mt-0.5">${item.detalle_clinico || 'Atención Farmacéutica / Paciente Crónico'}</p>
+            </td>
+            <td class="py-2.5 px-2">
+              <span class="px-2 py-0.5 rounded font-black text-[10px] bg-rose-100 text-rose-900 border border-rose-300">SERVICIO</span>
+            </td>
+            <td class="py-2.5 px-2 text-center font-mono font-bold">1</td>
+            <td class="py-2.5 px-2 text-center font-mono text-slate-400">Servicio</td>
+            <td class="py-2.5 px-3 text-right font-extrabold text-slate-900">${formatRD(sub)}</td>
+            <td class="py-2.5 px-2 text-center">
+              <button type="button" onclick="changePosItemQty(${idx}, -999)" class="text-rose-500 hover:text-rose-700 font-extrabold cursor-pointer p-1">✕</button>
+            </td>
+          </tr>
+        `;
+      }
+      if (item.is_kit || item.es_kit) {
+        const sub = (item.unit_price || item.precio_oferta || item.product.precio_base) * item.cantidad;
+        const totalComps = item.items ? item.items.length * item.cantidad : item.cantidad;
+        totalU += totalComps;
+        totalRD += sub;
+        const compsText = (item.items || []).map(it => `${it.cantidad}x ${it.presentacion} ${it.nombre_comercial}`).join(' + ');
+
+        return `
+          <tr class="bg-amber-50/40 border-b border-amber-200/60">
+            <td class="py-2.5 px-3">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-black px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 shadow-2xs">⚡ KIT OFERTA</span>
+                <p class="font-extrabold text-slate-900">${item.nombre_comercial}</p>
+              </div>
+              <p class="text-[10px] text-amber-900 font-bold mt-0.5">
+                📦 Consta de: ${compsText}
+              </p>
+              <p class="text-[10px] font-mono text-slate-400">Precio regular: RD$ ${(item.precio_regular_total * item.cantidad).toFixed(2)} • Ahorro combo: RD$ ${(item.ahorro_monto * item.cantidad).toFixed(2)}</p>
+            </td>
+            <td class="py-2.5 px-2">
+              <span class="px-2 py-0.5 rounded font-black text-[10px] bg-amber-100 text-amber-900 border border-amber-300">PAQUETE SEMANAL</span>
+            </td>
+            <td class="py-2.5 px-2 text-center">
+              <div class="inline-flex items-center gap-0.5">
+                <button type="button" onclick="changePosItemQty(${idx}, -1)" class="w-6 h-6 rounded bg-white border border-slate-300 hover:bg-slate-100 font-extrabold text-xs cursor-pointer">-</button>
+                <input
+                  type="number"
+                  min="1"
+                  max="999"
+                  value="${item.cantidad}"
+                  onchange="setPosItemDirectQty(${idx}, this.value)"
+                  class="w-10 text-center font-extrabold text-xs border border-slate-300 rounded bg-white py-0.5"
+                />
+                <button type="button" onclick="changePosItemQty(${idx}, 1)" class="w-6 h-6 rounded bg-white border border-slate-300 hover:bg-slate-100 font-extrabold text-xs cursor-pointer">+</button>
+              </div>
+            </td>
+            <td class="py-2.5 px-3 text-right">
+              <span class="font-extrabold text-slate-900">${formatRD(sub)}</span>
+            </td>
+            <td class="py-2.5 px-2 text-center">
+              <button type="button" onclick="removePosItem(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold cursor-pointer p-1">✕</button>
+            </td>
+          </tr>
+        `;
+      }
       const p = sysState.products.find((pr) => pr.id === item.product.id) || item.product;
       const isMerch = p.es_mercancia || p.unidades_por_blister <= 1;
       const canBlister = !isMerch && p.unidades_por_blister > 1;
@@ -1244,7 +1438,8 @@ function renderPosCart() {
           <td class="py-2.5 px-2 text-center font-mono font-bold text-teal-700">-${minU}u</td>
           <td class="py-2.5 px-3 text-right font-extrabold">${formatRD(sub)}</td>
           <td class="py-2.5 px-2 text-center">
-            <button onclick="changePosItemQty(${idx}, -999)" title="Quitar fila" class="text-rose-600 hover:text-rose-800 font-bold px-1.5 py-0.5 rounded">✕</button>
+            <button type="button" onclick="openSubstituteModal(${p.id}, '${escapeQuote(p.nombre_comercial)}', '${escapeQuote(p.principio_activo || '')}')" class="text-indigo-600 hover:text-indigo-800 font-extrabold px-1.5 py-0.5 rounded text-[11px] block mx-auto mb-1" title="Ver sustitutos y bioequivalentes con stock">💡 Sustitutos</button>
+            <button onclick="changePosItemQty(${idx}, -999)"  title="Quitar fila" class="text-rose-600 hover:text-rose-800 font-bold px-1.5 py-0.5 rounded">✕</button>
           </td>
         </tr>
       `;
@@ -1252,7 +1447,36 @@ function renderPosCart() {
     .join('');
 
   document.getElementById('pos-total-min-units').textContent = `${totalU} unid. mínimas`;
-  document.getElementById('pos-total-amount').textContent = formatRD(totalRD);
+  let subtotalRD = totalRD;
+  let discountRD = 0;
+  let pctDiscount = 0;
+
+  if (sysState.posSelectedPatient && sysState.posSelectedPatient.plan_descuento_porcentaje > 0 && sysState.posApplyBonus) {
+    pctDiscount = sysState.posSelectedPatient.plan_descuento_porcentaje;
+    discountRD = (subtotalRD * pctDiscount) / 100;
+  }
+
+  let finalToChargeRD = Math.max(0, subtotalRD - discountRD);
+
+  const elSubtotal = document.getElementById('pos-subtotal-val');
+  if (elSubtotal) elSubtotal.textContent = formatRD(subtotalRD);
+
+  const rowBonus = document.getElementById('pos-row-bonus-discount');
+  const elBonusAmount = document.getElementById('pos-discount-amount-summary');
+  const elBonusPct = document.getElementById('pos-discount-pct-summary');
+  const elBonusDirect = document.getElementById('pos-bonus-discount-amount');
+
+  if (discountRD > 0) {
+    if (rowBonus) rowBonus.classList.remove('hidden');
+    if (elBonusAmount) elBonusAmount.textContent = '-' + formatRD(discountRD);
+    if (elBonusPct) elBonusPct.textContent = pctDiscount + '%';
+    if (elBonusDirect) elBonusDirect.textContent = '-' + formatRD(discountRD);
+  } else {
+    if (rowBonus) rowBonus.classList.add('hidden');
+    if (elBonusDirect) elBonusDirect.textContent = '-RD$ 0.00';
+  }
+
+  document.getElementById('pos-total-amount').textContent = formatRD(finalToChargeRD);
   updatePosActiveCartPills();
 }
 
@@ -1288,11 +1512,32 @@ async function submitPosSale() {
   const refPago = paymentRefInput ? paymentRefInput.value.trim() : '';
   const cashTendered = cashTenderedInput ? parseFloat(cashTenderedInput.value || 0) : 0;
 
-  const itemsPayload = sysState.posCart.map((i) => ({
-    producto_id: Number(i.product ? i.product.id : i.producto_id),
-    presentacion: i.presentacion,
-    cantidad: Number(i.cantidad || 1),
-  }));
+  const itemsPayload = sysState.posCart.map((i) => {
+    if (i.is_pharma_service) {
+      return {
+        es_servicio_farmaceutico: true,
+        presentacion: 'SERVICIO',
+        nombre_comercial: i.nombre_comercial,
+        cantidad: Number(i.cantidad || 1),
+        precio_servicio: Number(i.unit_price || 0),
+        detalle_clinico: i.detalle_clinico || ''
+      };
+    }
+    if (i.is_kit || i.es_kit) {
+      return {
+        es_kit: true,
+        kit_id: i.kit_id || i.codigo_kit,
+        cantidad: Number(i.cantidad || 1),
+        presentacion: 'KIT',
+        precio_vendedor: Number(i.unit_price || 0)
+      };
+    }
+    return {
+      producto_id: Number(i.product ? i.product.id : i.producto_id),
+      presentacion: i.presentacion,
+      cantidad: Number(i.cantidad || 1),
+    };
+  });
 
   try {
     const res = await fetch('/api/sales', {
@@ -1308,6 +1553,8 @@ async function submitPosSale() {
         referencia_pago: refPago,
         monto_pagado_efectivo: cashTendered,
         atendido_por: f.nombre_usuario_actual || f.usuario_actual || f.usuario_admin || 'Cajero Mostrador',
+        descuento_porcentaje: (sysState.posSelectedPatient && sysState.posApplyBonus) ? (sysState.posSelectedPatient.plan_descuento_porcentaje || 0) : 0,
+        plan_paciente_id: (sysState.posSelectedPatient && sysState.posApplyBonus) ? (sysState.posSelectedPatient.plan_id || null) : null,
         items: itemsPayload,
       }),
     });
@@ -1329,6 +1576,7 @@ async function submitPosSale() {
 
     // Limpiar carrito y campos de cobro
     sysState.posCart = [];
+    clearSelectedPosPatient();
     renderPosCart();
     if (cashTenderedInput) cashTenderedInput.value = '';
     const changeValEl = document.getElementById('pos-cash-change-val');
@@ -1962,7 +2210,7 @@ function switchInventorySubView(mode) {
 
 function setInventoryFilterPill(pill) {
   sysState.inventoryFilterPill = pill;
-  const pills = ['TODOS', 'MERCANCIA', 'MEDICAMENTOS', 'POR_VENCER', 'VENCIDOS', 'STOCK_BAJO', 'SIN_SALIDA'];
+  const pills = ['TODOS', 'MERCANCIA', 'MEDICAMENTOS', 'POR_VENCER', 'VENCIDOS', 'STOCK_BAJO', 'SIN_SALIDA', 'CRONICOS'];
   pills.forEach((p) => {
     const el = document.getElementById(`inv-pill-${p}`);
     if (el) {
@@ -1983,6 +2231,8 @@ function setInventoryFilterPill(pill) {
             ? 'bg-orange-50 text-orange-800 border border-orange-300'
             : p === 'SIN_SALIDA'
             ? 'bg-amber-50 text-amber-900 border border-amber-400 font-extrabold'
+            : p === 'CRONICOS'
+            ? 'bg-purple-50 text-purple-900 border border-purple-400 font-extrabold'
             : 'bg-white text-slate-700 border border-slate-300';
         el.className = `px-4 py-2 rounded-2xl text-xs font-bold transition hover:opacity-90 cursor-pointer ${borderCls}`;
       }
@@ -2035,7 +2285,11 @@ function getFilteredInventoryProducts() {
   } else if (sysState.inventoryFilterPill === 'STOCK_BAJO') {
     list = list.filter((p) => p.inventario.alerta_stock_bajo);
   } else if (sysState.inventoryFilterPill === 'SIN_SALIDA') {
-    list = list.filter((p) => p.rotacion && p.rotacion.alerta_poca_salida);
+    // Alerta de poca salida REAL: Excluye medicamentos de uso crónico mensual
+    list = list.filter((p) => p.rotacion && p.rotacion.alerta_poca_salida && !p.rotacion.es_uso_cronico);
+  } else if (sysState.inventoryFilterPill === 'CRONICOS') {
+    // Medicamentos de uso crónico con salida mensual programada
+    list = list.filter((p) => p.rotacion && p.rotacion.es_uso_cronico);
   }
 
   const sortSelect = document.getElementById('inv-sort-filter');
@@ -2074,7 +2328,8 @@ function renderInventoryTable() {
   ).length;
   const vencidosCnt = prods.filter((p) => p.vencimiento.estado_vencimiento === 'VENCIDO').length;
   const stockBajoCnt = prods.filter((p) => p.inventario.alerta_stock_bajo).length;
-  const sinSalidaCnt = prods.filter((p) => p.rotacion && p.rotacion.alerta_poca_salida).length;
+  const sinSalidaCnt = prods.filter((p) => p.rotacion && p.rotacion.alerta_poca_salida && !p.rotacion.es_uso_cronico).length;
+  const cronicosCnt = prods.filter((p) => p.rotacion && p.rotacion.es_uso_cronico).length;
 
   let globalUnits = 0;
   let globalBoxes = 0;
@@ -2130,6 +2385,8 @@ function renderInventoryTable() {
   if (elBajo) elBajo.textContent = stockBajoCnt;
   const elSinSalida = document.getElementById('cnt-inv-sin-salida');
   if (elSinSalida) elSinSalida.textContent = sinSalidaCnt;
+  const elCronicos = document.getElementById('cnt-inv-cronicos');
+  if (elCronicos) elCronicos.textContent = cronicosCnt;
 
   const list = getFilteredInventoryProducts();
   const showingCounter = document.getElementById('inv-showing-counter');
@@ -2175,6 +2432,13 @@ function renderInventoryTable() {
               <span class="px-2 py-0.5 rounded text-[9px] font-extrabold ${
                 isMerch ? 'bg-teal-100 text-teal-800' : 'bg-sky-100 text-sky-800'
               }">${isMerch ? '🧴 Mercancía' : '💊 Medicamento'}</span>
+              ${
+                p.rotacion && p.rotacion.es_uso_cronico
+                  ? `<span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-900 border border-purple-300" title="${p.rotacion.descripcion || 'Salida mensual continua por pacientes crónicos. No es producto estancado.'}">🩺 Uso Crónico (${p.rotacion.unidades_vendidas_mes || 0}u/mes)</span>`
+                  : (p.rotacion && p.rotacion.alerta_poca_salida
+                      ? `<span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300" title="${p.rotacion.descripcion || 'Baja rotación real'}">📉 Sin Salida Real (${p.rotacion.unidades_vendidas_mes || 0}u/mes)</span>`
+                      : '')
+              }
               <p class="font-extrabold text-slate-900">${p.nombre_comercial}</p>
             </div>
             <p class="text-[11px] text-teal-700 font-medium">${p.principio_activo}${
@@ -5464,6 +5728,11 @@ async function loadAndRenderComparativeStats(fid) {
     // -------------------------------------------------------------
 
     // Diaria (Hoy vs. Ayer)
+    
+    const bannerSummary = document.getElementById('pos-banner-today-summary');
+    if (bannerSummary && diaria && diaria.hoy) {
+      bannerSummary.textContent = `Hoy: RD$ ${formatMoneyRD(diaria.hoy.total_rd)} (${diaria.hoy.ventas_count} ventas)`;
+    }
     const posDailyToday = document.getElementById('pos-comp-daily-today');
     if (posDailyToday) posDailyToday.textContent = `RD$ ${formatMoneyRD(diaria.hoy.total_rd)}`;
     const posDailyTodayCnt = document.getElementById('pos-comp-daily-today-cnt');
@@ -6485,3 +6754,2168 @@ function selectVisualScanPresentation(pres) {
   }
 }
 
+
+// =====================================================================
+// MÓDULOS NUEVOS: CRÓNICOS, PLANES, SUSTITUCIÓN Y DUPLICIDAD
+// =====================================================================
+
+// Estado global para módulos nuevos
+sysState.chronicPatients = [];
+sysState.chronicFilter = 'TODOS';
+sysState.frequentPlans = [];
+sysState.posSelectedPatient = null;
+sysState.posApplyBonus = true;
+
+// 1. GESTIÓN DE PACIENTES CRÓNICOS & ALERTA 10 DÍAS
+async function loadChronicPatients(statusFilter) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+  const filter = statusFilter || sysState.chronicFilter || 'TODOS';
+  sysState.chronicFilter = filter;
+
+  try {
+    let url = `/api/chronic-patients?farmacia_id=${farmaciaId}`;
+    if (filter && filter !== 'TODOS') {
+      url += `&filter_status=${encodeURIComponent(filter)}`;
+    }
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al cargar pacientes crónicos');
+
+    sysState.chronicPatients = Array.isArray(data.patients) ? data.patients : (data.patients?.items || []);
+    renderChronicPatientsTable();
+    updateChronicKPIs();
+    if (typeof loadPharmaceuticalCareData === 'function') {
+      loadPharmaceuticalCareData(farmaciaId);
+    }
+  } catch (err) {
+    console.error('Error cargando crónicos:', err);
+    showToast('No se pudieron cargar los pacientes crónicos: ' + err.message, 'error');
+  }
+}
+
+function updateChronicKPIs() {
+  const pts = Array.isArray(sysState.chronicPatients) ? sysState.chronicPatients : (sysState.chronicPatients?.items || []);
+  const total = pts.length;
+  const alertas = pts.filter(p => p.estado_alerta === 'ALERTA_10_DIAS').length;
+  const vencidos = pts.filter(p => p.estado_alerta === 'VENCIDO').length;
+  const vigentes = pts.filter(p => p.estado_alerta === 'VIGENTE').length;
+
+  const elTotal = document.getElementById('chronic-kpi-total');
+  const elAlerta = document.getElementById('chronic-kpi-alerta');
+  const elVenc = document.getElementById('chronic-kpi-vencidos');
+  const elVig = document.getElementById('chronic-kpi-vigentes');
+
+  if (elTotal) elTotal.textContent = total;
+  if (elAlerta) elAlerta.textContent = alertas;
+  if (elVenc) elVenc.textContent = vencidos;
+  if (elVig) elVig.textContent = vigentes;
+
+  // Actualizar badges en navbar
+  const badgeAlerts = document.getElementById('badge-sys-chronic-alerts');
+  const badgeGrp = document.getElementById('badge-grp-pacientes');
+  const badgeMob = document.getElementById('badge-mobile-chronic');
+
+  if (badgeAlerts) {
+    if (alertas > 0) {
+      badgeAlerts.textContent = alertas;
+      badgeAlerts.classList.remove('hidden');
+    } else {
+      badgeAlerts.classList.add('hidden');
+    }
+  }
+  if (badgeGrp) {
+    if (alertas > 0) {
+      badgeGrp.textContent = alertas;
+      badgeGrp.classList.remove('hidden');
+    } else {
+      badgeGrp.classList.add('hidden');
+    }
+  }
+  if (badgeMob) {
+    if (alertas > 0) {
+      badgeMob.textContent = alertas;
+      badgeMob.classList.remove('hidden');
+    } else {
+      badgeMob.classList.add('hidden');
+    }
+  }
+}
+
+function filterChronicByStatus(status) {
+  sysState.chronicFilter = status;
+  const pills = ['TODOS', 'ALERTA_10_DIAS', 'VENCIDO', 'VIGENTE'];
+  pills.forEach(p => {
+    const el = document.getElementById(`chronic-filter-${p}`);
+    if (el) {
+      if (p === status) {
+        el.className = 'px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-900 text-white shadow-xs';
+      } else {
+        el.className = 'px-3 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200';
+      }
+    }
+  });
+  renderChronicPatientsTable();
+}
+
+function handleChronicSearch(query) {
+  const q = (query || '').toLowerCase().trim();
+  renderChronicPatientsTable(q);
+}
+
+function renderChronicPatientsTable(searchTerm = '') {
+  const tbody = document.getElementById('chronic-table-tbody');
+  if (!tbody) return;
+
+  let list = Array.isArray(sysState.chronicPatients) ? sysState.chronicPatients : (sysState.chronicPatients?.items || []);
+
+  if (sysState.chronicFilter && sysState.chronicFilter !== 'TODOS') {
+    list = list.filter(p => p.estado_alerta === sysState.chronicFilter);
+  }
+
+  if (searchTerm) {
+    list = list.filter(p => 
+      (p.nombre_completo || '').toLowerCase().includes(searchTerm) ||
+      (p.cedula_identificacion || '').toLowerCase().includes(searchTerm) ||
+      (p.telefono || '').toLowerCase().includes(searchTerm) ||
+      (p.medicamento_cronico || '').toLowerCase().includes(searchTerm) ||
+      (p.diagnostico || '').toLowerCase().includes(searchTerm)
+    );
+  }
+
+  if (!list.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-8 text-center text-slate-400">
+          No hay pacientes crónicos que coincidan con los filtros actuales.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = list.map(p => {
+    let alertBadge = '';
+    let rowBg = '';
+    if (p.estado_alerta === 'ALERTA_10_DIAS') {
+      alertBadge = `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
+          <span>⚠️</span> <span>Quedan ${p.dias_restantes} días</span>
+        </span>
+      `;
+      rowBg = 'bg-amber-50/20';
+    } else if (p.estado_alerta === 'VENCIDO') {
+      alertBadge = `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-rose-100 text-rose-900 border border-rose-300">
+          <span>🚨</span> <span>Agotado hace ${Math.abs(p.dias_restantes)}d</span>
+        </span>
+      `;
+      rowBg = 'bg-rose-50/20';
+    } else {
+      alertBadge = `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+          <span>✅</span> <span>Vigente (${p.dias_restantes}d)</span>
+        </span>
+      `;
+    }
+
+    return `
+      <tr class="hover:bg-slate-50 transition ${rowBg}">
+        <td class="py-3 px-3">
+          <p class="font-extrabold text-slate-900">${p.nombre_completo}</p>
+          <div class="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+            <span>🪪 ${p.cedula_identificacion || 'Sin cédula'}</span>
+            <span>•</span>
+            <span>📞 ${p.telefono}</span>
+          </div>
+          ${p.plan_nombre ? `<span class="inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-bold bg-teal-100 text-teal-800">Plan: ${p.plan_nombre} (${p.plan_descuento}%)</span>` : ''}
+        </td>
+        <td class="py-3 px-3">
+          <span class="px-2 py-0.5 rounded-lg font-bold bg-slate-100 text-slate-700 text-[11px]">
+            ${p.diagnostico}
+          </span>
+        </td>
+        <td class="py-3 px-3">
+          <p class="font-extrabold text-teal-900">${p.medicamento_cronico}</p>
+          <p class="text-[10px] text-slate-500 font-medium">${p.dosis_diaria || '1 dosis diaria'}</p>
+        </td>
+        <td class="py-3 px-3 text-center">
+          <span class="font-mono font-bold text-slate-800">${p.dias_suministro} días</span>
+          <p class="text-[10px] text-slate-400">Próx: <b>${p.fecha_proximo_vencimiento_tratamiento || '-'}</b></p>
+        </td>
+        <td class="py-3 px-3 text-center">
+          ${alertBadge}
+        </td>
+        <td class="py-3 px-3 text-right">
+          <div class="inline-flex items-center gap-1.5 flex-wrap justify-end">
+            <!-- Botón WhatsApp Directo con Mensaje Dominicano Preformateado -->
+            <a 
+              href="${p.wa_link || '#'}" 
+              target="_blank" 
+              class="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] shadow-2xs flex items-center gap-1 transition"
+              title="Contactar al paciente por WhatsApp para coordinar reposición de su medicamento"
+            >
+              <span>💬</span> <span>WhatsApp</span>
+            </a>
+            <!-- Botón Llamada -->
+            <a 
+              href="${p.call_link || `tel:${p.telefono}`}" 
+              class="px-2 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] border border-slate-300"
+              title="Llamar al paciente"
+            >
+              📞
+            </a>
+            <!-- Botón Toma de Presión / Glicemia (Atención Farmacéutica) -->
+            <button
+              type="button"
+              onclick="openPharmaCareModalForPatient(${p.id})"
+              class="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-[11px] transition shadow-2xs flex items-center gap-1 cursor-pointer"
+              title="Registrar Toma de Presión Arterial o Glicemia para este paciente crónico e imprimir comprobante"
+            >
+              <span>🩺</span> <span>Presión / Glicemia</span>
+            </button>
+            <!-- Botón Renovar Despacho 30 Días (1 Clic) -->
+            <button 
+              type="button" 
+              onclick="renewChronicPatient(${p.id})" 
+              class="px-2.5 py-1 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 font-extrabold text-[11px] transition shadow-2xs flex items-center gap-1"
+              title="Renovar tratamiento por 30 días adicionales tras despacho en mostrador"
+            >
+              <span>🔄</span> <span>Renovar 30d</span>
+            </button>
+            <!-- Editar y Eliminar -->
+            <button 
+              type="button" 
+              onclick="editChronicPatient(${p.id})" 
+              class="p-1 rounded-lg hover:bg-slate-200 text-slate-600 font-bold text-xs"
+              title="Editar"
+            >
+              ✏️
+            </button>
+            <button 
+              type="button" 
+              onclick="deleteChronicPatient(${p.id})" 
+              class="p-1 rounded-lg hover:bg-rose-100 text-rose-600 font-bold text-xs"
+              title="Dar de baja"
+            >
+              🗑️
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function renewChronicPatient(patientId) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  if (!confirm('¿Confirma que se le despachó la medicación de este mes y desea renovar el tratamiento por 30 días adicionales?')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/chronic-patients/renew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: farmaciaId,
+        paciente_id: patientId,
+        dias_agregados: 30
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al renovar');
+
+    showToast('✅ Despacho renovado exitosamente por 30 días. Próxima alerta programada.', 'success');
+    loadChronicPatients();
+  } catch (err) {
+    showToast('Error al renovar: ' + err.message, 'error');
+  }
+}
+
+async function deleteChronicPatient(patientId) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  if (!confirm('¿Seguro que desea eliminar el seguimiento crónico de este paciente?')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/chronic-patients/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: farmaciaId, paciente_id: patientId })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al eliminar');
+
+    showToast('Paciente removido del seguimiento crónico.', 'info');
+    loadChronicPatients();
+  } catch (err) {
+    showToast('Error al eliminar: ' + err.message, 'error');
+  }
+}
+
+function openNewChronicPatientModal() {
+  document.getElementById('modal-chronic-title').textContent = 'Registrar Paciente Crónico';
+  document.getElementById('chronic-form-id').value = '';
+  document.getElementById('chronic-form-nombre').value = '';
+  document.getElementById('chronic-form-cedula').value = '';
+  document.getElementById('chronic-form-telefono').value = '';
+  document.getElementById('chronic-form-diagnostico').value = '';
+  document.getElementById('chronic-form-medicamento').value = '';
+  document.getElementById('chronic-form-dosis').value = '1 tableta al día';
+  document.getElementById('chronic-form-dias').value = '30';
+  document.getElementById('chronic-form-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('chronic-form-notas').value = '';
+
+  // Poblar opciones de planes
+  populatePlanSelectInChronicModal();
+
+  const modal = document.getElementById('modal-chronic-patient');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function populatePlanSelectInChronicModal(selectedPlanId = null) {
+  const select = document.getElementById('chronic-form-plan');
+  if (!select) return;
+
+  const plans = sysState.frequentPlans || [];
+  select.innerHTML = '<option value="">Sin plan específico</option>' + plans.map(pl => `
+    <option value="${pl.id}" ${selectedPlanId == pl.id ? 'selected' : ''}>
+      ${pl.nombre_plan} (${pl.descuento_porcentaje}% Descuento)
+    </option>
+  `).join('');
+}
+
+function editChronicPatient(patientId) {
+  const p = sysState.chronicPatients.find(x => x.id === patientId);
+  if (!p) return;
+
+  document.getElementById('modal-chronic-title').textContent = 'Editar Paciente Crónico';
+  document.getElementById('chronic-form-id').value = p.id;
+  document.getElementById('chronic-form-nombre').value = p.nombre_completo || '';
+  document.getElementById('chronic-form-cedula').value = p.cedula_identificacion || '';
+  document.getElementById('chronic-form-telefono').value = p.telefono || '';
+  document.getElementById('chronic-form-diagnostico').value = p.diagnostico || '';
+  document.getElementById('chronic-form-medicamento').value = p.medicamento_cronico || '';
+  document.getElementById('chronic-form-dosis').value = p.dosis_diaria || '';
+  document.getElementById('chronic-form-dias').value = p.dias_suministro || 30;
+  document.getElementById('chronic-form-fecha').value = p.fecha_ultima_entrega || new Date().toISOString().split('T')[0];
+  document.getElementById('chronic-form-notas').value = p.notas_medicas || '';
+
+  populatePlanSelectInChronicModal(p.plan_frecuente_id);
+
+  const modal = document.getElementById('modal-chronic-patient');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function closeChronicPatientModal() {
+  const modal = document.getElementById('modal-chronic-patient');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+async function handleSaveChronicPatient(e) {
+  e.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  const id = document.getElementById('chronic-form-id').value;
+  const payload = {
+    farmacia_id: farmaciaId,
+    id: id ? Number(id) : null,
+    nombre_completo: document.getElementById('chronic-form-nombre').value.trim(),
+    cedula_identificacion: document.getElementById('chronic-form-cedula').value.trim(),
+    telefono: document.getElementById('chronic-form-telefono').value.trim(),
+    plan_frecuente_id: document.getElementById('chronic-form-plan').value ? Number(document.getElementById('chronic-form-plan').value) : null,
+    diagnostico: document.getElementById('chronic-form-diagnostico').value.trim(),
+    medicamento_cronico: document.getElementById('chronic-form-medicamento').value.trim(),
+    dosis_diaria: document.getElementById('chronic-form-dosis').value.trim(),
+    dias_suministro: Number(document.getElementById('chronic-form-dias').value || 30),
+    fecha_ultima_entrega: document.getElementById('chronic-form-fecha').value,
+    notas_medicas: document.getElementById('chronic-form-notas').value.trim(),
+  };
+
+  try {
+    const res = await fetch('/api/chronic-patients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al guardar');
+
+    showToast('✅ Paciente crónico guardado y monitoreo de 10 días programado.', 'success');
+    closeChronicPatientModal();
+    loadChronicPatients();
+  } catch (err) {
+    showToast('Error al guardar paciente crónico: ' + err.message, 'error');
+  }
+}
+
+// 2. GESTIÓN DE PLANES DE PACIENTES FRECUENTES
+async function loadFrequentPlans() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  try {
+    const res = await fetch(`/api/frequent-plans?farmacia_id=${farmaciaId}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al cargar planes');
+
+    sysState.frequentPlans = data.plans || [];
+    renderFrequentPlansTable();
+  } catch (err) {
+    console.error('Error cargando planes:', err);
+    showToast('No se pudieron cargar los planes de pacientes: ' + err.message, 'error');
+  }
+}
+
+function renderFrequentPlansTable() {
+  const tbody = document.getElementById('plans-table-tbody');
+  const badge = document.getElementById('plans-count-badge');
+  if (!tbody) return;
+
+  const list = sysState.frequentPlans || [];
+  if (badge) badge.textContent = `${list.length} Planes Configurados`;
+
+  if (!list.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-8 text-center text-slate-400">
+          No hay planes de pacientes frecuentes registrados.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = list.map(pl => `
+    <tr class="hover:bg-slate-50 transition">
+      <td class="py-3 px-3">
+        <p class="font-extrabold text-slate-900 text-sm">${pl.nombre_plan}</p>
+        <p class="text-[10px] text-slate-400">Código: PLAN-${pl.id}</p>
+      </td>
+      <td class="py-3 px-3">
+        <span class="px-2.5 py-1 rounded-full font-black text-xs bg-emerald-100 text-emerald-800 border border-emerald-300">
+          ${pl.descuento_porcentaje}% Descuento
+        </span>
+      </td>
+      <td class="py-3 px-3 font-mono font-bold text-indigo-700">
+        ${pl.puntos_por_cada_100rd || 1} pts / RD$100
+      </td>
+      <td class="py-3 px-3 text-slate-600 max-w-xs truncate">
+        ${pl.descripcion || 'Sin descripción'}
+      </td>
+      <td class="py-3 px-3 text-center">
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${pl.activo ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}">
+          ${pl.activo ? 'ACTIVO' : 'INACTIVO'}
+        </span>
+      </td>
+      <td class="py-3 px-3 text-right">
+        <button onclick="editPlan(${pl.id})" class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs mr-1">
+          ✏️ Editar
+        </button>
+        <button onclick="deletePlan(${pl.id})" class="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs">
+          🗑️
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openNewPlanModal() {
+  document.getElementById('modal-plan-title').textContent = 'Crear Plan de Fidelidad';
+  document.getElementById('plan-form-id').value = '';
+  document.getElementById('plan-form-nombre').value = '';
+  document.getElementById('plan-form-descuento').value = '10';
+  document.getElementById('plan-form-puntos').value = '1';
+  document.getElementById('plan-form-desc').value = '';
+
+  const modal = document.getElementById('modal-patient-plan');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function editPlan(planId) {
+  const pl = sysState.frequentPlans.find(x => x.id === planId);
+  if (!pl) return;
+
+  document.getElementById('modal-plan-title').textContent = 'Editar Plan de Fidelidad';
+  document.getElementById('plan-form-id').value = pl.id;
+  document.getElementById('plan-form-nombre').value = pl.nombre_plan || '';
+  document.getElementById('plan-form-descuento').value = pl.descuento_porcentaje || 0;
+  document.getElementById('plan-form-puntos').value = pl.puntos_por_cada_100rd || 1;
+  document.getElementById('plan-form-desc').value = pl.descripcion || '';
+
+  const modal = document.getElementById('modal-patient-plan');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function closePatientPlanModal() {
+  const modal = document.getElementById('modal-patient-plan');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+async function handleSavePatientPlan(e) {
+  e.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  const id = document.getElementById('plan-form-id').value;
+  const payload = {
+    farmacia_id: farmaciaId,
+    id: id ? Number(id) : null,
+    nombre_plan: document.getElementById('plan-form-nombre').value.trim(),
+    descuento_porcentaje: parseFloat(document.getElementById('plan-form-descuento').value || 0),
+    puntos_por_cada_100rd: parseInt(document.getElementById('plan-form-puntos').value || 1),
+    descripcion: document.getElementById('plan-form-desc').value.trim(),
+    activo: 1
+  };
+
+  try {
+    const res = await fetch('/api/frequent-plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al guardar plan');
+
+    showToast('✅ Plan de fidelidad guardado exitosamente.', 'success');
+    closePatientPlanModal();
+    loadFrequentPlans();
+  } catch (err) {
+    showToast('Error al guardar plan: ' + err.message, 'error');
+  }
+}
+
+async function deletePlan(planId) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  if (!confirm('¿Seguro que desea eliminar este plan de fidelidad?')) return;
+
+  try {
+    const res = await fetch('/api/frequent-plans/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: farmaciaId, plan_id: planId })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al eliminar');
+
+    showToast('Plan eliminado.', 'info');
+    loadFrequentPlans();
+  } catch (err) {
+    showToast('Error al eliminar: ' + err.message, 'error');
+  }
+}
+
+// 3. POS CHECKOUT: BUSCADOR DE PACIENTE FRECUENTE & BONIFICACIÓN OPCIONAL
+async function handlePosPatientSearch(query) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+  const dropdown = document.getElementById('pos-patient-search-results');
+  if (!dropdown) return;
+
+  const q = (query || '').trim();
+  if (q.length < 2) {
+    dropdown.classList.add('hidden');
+    dropdown.innerHTML = '';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/patient/search-checkout?farmacia_id=${farmaciaId}&q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    const results = data.results || [];
+
+    if (!results.length) {
+      dropdown.innerHTML = `<div class="p-3 text-slate-400 text-xs">No se encontró ningún paciente con '${q}'.</div>`;
+      dropdown.classList.remove('hidden');
+      return;
+    }
+
+    dropdown.innerHTML = results.map(p => `
+      <div 
+        onclick='selectPosPatient(${JSON.stringify(p)})' 
+        class="p-2.5 hover:bg-teal-50 cursor-pointer flex items-center justify-between transition"
+      >
+        <div>
+          <p class="font-bold text-slate-900">${p.nombre}</p>
+          <p class="text-[10px] text-slate-400">Tel: ${p.telefono} • Céd: ${p.cedula || 'N/A'}</p>
+        </div>
+        <div class="text-right">
+          ${p.plan_nombre ? `
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-teal-100 text-teal-800">
+              ${p.plan_nombre} (${p.plan_descuento_porcentaje}%)
+            </span>
+          ` : `
+            <span class="text-[10px] text-slate-400">Sin plan</span>
+          `}
+          <p class="text-[9px] font-mono text-purple-700 font-bold">${p.puntos_fidelidad || 0} pts</p>
+        </div>
+      </div>
+    `).join('');
+    dropdown.classList.remove('hidden');
+  } catch (err) {
+    console.error('Error buscando paciente para POS:', err);
+  }
+}
+
+function selectPosPatient(patient) {
+  sysState.posSelectedPatient = patient;
+  sysState.posApplyBonus = true;
+
+  // Llenar datos de cliente en formulario POS
+  const clientNameInp = document.getElementById('pos-client-name');
+  const clientPhoneInp = document.getElementById('pos-client-phone');
+  if (clientNameInp) clientNameInp.value = patient.nombre;
+  if (clientPhoneInp) clientPhoneInp.value = patient.telefono;
+
+  // Actualizar UI de Fidelización
+  const searchInp = document.getElementById('pos-patient-search');
+  if (searchInp) searchInp.value = `${patient.nombre} (${patient.telefono})`;
+
+  const dropdown = document.getElementById('pos-patient-search-results');
+  if (dropdown) {
+    dropdown.classList.add('hidden');
+    dropdown.innerHTML = '';
+  }
+
+  const btnClear = document.getElementById('pos-btn-clear-patient');
+  if (btnClear) btnClear.classList.remove('hidden');
+
+  const badgePlan = document.getElementById('pos-patient-plan-badge');
+  const bonusContainer = document.getElementById('pos-plan-bonus-container');
+  const bonusPctLabel = document.getElementById('pos-bonus-pct-label');
+  const bonusCheck = document.getElementById('pos-apply-bonus-check');
+
+  if (patient.plan_descuento_porcentaje > 0) {
+    if (badgePlan) {
+      badgePlan.textContent = `${patient.plan_nombre || 'Plan Frecuente'} (${patient.plan_descuento_porcentaje}%)`;
+      badgePlan.classList.remove('hidden');
+    }
+    if (bonusContainer) bonusContainer.classList.remove('hidden');
+    if (bonusPctLabel) bonusPctLabel.textContent = `${patient.plan_descuento_porcentaje}%`;
+    if (bonusCheck) bonusCheck.checked = true;
+  } else {
+    if (badgePlan) {
+      badgePlan.textContent = `Registrado (${patient.puntos_fidelidad || 0} pts)`;
+      badgePlan.classList.remove('hidden');
+    }
+    if (bonusContainer) bonusContainer.classList.add('hidden');
+  }
+
+  renderPosCart();
+  showToast(`👤 Paciente '${patient.nombre}' seleccionado en mostrador.`, 'info');
+}
+
+function clearSelectedPosPatient() {
+  sysState.posSelectedPatient = null;
+  sysState.posApplyBonus = true;
+
+  const searchInp = document.getElementById('pos-patient-search');
+  if (searchInp) searchInp.value = '';
+
+  const btnClear = document.getElementById('pos-btn-clear-patient');
+  if (btnClear) btnClear.classList.add('hidden');
+
+  const badgePlan = document.getElementById('pos-patient-plan-badge');
+  if (badgePlan) badgePlan.classList.add('hidden');
+
+  const bonusContainer = document.getElementById('pos-plan-bonus-container');
+  if (bonusContainer) bonusContainer.classList.add('hidden');
+
+  const clientNameInp = document.getElementById('pos-client-name');
+  const clientPhoneInp = document.getElementById('pos-client-phone');
+  if (clientNameInp) clientNameInp.value = 'Cliente de Mostrador';
+  if (clientPhoneInp) clientPhoneInp.value = '';
+
+  renderPosCart();
+}
+
+function togglePosBonusApplication() {
+  const check = document.getElementById('pos-apply-bonus-check');
+  sysState.posApplyBonus = check ? check.checked : false;
+  renderPosCart();
+}
+
+// 4. MODAL DE ALERTA DE DUPLICIDAD CLÍNICA
+function checkCartDuplicity(productToAdd) {
+  if (!productToAdd || !sysState.posCart || !sysState.posCart.length) return null;
+
+  const paNew = (productToAdd.principio_activo || '').trim().toLowerCase();
+  const catNew = (productToAdd.categoria || '').trim().toLowerCase();
+
+  for (const item of sysState.posCart) {
+    const existingP = item.product;
+    if (existingP.id === productToAdd.id) continue;
+
+    const paExist = (existingP.principio_activo || '').trim().toLowerCase();
+    const catExist = (existingP.categoria || '').trim().toLowerCase();
+
+    // 1. Mismo Principio Activo
+    if (paNew && paExist && (paNew === paExist || paNew.includes(paExist) || paExist.includes(paNew))) {
+      return {
+        tipo: 'PRINCIPIO_ACTIVO',
+        itemExistente: existingP,
+        principio: productToAdd.principio_activo
+      };
+    }
+
+    // 2. Misma familia terapéutica de alto riesgo de sobredosis (ej. AINEs, Antihipertensivos)
+    const familiasAlerta = ['antiinflamatorio', 'aine', 'antihipertensivo', 'hipolipemiante', 'antibiotico'];
+    if (catNew && catExist && catNew === catExist && familiasAlerta.some(f => catNew.includes(f))) {
+      return {
+        tipo: 'FAMILIA_TERAPEUTICA',
+        itemExistente: existingP,
+        familia: productToAdd.categoria
+      };
+    }
+  }
+
+  return null;
+}
+
+function showDuplicityWarningModal(existingProduct, newProduct, presentation) {
+  const modal = document.getElementById('modal-duplicity-warning');
+  const textEl = document.getElementById('duplicity-explanation-text');
+  const currItem = document.getElementById('duplicity-current-item');
+  const currPa = document.getElementById('duplicity-current-pa');
+  const newItem = document.getElementById('duplicity-new-item');
+  const newPa = document.getElementById('duplicity-new-pa');
+  const confirmBtn = document.getElementById('duplicity-confirm-btn');
+
+  if (currItem) currItem.textContent = existingProduct.nombre_comercial;
+  if (currPa) currPa.textContent = `Principio: ${existingProduct.principio_activo || 'N/A'}`;
+  if (newItem) newItem.textContent = newProduct.nombre_comercial;
+  if (newPa) newPa.textContent = `Principio: ${newProduct.principio_activo || 'N/A'}`;
+
+  if (textEl) {
+    textEl.innerHTML = `
+      El ticket ya incluye <b>${existingProduct.nombre_comercial}</b> y está agregando <b>${newProduct.nombre_comercial}</b> con el mismo principio activo (<i>${newProduct.principio_activo || existingProduct.principio_activo}</i>).
+      <br><br>
+      <b>Riesgo:</b> Posible duplicidad farmacológica o sobremedicación del paciente.
+    `;
+  }
+
+  if (confirmBtn) {
+    confirmBtn.onclick = () => {
+      closeDuplicityModal();
+      addPosItemDirect(newProduct.id, presentation, true);
+    };
+  }
+
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function closeDuplicityModal() {
+  const modal = document.getElementById('modal-duplicity-warning');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+// 5. MODAL DE SUSTITUCIÓN INTELIGENTE Y BIOEQUIVALENTES
+async function openSubstituteModal(productId, productName, activeIngredient) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  const modal = document.getElementById('modal-substitutes');
+  const origName = document.getElementById('sub-orig-name');
+  const origPa = document.getElementById('sub-orig-pa');
+  const origPrice = document.getElementById('sub-orig-price');
+  const listContainer = document.getElementById('substitutes-list-container');
+  const countBadge = document.getElementById('sub-count-badge');
+
+  const p = sysState.products.find(x => x.id === productId);
+  if (origName) origName.textContent = productName || (p ? p.nombre_comercial : 'Medicamento');
+  if (origPa) origPa.textContent = `Principio Activo: ${activeIngredient || (p ? p.principio_activo : 'No especificado')}`;
+  if (origPrice && p) origPrice.textContent = formatRD(p.precio_base);
+
+  if (listContainer) {
+    listContainer.innerHTML = '<p class="text-center py-6 text-slate-400">Buscando bioequivalentes con stock...</p>';
+  }
+
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+
+  try {
+    const res = await fetch(`/api/products/substitutes?farmacia_id=${farmaciaId}&producto_id=${productId}&q=${encodeURIComponent(activeIngredient || '')}`);
+    const data = await res.json();
+    const subs = data.substitutes || [];
+
+    if (countBadge) countBadge.textContent = `${subs.length} encontrados`;
+
+    if (!subs.length) {
+      if (listContainer) {
+        listContainer.innerHTML = `
+          <div class="p-6 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+            <p class="text-base">🔍</p>
+            <p class="font-bold text-xs mt-1">No se encontraron alternativas en inventario actual.</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Actualmente no hay otros medicamentos con el principio activo '${activeIngredient || 'este medicamento'}'.</p>
+          </div>
+        `;
+      }
+      return;
+    }
+
+    if (listContainer) {
+      listContainer.innerHTML = subs.map(s => {
+        let ahorroHtml = '';
+        if (s.es_mas_barato) {
+          ahorroHtml = `
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+              🎉 Ahorro de ${formatRD(s.ahorro_rd)} (${s.porcentaje_ahorro}%)
+            </span>
+          `;
+        } else if (s.precio_rd === (p ? p.precio_base : s.precio_rd)) {
+          ahorroHtml = `<span class="text-[10px] text-slate-500 font-bold">Mismo precio</span>`;
+        } else {
+          ahorroHtml = `<span class="text-[10px] text-slate-400">Opción premium</span>`;
+        }
+
+        return `
+          <div class="p-3 bg-white rounded-2xl border border-slate-200 hover:border-teal-400 transition flex items-center justify-between gap-3 shadow-2xs">
+            <div class="space-y-0.5">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="font-extrabold text-slate-900">${s.nombre_comercial}</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded font-bold ${s.es_generico ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-700'}">
+                  ${s.es_generico ? 'Genérico Bioequivalente' : 'Marca Alternativa'}
+                </span>
+                ${ahorroHtml}
+              </div>
+              <p class="text-[10px] text-slate-500">
+                Principio: <span class="font-bold text-teal-700">${s.principio_activo}</span> • Concentración: ${s.concentracion || 'Estándar'}
+              </p>
+              <p class="text-[10px] font-mono font-bold ${s.stock_unidades > 0 ? 'text-emerald-700' : 'text-rose-600'}">
+                Stock: ${s.stock_unidades} unidades disponibles
+              </p>
+            </div>
+            <div class="text-right flex flex-col items-end gap-1.5 flex-shrink-0">
+              <span class="font-mono font-black text-slate-900 text-sm">${formatRD(s.precio_rd)}</span>
+              <div class="flex items-center gap-1">
+                <button 
+                  type="button" 
+                  onclick="applyCartSubstitution(${productId}, ${s.id})" 
+                  class="px-2.5 py-1 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-[11px] shadow-2xs transition"
+                  title="Reemplazar el medicamento actual en el carrito por este sustituto"
+                >
+                  🔄 Sustituir
+                </button>
+                <button 
+                  type="button" 
+                  onclick="addPosItemDirect(${s.id}, 'UNIDAD')" 
+                  class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] border border-slate-300"
+                  title="Añadir también este producto al carrito"
+                >
+                  ➕ Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+  } catch (err) {
+    if (listContainer) {
+      listContainer.innerHTML = `<p class="text-rose-600 text-center py-4">Error al buscar alternativas: ${err.message}</p>`;
+    }
+  }
+}
+
+function applyCartSubstitution(oldProductId, newProductId) {
+  // Buscar si el producto anterior estaba en el carrito
+  const oldIndex = sysState.posCart.findIndex(i => i.product.id === oldProductId);
+  let pres = 'UNIDAD';
+  let qty = 1;
+
+  if (oldIndex !== -1) {
+    pres = sysState.posCart[oldIndex].presentacion;
+    qty = sysState.posCart[oldIndex].cantidad;
+    sysState.posCart.splice(oldIndex, 1);
+  }
+
+  // Agregar el nuevo producto
+  const newProduct = sysState.products.find(p => p.id === newProductId);
+  if (newProduct) {
+    sysState.posCart.push({
+      product: newProduct,
+      presentacion: pres,
+      cantidad: qty
+    });
+    showToast(`🔄 Sustitución aplicada: Ahora despachando '${newProduct.nombre_comercial}'.`, 'success');
+  }
+
+  closeSubstitutesModal();
+  renderPosCart();
+}
+
+function closeSubstitutesModal() {
+  const modal = document.getElementById('modal-substitutes');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+// 6. HELPER PARA FILTRAR MEDICAMENTOS SIN SALIDA (≤ 50 unidades/mes)
+function filterSlowMovingProducts() {
+  switchSysTab('inventario');
+  closeAllSysDropdowns();
+  setInventoryFilterPill('SIN_SALIDA');
+  showToast('Mostrando productos de baja rotación / sin salida real (≤ 50 unidades/mes). Los medicamentos de uso crónico mensual están protegidos y excluidos de esta alerta.', 'info');
+}
+
+function filterChronicMonthlyProducts() {
+  switchSysTab('inventario');
+  closeAllSysDropdowns();
+  setInventoryFilterPill('CRONICOS');
+  showToast('Mostrando medicamentos de uso crónico con demanda mensual programada por pacientes.', 'info');
+}
+
+window.filterSlowMovingProducts = filterSlowMovingProducts;
+window.filterChronicMonthlyProducts = filterChronicMonthlyProducts;
+
+function closePosTicketModal() {
+  const m = document.getElementById('pos-ticket-modal');
+  if (m) {
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+  }
+}
+
+
+/* =========================================================================
+   SISTEMA POS: KITS ALIVIO EN 1 CLIC — OFERTAS SEMANALES Y DESPACHO FÍSICO
+   ========================================================================= */
+function escapeJsQuotes(str) {
+  return String(str || '').replace(/'/g, "\'").replace(/"/g, '&quot;');
+}
+
+let activePosKitModalData = null;
+let kitBuilderItemsState = [];
+
+async function loadPromotionalKits(fid) {
+  try {
+    const id = fid || (sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1);
+    const res = await fetch(`/api/promotional-kits?farmacia_id=${id}`);
+    const data = await res.json();
+    if (data.ok) {
+      sysState.promotionalKits = data.kits || [];
+      renderPosQuickKits();
+      renderKitsManagementView();
+    }
+  } catch (err) {
+    console.error('Error al cargar kits en FarmaSys POS:', err);
+  }
+}
+
+function renderPosQuickKits() {
+  const container = document.getElementById('pos-quick-kits-container');
+  if (!container) return;
+
+  const kits = sysState.promotionalKits || [];
+  if (!kits.length) {
+    container.innerHTML = `<span class="text-[11px] text-slate-400 italic">No hay kits armados aún.</span>`;
+    return;
+  }
+
+  container.innerHTML = kits.map(k => {
+    const isAvail = k.disponible !== false && (k.kits_disponibles == null || k.kits_disponibles > 0);
+    const hasOffer = Number(k.ahorro_monto || 0) > 0;
+    return `
+      <button
+        type="button"
+        onclick="openPosKitDetailModal('${k.id}')"
+        class="px-2.5 py-1.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+          isAvail
+            ? 'bg-white hover:bg-amber-50 border-amber-300 text-slate-900 hover:border-amber-400'
+            : 'bg-slate-100 border-slate-300 text-slate-400 opacity-60'
+        }"
+        title="Ver medicamentos existentes que componen el kit, su precio por unidad solicitada y definir oferta del vendedor"
+      >
+        <span>${k.icono || '⚡'}</span>
+        <span>${k.nombre_kit}</span>
+        <span class="px-1.5 py-0.2 rounded-full font-black text-[10px] ${hasOffer ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-slate-950'}">${formatRD(k.precio_oferta_kit)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function openPosKitDetailModal(kitId) {
+  const kit = (sysState.promotionalKits || []).find(k => String(k.id) === String(kitId) || k.codigo_kit === kitId);
+  if (!kit) {
+    showToast('Kit no encontrado', 'error');
+    return;
+  }
+  activePosKitModalData = { ...kit, sellerCustomPrice: Number(kit.precio_oferta_kit || kit.precio_regular_total || 0) };
+
+  document.getElementById('modal-pos-kit-title').textContent = kit.nombre_kit;
+  document.getElementById('modal-pos-kit-icon').textContent = kit.icono || '⚡';
+  document.getElementById('modal-pos-kit-tag').textContent = (kit.ahorro_monto > 0) ? 'OFERTA DEL VENDEDOR ⚡' : 'PRECIO POR UNIDAD SOLICITADA ⚡';
+  document.getElementById('modal-pos-kit-desc').textContent = kit.descripcion || kit.lema || '';
+
+  const availEl = document.getElementById('modal-pos-kit-avail');
+  const isAvail = kit.disponible !== false && (kit.kits_disponibles == null || kit.kits_disponibles > 0);
+  if (isAvail) {
+    availEl.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white';
+    availEl.textContent = `Disponible (${kit.kits_disponibles} kits armables)`;
+  } else {
+    availEl.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white';
+    availEl.textContent = 'Sin Stock Completo';
+  }
+
+  const tbody = document.getElementById('modal-pos-kit-table-body');
+  if (tbody) {
+    tbody.innerHTML = (kit.items || []).map(comp => {
+      const pProd = (sysState.products || []).find(p => p.id === comp.producto_id || p.codigo_barras === comp.codigo_barras);
+      const stockDisp = pProd ? (pProd.inventario ? pProd.inventario.stock_total_unidades : pProd.stock_total_unidades) : (comp.stock_actual_unidades != null ? comp.stock_actual_unidades : '-');
+      const subtotalComp = comp.precio_unitario * comp.cantidad;
+      const unitLabel = comp.unidad_minima_nombre || comp.presentacion || 'UNIDAD';
+
+      return `
+        <tr class="hover:bg-amber-50/30">
+          <td class="py-2 px-3">
+            <div class="flex items-center gap-1.5 font-bold text-slate-900">
+              <span>${comp.icono || '💊'}</span>
+              <span>${comp.nombre_comercial}</span>
+            </div>
+            <p class="text-[10px] text-slate-500 font-mono">${comp.principio_activo || ''}</p>
+          </td>
+          <td class="py-2 px-2 text-center font-bold text-slate-700">
+            ${unitLabel}
+          </td>
+          <td class="py-2 px-2 text-center font-black text-slate-900">
+            ${comp.cantidad}
+          </td>
+          <td class="py-2 px-2 text-center font-mono font-bold ${Number(stockDisp) > 10 ? 'text-teal-700' : 'text-rose-600'}">
+            ${stockDisp} unid.
+          </td>
+          <td class="py-2 px-3 text-right font-mono text-slate-600">
+            RD$ ${Number(comp.precio_unitario).toFixed(2)}
+          </td>
+          <td class="py-2 px-3 text-right font-mono font-black text-slate-900">
+            RD$ ${Number(subtotalComp).toFixed(2)}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('modal-pos-kit-reg-price').textContent = formatRD(kit.precio_regular_total);
+  const sellerInp = document.getElementById('modal-pos-kit-seller-price-input');
+  if (sellerInp) {
+    sellerInp.value = Number(kit.precio_oferta_kit || kit.precio_regular_total).toFixed(2);
+  }
+  handlePosKitSellerPriceChange(kit.precio_oferta_kit || kit.precio_regular_total);
+
+  const btnAdd = document.getElementById('btn-modal-add-kit-to-pos');
+  if (btnAdd) {
+    btnAdd.disabled = !isAvail;
+    if (!isAvail) {
+      btnAdd.className = 'px-5 py-2.5 rounded-xl bg-slate-200 text-slate-400 font-bold text-xs cursor-not-allowed';
+    } else {
+      btnAdd.className = 'px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs shadow-lg transition flex items-center gap-2 cursor-pointer transform active:scale-95';
+    }
+  }
+
+  const modal = document.getElementById('modal-pos-kit-detail');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+  }
+}
+
+function handlePosKitSellerPriceChange(val) {
+  if (!activePosKitModalData) return;
+  const reg = Number(activePosKitModalData.precio_regular_total || 0);
+  let finalPrice = parseFloat(val);
+  if (isNaN(finalPrice) || finalPrice <= 0) {
+    finalPrice = reg;
+  }
+  activePosKitModalData.sellerCustomPrice = finalPrice;
+
+  const offerEl = document.getElementById('modal-pos-kit-offer-price');
+  const savEl = document.getElementById('modal-pos-kit-savings');
+  if (offerEl) offerEl.textContent = formatRD(finalPrice);
+
+  if (savEl) {
+    const diff = Math.max(0, reg - finalPrice);
+    if (diff > 0.01) {
+      const pct = reg > 0 ? ((diff / reg) * 100).toFixed(1) : '0.0';
+      savEl.className = 'px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-black';
+      savEl.textContent = `¡Oferta aplicada por vendedor: -${formatRD(diff)} (-${pct}%)!`;
+    } else {
+      savEl.className = 'px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 font-bold';
+      savEl.textContent = 'Precio exacto por unidad de lo solicitado (Sin descuento)';
+    }
+  }
+}
+
+function applyPosKitSellerQuickDiscount(pct) {
+  if (!activePosKitModalData) return;
+  const reg = Number(activePosKitModalData.precio_regular_total || 0);
+  const newPrice = Number((reg * (1 - Number(pct) / 100)).toFixed(2));
+  const sellerInp = document.getElementById('modal-pos-kit-seller-price-input');
+  if (sellerInp) sellerInp.value = newPrice.toFixed(2);
+  handlePosKitSellerPriceChange(newPrice);
+}
+
+function closePosKitDetailModal() {
+  const modal = document.getElementById('modal-pos-kit-detail');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+  }
+  activePosKitModalData = null;
+}
+
+function executeAddKitFromModal() {
+  if (!activePosKitModalData) return;
+  const sellerInp = document.getElementById('modal-pos-kit-seller-price-input');
+  const customPrice = sellerInp ? parseFloat(sellerInp.value) : activePosKitModalData.sellerCustomPrice;
+  addKitToPosCart(activePosKitModalData.id, customPrice);
+  closePosKitDetailModal();
+}
+
+function addKitToPosCart(kitId, sellerPriceOverride = null) {
+  const kit = (sysState.promotionalKits || []).find(k => String(k.id) === String(kitId) || k.codigo_kit === kitId);
+  if (!kit) {
+    showToast('Kit no encontrado', 'error');
+    return;
+  }
+
+  const chosenPrice = (sellerPriceOverride != null && !isNaN(sellerPriceOverride) && Number(sellerPriceOverride) > 0)
+    ? Number(sellerPriceOverride)
+    : Number(kit.precio_oferta_kit || kit.precio_regular_total);
+  const ahorro = Math.max(0, Number(kit.precio_regular_total) - chosenPrice);
+
+  const existing = sysState.posCart.find(i => i.is_kit && (String(i.kit_id) === String(kit.id) || i.codigo_kit === kit.codigo_kit));
+  if (existing) {
+    existing.cantidad += 1;
+    existing.unit_price = chosenPrice;
+    existing.ahorro_monto = ahorro;
+  } else {
+    sysState.posCart.push({
+      is_kit: true,
+      es_kit: true,
+      kit_id: kit.id,
+      codigo_kit: kit.codigo_kit,
+      nombre_comercial: kit.nombre_kit,
+      product: {
+        id: 0,
+        nombre_comercial: `[KIT] ${kit.nombre_kit}`,
+        principio_activo: 'Kit por Unidad Solicitada',
+        precio_base: chosenPrice,
+        precios_presentacion: { KIT: chosenPrice },
+        unidad_minima_nombre: 'Kit',
+        inventario: { stock_total_unidades: kit.kits_disponibles || 50 }
+      },
+      presentacion: 'KIT',
+      cantidad: 1,
+      unit_price: chosenPrice,
+      subtotal: chosenPrice,
+      items: kit.items,
+      precio_regular_total: kit.precio_regular_total,
+      ahorro_monto: ahorro
+    });
+  }
+
+  renderPosCart();
+  showToast(`⚡ ${kit.nombre_kit} cargado al mostrador (${formatRD(chosenPrice)})`);
+}
+
+function renderKitsManagementView() {
+  const container = document.getElementById('kits-management-grid');
+  if (!container) return;
+
+  const kits = sysState.promotionalKits || [];
+  if (!kits.length) {
+    container.innerHTML = `<div class="col-span-full p-8 text-center text-slate-500 bg-white rounded-3xl border border-slate-200">No hay kits registrados en el sistema.</div>`;
+    return;
+  }
+
+  container.innerHTML = kits.map(kit => {
+    const isAvail = kit.disponible !== false && (kit.kits_disponibles == null || kit.kits_disponibles > 0);
+    const hasOffer = Number(kit.ahorro_monto || 0) > 0;
+    const compsList = (kit.items || []).map(c => `
+      <div class="flex items-center justify-between text-xs py-1.5 px-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="flex items-center gap-2">
+          <span>${c.icono || '💊'}</span>
+          <span class="font-bold text-slate-800">${c.cantidad}x ${c.unidad_minima_nombre || c.presentacion} <strong>${c.nombre_comercial}</strong></span>
+        </div>
+        <div class="text-right">
+          <span class="text-slate-700 font-mono font-bold">RD$ ${Number(c.precio_unitario * c.cantidad).toFixed(2)}</span>
+          <span class="text-[10px] text-teal-700 block font-semibold">Stock: ${c.stock_actual_unidades != null ? c.stock_actual_unidades : '-'}u</span>
+        </div>
+      </div>
+    `).join('');
+
+    return `
+      <div class="bg-white rounded-3xl p-5 border-2 ${isAvail ? 'border-amber-300' : 'border-slate-200'} shadow-sm space-y-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="text-3xl">${kit.icono || '⚡'}</span>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950">${hasOffer ? 'OFERTA DEL VENDEDOR ⚡' : 'PRECIO POR UNIDAD ⚡'}</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isAvail ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+                  ${isAvail ? `● ${kit.kits_disponibles} kits armables` : '● Stock insuficiente'}
+                </span>
+              </div>
+              <h3 class="text-base font-black text-slate-900 mt-1">${kit.nombre_kit}</h3>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] font-extrabold uppercase text-slate-400 block">Precio por Unidad: ${formatRD(kit.precio_regular_total)}</span>
+            <span class="text-xl font-black text-teal-700">${formatRD(kit.precio_oferta_kit)}</span>
+            <span class="text-[10px] ${hasOffer ? 'text-emerald-700 font-bold' : 'text-slate-400'} block">
+              ${hasOffer ? `Oferta activa (-${formatRD(kit.ahorro_monto)})` : 'Sin oferta (Precio exacto)'}
+            </span>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-600 leading-relaxed font-medium">${kit.descripcion}</p>
+
+        <div class="space-y-1.5 p-3 rounded-2xl bg-amber-50/50 border border-amber-200">
+          <p class="text-[11px] font-black uppercase text-amber-900 mb-1">📦 Medicamentos existentes que componen el kit (Por Unidad):</p>
+          ${compsList}
+        </div>
+
+        <!-- Control rápido para que el vendedor defina la oferta a su decisión -->
+        <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-black uppercase text-slate-700 block">🏷️ Oferta a decisión del vendedor:</span>
+            <span class="text-[10px] text-slate-500">Precio base por unidad: <b>${formatRD(kit.precio_regular_total)}</b></span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <input
+              id="admin-kit-offer-inp-${kit.id}"
+              type="number"
+              step="0.01"
+              value="${Number(kit.precio_oferta_kit).toFixed(2)}"
+              class="w-24 px-2 py-1 rounded-lg border border-slate-300 bg-white font-mono font-bold text-xs text-right"
+            />
+            <button
+              type="button"
+              onclick="saveSellerQuickKitOffer(${kit.id})"
+              class="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer"
+            >
+              Guardar Precio
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onclick="openKitBuilderModal(${kit.id})"
+            class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs cursor-pointer"
+          >
+            ✏️ Editar Medicamentos del Kit
+          </button>
+          <button
+            type="button"
+            onclick="openPosKitDetailModal('${kit.id}'); switchSysTab('pos');"
+            ${!isAvail ? 'disabled' : ''}
+            class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>➕</span> <span>Despachar en POS</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function saveSellerQuickKitOffer(kitId) {
+  const kit = (sysState.promotionalKits || []).find(k => Number(k.id) === Number(kitId));
+  if (!kit) return;
+  const inp = document.getElementById(`admin-kit-offer-inp-${kitId}`);
+  const val = inp ? parseFloat(inp.value) : kit.precio_regular_total;
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+
+  try {
+    const res = await fetch('/api/promotional-kits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        id: kit.id,
+        codigo_kit: kit.codigo_kit,
+        nombre_kit: kit.nombre_kit,
+        lema: kit.lema,
+        descripcion: kit.descripcion,
+        categoria: kit.categoria,
+        icono: kit.icono,
+        precio_regular_total: kit.precio_regular_total,
+        precio_oferta_kit: val,
+        oferta_vendedor_activa: val < kit.precio_regular_total ? 1 : 0,
+        items: kit.items
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('✅ Precio / Oferta del vendedor actualizada en el Kit.');
+      await loadPromotionalKits(f.id);
+    }
+  } catch (e) {
+    showToast('Error al actualizar oferta del kit', 'error');
+  }
+}
+
+/* =========================================================================
+   CONSTRUCTOR DE KITS CON MEDICAMENTOS EXISTENTES EN INVENTARIO
+   ========================================================================= */
+
+function openKitBuilderModal(editKitId = null) {
+  const select = document.getElementById('kit-builder-prod-select');
+  if (select) {
+    const prods = sysState.products || [];
+    select.innerHTML = prods.map(p => `
+      <option value="${p.id}">
+        ${p.nombre_comercial} — RD$ ${Number(p.precio_base).toFixed(2)} / ${p.unidad_minima_nombre || 'Unidad'} (Stock: ${p.inventario?.stock_total_unidades || 0}u)
+      </option>
+    `).join('');
+  }
+
+  if (editKitId) {
+    const kit = (sysState.promotionalKits || []).find(k => Number(k.id) === Number(editKitId));
+    if (kit) {
+      document.getElementById('kit-builder-id').value = kit.id;
+      document.getElementById('kit-builder-name').value = kit.nombre_kit;
+      document.getElementById('kit-builder-icon').value = kit.icono || '⚡';
+      document.getElementById('kit-builder-cat').value = kit.categoria || 'Alivio en 1 Clic';
+      document.getElementById('kit-builder-desc').value = kit.descripcion || kit.lema || '';
+      kitBuilderItemsState = (kit.items || []).map(it => ({
+        producto_id: it.producto_id,
+        codigo_barras: it.codigo_barras,
+        nombre_comercial: it.nombre_comercial,
+        presentacion: 'UNIDAD',
+        cantidad: Number(it.cantidad || 1),
+        precio_unitario: Number(it.precio_unitario || 0),
+        icono: it.icono || '💊'
+      }));
+      const offerInp = document.getElementById('kit-builder-seller-offer');
+      if (offerInp) {
+        offerInp.value = (kit.ahorro_monto > 0) ? Number(kit.precio_oferta_kit).toFixed(2) : '';
+      }
+    }
+  } else {
+    document.getElementById('kit-builder-id').value = '';
+    document.getElementById('kit-builder-name').value = '';
+    document.getElementById('kit-builder-icon').value = '🤧';
+    document.getElementById('kit-builder-cat').value = 'Alivio en 1 Clic';
+    document.getElementById('kit-builder-desc').value = '';
+    document.getElementById('kit-builder-seller-offer').value = '';
+    kitBuilderItemsState = [];
+  }
+
+  renderKitBuilderItems();
+  showModal('modal-kit-builder');
+}
+
+function closeKitBuilderModal() {
+  hideModal('modal-kit-builder');
+}
+
+function addProductToKitBuilder() {
+  const select = document.getElementById('kit-builder-prod-select');
+  const qtyInp = document.getElementById('kit-builder-prod-qty');
+  if (!select || !select.value) return;
+  const pid = Number(select.value);
+  const qty = Math.max(1, parseInt(qtyInp?.value || '1', 10));
+  const prod = (sysState.products || []).find(p => Number(p.id) === pid);
+  if (!prod) return;
+
+  const existing = kitBuilderItemsState.find(i => Number(i.producto_id) === pid);
+  if (existing) {
+    existing.cantidad += qty;
+  } else {
+    kitBuilderItemsState.push({
+      producto_id: prod.id,
+      codigo_barras: prod.codigo_barras || '',
+      nombre_comercial: prod.nombre_comercial,
+      presentacion: 'UNIDAD',
+      cantidad: qty,
+      precio_unitario: Number(prod.precio_base || 0),
+      icono: '💊'
+    });
+  }
+  renderKitBuilderItems();
+}
+
+function removeProductFromKitBuilder(idx) {
+  kitBuilderItemsState.splice(idx, 1);
+  renderKitBuilderItems();
+}
+
+function renderKitBuilderItems() {
+  const tbody = document.getElementById('kit-builder-items-tbody');
+  const sumEl = document.getElementById('kit-builder-unit-sum-display');
+  if (!tbody) return;
+
+  if (!kitBuilderItemsState.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-400">Seleccione medicamentos existentes arriba para armar el kit.</td></tr>`;
+    if (sumEl) sumEl.textContent = 'RD$ 0.00';
+    return;
+  }
+
+  let totalSum = 0;
+  tbody.innerHTML = kitBuilderItemsState.map((it, idx) => {
+    const sub = it.precio_unitario * it.cantidad;
+    totalSum += sub;
+    return `
+      <tr>
+        <td class="py-2 px-3 font-bold text-slate-900">${it.nombre_comercial}</td>
+        <td class="py-2 px-2 text-center font-mono font-black">${it.cantidad} unid.</td>
+        <td class="py-2 px-3 text-right font-mono">RD$ ${Number(it.precio_unitario).toFixed(2)}</td>
+        <td class="py-2 px-3 text-right font-mono font-bold text-teal-800">RD$ ${Number(sub).toFixed(2)}</td>
+        <td class="py-2 px-2 text-center">
+          <button type="button" onclick="removeProductFromKitBuilder(${idx})" class="text-rose-600 font-black cursor-pointer">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  if (sumEl) sumEl.textContent = formatRD(totalSum);
+}
+
+async function submitKitBuilderForm(e) {
+  e.preventDefault();
+  if (!kitBuilderItemsState.length) {
+    showToast('Añada al menos un medicamento existente al kit.', 'error');
+    return;
+  }
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const kitId = document.getElementById('kit-builder-id').value;
+  const nombre = document.getElementById('kit-builder-name').value.trim();
+  const icono = document.getElementById('kit-builder-icon').value.trim() || '⚡';
+  const cat = document.getElementById('kit-builder-cat').value.trim() || 'Alivio en 1 Clic';
+  const desc = document.getElementById('kit-builder-desc').value.trim() || kitBuilderItemsState.map(i => `${i.cantidad}x ${i.nombre_comercial}`).join(' + ');
+  const sellerOfferRaw = document.getElementById('kit-builder-seller-offer').value.trim();
+
+  const unitSum = kitBuilderItemsState.reduce((acc, i) => acc + (i.precio_unitario * i.cantidad), 0);
+  const sellerOfferVal = sellerOfferRaw ? parseFloat(sellerOfferRaw) : unitSum;
+
+  try {
+    const res = await fetch('/api/promotional-kits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        id: kitId ? Number(kitId) : null,
+        nombre_kit: nombre,
+        lema: desc,
+        descripcion: desc,
+        categoria: cat,
+        icono: icono,
+        precio_regular_total: unitSum,
+        precio_oferta_kit: sellerOfferVal,
+        oferta_vendedor_activa: (sellerOfferRaw && sellerOfferVal < unitSum) ? 1 : 0,
+        items: kitBuilderItemsState
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✅ Kit "${nombre}" guardado con precio por unidad (${formatRD(unitSum)}).`);
+      closeKitBuilderModal();
+      await loadPromotionalKits(f.id);
+    } else {
+      showToast(data.error || 'No se pudo guardar el kit', 'error');
+    }
+  } catch (err) {
+    showToast('Error al guardar el kit', 'error');
+  }
+}
+
+/* =========================================================================
+   ATENCIÓN FARMACÉUTICA: TOMA DE PRESIÓN ARTERIAL Y GLICEMIA
+   (REGISTRO A PACIENTES CRÓNICOS, PRECIO CONFIGURABLE E IMPRESIÓN CON FECHA Y HORA)
+   ========================================================================= */
+
+sysState.pharmaCareTariffs = [];
+sysState.pharmaCareRecords = [];
+sysState.lastPrintedPharmaCareRecord = null;
+
+async function loadPharmaceuticalCareData(fid) {
+  try {
+    const id = fid || (sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1);
+    const res = await fetch(`/api/pharmaceutical-care?farmacia_id=${id}`);
+    const data = await res.json();
+    if (data.ok) {
+      sysState.pharmaCareTariffs = data.tariffs || [];
+      sysState.pharmaCareRecords = data.records || [];
+      renderPharmaCareTariffsCards();
+      renderPharmaCareRecordsTable();
+    }
+  } catch (err) {
+    console.error('Error cargando Atención Farmacéutica:', err);
+  }
+}
+
+function renderPharmaCareTariffsCards() {
+  const container = document.getElementById('pharma-care-tariffs-cards');
+  if (!container) return;
+  const tariffs = sysState.pharmaCareTariffs || [];
+  if (!tariffs.length) return;
+
+  container.innerHTML = tariffs.map(t => `
+    <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <span class="text-2xl">${t.icono || '🩺'}</span>
+        <div>
+          <h4 class="text-xs font-extrabold text-slate-900 leading-tight">${t.nombre_servicio}</h4>
+          <span class="text-[10px] text-slate-500">Servicio secundario configurable</span>
+        </div>
+      </div>
+      <div class="text-right shrink-0">
+        <span class="text-sm font-black font-mono text-rose-700">${formatRD(t.precio_rd)}</span>
+        <button type="button" onclick="openPharmaCareModal(null, '${t.codigo_servicio}')" class="block mt-0.5 text-[10px] font-extrabold text-teal-700 hover:underline cursor-pointer">
+          + Registrar Toma
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderPharmaCareRecordsTable() {
+  const tbody = document.getElementById('pharma-care-records-tbody');
+  if (!tbody) return;
+  const records = sysState.pharmaCareRecords || [];
+  if (!records.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-6 text-center text-slate-400">
+          No hay registros de Toma de Presión o Glicemia aún. Use el botón "🩺 Toma de Presión / Glicemia" para registrar.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = records.map(r => {
+    const hasPA = r.presion_sistolica && r.presion_diastolica;
+    const hasGlic = r.glicemia_mg_dl && Number(r.glicemia_mg_dl) > 0;
+    let clinicalHtml = '';
+    if (hasPA) {
+      clinicalHtml += `
+        <div class="mb-1">
+          <span class="font-mono font-black text-slate-900 text-xs">🩺 PA: ${r.presion_sistolica}/${r.presion_diastolica} mmHg</span>
+          ${r.pulso_bpm ? `<span class="text-[10px] text-slate-500 font-mono ml-1">(♥ ${r.pulso_bpm} lpm)</span>` : ''}
+          <span class="block text-[10px] font-bold text-rose-800">${r.clasificacion_pa || ''}</span>
+        </div>
+      `;
+    }
+    if (hasGlic) {
+      clinicalHtml += `
+        <div>
+          <span class="font-mono font-black text-indigo-900 text-xs">🩸 Glicemia: ${r.glicemia_mg_dl} mg/dL</span>
+          <span class="text-[10px] text-slate-500">(${r.condicion_ayuno || 'Ayunas'})</span>
+          <span class="block text-[10px] font-bold text-indigo-800">${r.clasificacion_glicemia || ''}</span>
+        </div>
+      `;
+    }
+
+    return `
+      <tr class="hover:bg-rose-50/20 transition">
+        <td class="py-3 px-3">
+          <span class="font-mono font-black text-rose-700 text-xs">#${r.codigo_atencion}</span>
+          <div class="text-[11px] font-bold text-slate-800 mt-0.5">📅 ${r.fecha_toma}</div>
+          <div class="text-[11px] font-mono font-extrabold text-teal-800">⏰ ${r.hora_toma}</div>
+        </td>
+        <td class="py-3 px-3">
+          <p class="font-extrabold text-slate-900">${r.paciente_nombre}</p>
+          <p class="text-[10px] text-slate-500 font-mono">🪪 ${r.paciente_cedula || '-'} • 📞 ${r.paciente_telefono || '-'}</p>
+          <span class="inline-block mt-0.5 px-2 py-0.2 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">${r.diagnostico_cronico || 'Crónico'}</span>
+        </td>
+        <td class="py-3 px-3">
+          <span class="font-extrabold text-slate-800">${r.nombre_servicio}</span>
+          <span class="block text-[10px] text-slate-400">Atendido: ${r.atendido_por || 'Farmacéutico'}</span>
+        </td>
+        <td class="py-3 px-3">
+          ${clinicalHtml || '<span class="text-slate-400">Control registrado</span>'}
+        </td>
+        <td class="py-3 px-3 text-center">
+          <span class="font-mono font-black text-sm text-slate-900 block">${formatRD(r.precio_cobrado)}</span>
+          <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${r.estado_pago === 'PAGADO' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}">
+            ${r.estado_pago} • ${r.metodo_pago}
+          </span>
+        </td>
+        <td class="py-3 px-3 text-right">
+          <div class="inline-flex items-center gap-1.5 justify-end">
+            <button
+              type="button"
+              onclick="openPharmaCarePrintModal(${r.id})"
+              class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-[11px] shadow-xs flex items-center gap-1 cursor-pointer"
+              title="Imprimir reporte con fecha y hora de toma para entregar al paciente"
+            >
+              <span>🖨️</span> <span>Imprimir para Paciente</span>
+            </button>
+            <button
+              type="button"
+              onclick="deletePharmaCareRecord(${r.id})"
+              class="p-1.5 rounded-lg hover:bg-rose-100 text-rose-600 font-bold text-xs cursor-pointer"
+              title="Eliminar registro"
+            >
+              🗑️
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function openPharmaCareModal(patientId = null, defaultServiceCode = 'TOMA_PRESION') {
+  if (!sysState.pharmaCareTariffs || !sysState.pharmaCareTariffs.length) {
+    await loadPharmaceuticalCareData();
+  }
+  if (!sysState.chronicPatients || !sysState.chronicPatients.length) {
+    try {
+      const f = sysState.authenticatedPharmacy || { id: 1 };
+      const res = await fetch(`/api/chronic-patients?farmacia_id=${f.id || 1}`);
+      const d = await res.json();
+      if (d.ok) sysState.chronicPatients = Array.isArray(d.patients) ? d.patients : (d.patients?.items || []);
+    } catch (e) {}
+  }
+
+  // Llenar selector de pacientes crónicos
+  const sel = document.getElementById('pc-select-chronic-patient');
+  if (sel) {
+    const pts = Array.isArray(sysState.chronicPatients) ? sysState.chronicPatients : (sysState.chronicPatients?.items || []);
+    sel.innerHTML = `<option value="">-- Seleccionar Paciente Crónico Registrado --</option>` +
+      pts.map(p => `<option value="${p.id}">${p.nombre_completo} (${p.diagnostico || 'Crónico'}) — 🪪 ${p.cedula_identificacion || 'S/C'}</option>`).join('');
+  }
+
+  // Fecha y Hora actuales por defecto
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const timeStr = now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+  document.getElementById('pc-date').value = `${yyyy}-${mm}-${dd}`;
+  document.getElementById('pc-time').value = timeStr;
+  document.getElementById('pc-pa-sys').value = '';
+  document.getElementById('pc-pa-dia').value = '';
+  document.getElementById('pc-pulso').value = '';
+  document.getElementById('pc-glicemia').value = '';
+  document.getElementById('pc-peso').value = '';
+  document.getElementById('pc-spo2').value = '';
+  document.getElementById('pc-notes').value = '';
+
+  const f = sysState.authenticatedPharmacy || {};
+  document.getElementById('pc-attended-by').value = f.nombre_usuario_actual || f.usuario_actual || 'Farmacéutico de Turno';
+
+  if (patientId) {
+    if (sel) sel.value = String(patientId);
+    handleSelectChronicPatientForCare(patientId);
+  } else {
+    if (sel) sel.value = '';
+    document.getElementById('pc-patient-name').value = '';
+    document.getElementById('pc-patient-cedula').value = '';
+    document.getElementById('pc-patient-phone').value = '';
+    document.getElementById('pc-patient-diag').value = '';
+    document.getElementById('pc-patient-med').value = '';
+  }
+
+  const srvSel = document.getElementById('pc-service-type');
+  if (srvSel) {
+    srvSel.value = defaultServiceCode || 'TOMA_PRESION';
+    handlePharmaCareServiceTypeChange(srvSel.value);
+  }
+
+  updateLivePharmaCareClassification();
+  showModal('modal-pharma-care-register');
+}
+
+function openPharmaCareModalForPatient(patientId) {
+  openPharmaCareModal(patientId, 'TOMA_PRESION');
+}
+
+function closePharmaCareModal() {
+  hideModal('modal-pharma-care-register');
+}
+
+function handleSelectChronicPatientForCare(patientId) {
+  if (!patientId) return;
+  const ptsArr = Array.isArray(sysState.chronicPatients) ? sysState.chronicPatients : (sysState.chronicPatients?.items || []); const p = ptsArr.find(x => String(x.id) === String(patientId));
+  if (!p) return;
+  document.getElementById('pc-patient-name').value = p.nombre_completo || '';
+  document.getElementById('pc-patient-cedula').value = p.cedula_identificacion || '';
+  document.getElementById('pc-patient-phone').value = p.telefono || '';
+  document.getElementById('pc-patient-diag').value = p.diagnostico || '';
+  document.getElementById('pc-patient-med').value = p.medicamento_cronico || '';
+}
+
+function handlePharmaCareServiceTypeChange(serviceCode) {
+  const tariffs = sysState.pharmaCareTariffs || [];
+  const found = tariffs.find(t => t.codigo_servicio === serviceCode);
+  const priceInp = document.getElementById('pc-service-price');
+  if (priceInp) {
+    if (found) {
+      priceInp.value = Number(found.precio_rd).toFixed(2);
+    } else {
+      const defaults = { TOMA_PRESION: 50, TOMA_GLICEMIA: 150, COMBO_PRESION_GLICEMIA: 175, ATENCION_FARMACEUTICA: 100 };
+      priceInp.value = Number(defaults[serviceCode] || 50).toFixed(2);
+    }
+  }
+}
+
+function updateLivePharmaCareClassification() {
+  const sys = parseInt(document.getElementById('pc-pa-sys')?.value || '0', 10);
+  const dia = parseInt(document.getElementById('pc-pa-dia')?.value || '0', 10);
+  const paBadge = document.getElementById('pc-live-pa-badge');
+  if (paBadge) {
+    if (sys > 0 && dia > 0) {
+      if (sys >= 180 || dia >= 120) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white';
+        paBadge.textContent = '🚨 Crisis Hipertensiva';
+      } else if (sys >= 140 || dia >= 90) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        paBadge.textContent = '⚠️ HTA Grado 2';
+      } else if (sys >= 130 || dia >= 80) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+        paBadge.textContent = '⚠️ HTA Grado 1';
+      } else if (sys >= 120 && dia < 80) {
+        paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200';
+        paBadge.textContent = '🟡 Presión Elevada';
+      } else if (sys < 90 || dia < 60) {
+        paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-300';
+        paBadge.textContent = '🔵 Hipotensión';
+      } else {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        paBadge.textContent = '✅ Presión Normal';
+      }
+    } else {
+      paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200';
+      paBadge.textContent = 'Sin medir';
+    }
+  }
+
+  const glic = parseFloat(document.getElementById('pc-glicemia')?.value || '0');
+  const cond = document.getElementById('pc-condicion-ayuno')?.value || 'En Ayunas';
+  const glicBadge = document.getElementById('pc-live-glic-badge');
+  if (glicBadge) {
+    if (glic > 0) {
+      const isFasting = cond.toLowerCase().includes('ayun');
+      if (glic < 70) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white';
+        glicBadge.textContent = '🚨 Hipoglicemia';
+      } else if (isFasting ? glic <= 99 : glic < 140) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        glicBadge.textContent = '✅ Glicemia Normal';
+      } else if (isFasting ? glic <= 125 : glic <= 199) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+        glicBadge.textContent = '⚠️ Valor en Alerta';
+      } else {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        glicBadge.textContent = '🚨 Hiperglicemia';
+      }
+    } else {
+      glicBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200';
+      glicBadge.textContent = 'Sin medir';
+    }
+  }
+}
+
+async function submitPharmaCareRecord(e, sendToPosCart = false) {
+  if (e) e.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  const pacId = document.getElementById('pc-select-chronic-patient')?.value || null;
+  const nombre = document.getElementById('pc-patient-name')?.value.trim();
+  if (!nombre) {
+    showToast('Ingrese o seleccione el nombre del paciente.', 'error');
+    return;
+  }
+
+  const srvSelect = document.getElementById('pc-service-type');
+  const codigoServicio = srvSelect ? srvSelect.value : 'TOMA_PRESION';
+  const nombreServicio = srvSelect ? srvSelect.options[srvSelect.selectedIndex].text.replace(/^[^\wÁÉÍÓÚáéíóú]+/, '').trim() : 'Toma de Presión / Glicemia';
+  const metodoPago = document.getElementById('pc-payment-method')?.value || 'EFECTIVO';
+  let precio = parseFloat(document.getElementById('pc-service-price')?.value || '0');
+  if (metodoPago === 'CORTESIA') precio = 0;
+
+  const payload = {
+    farmacia_id: farmaciaId,
+    paciente_cronico_id: pacId ? Number(pacId) : null,
+    paciente_nombre: nombre,
+    paciente_cedula: document.getElementById('pc-patient-cedula')?.value.trim() || '',
+    paciente_telefono: document.getElementById('pc-patient-phone')?.value.trim() || '',
+    diagnostico_cronico: document.getElementById('pc-patient-diag')?.value.trim() || 'Control Crónico',
+    medicamento_habitual: document.getElementById('pc-patient-med')?.value.trim() || '',
+    codigo_servicio: codigoServicio,
+    nombre_servicio: nombreServicio,
+    fecha_toma: document.getElementById('pc-date')?.value || '',
+    hora_toma: document.getElementById('pc-time')?.value || '',
+    presion_sistolica: document.getElementById('pc-pa-sys')?.value || null,
+    presion_diastolica: document.getElementById('pc-pa-dia')?.value || null,
+    pulso_bpm: document.getElementById('pc-pulso')?.value || null,
+    brazo_toma: document.getElementById('pc-brazo')?.value || 'Brazo Izquierdo',
+    postura_paciente: document.getElementById('pc-postura')?.value || 'Sentado (5 min reposo)',
+    glicemia_mg_dl: document.getElementById('pc-glicemia')?.value || null,
+    condicion_ayuno: document.getElementById('pc-condicion-ayuno')?.value || 'En Ayunas (8h+)',
+    peso_kg: document.getElementById('pc-peso')?.value || null,
+    saturacion_o2: document.getElementById('pc-spo2')?.value || null,
+    observaciones: document.getElementById('pc-notes')?.value.trim() || '',
+    atendido_por: document.getElementById('pc-attended-by')?.value.trim() || 'Farmacéutico de Turno',
+    precio_cobrado: precio,
+    metodo_pago: metodoPago,
+    estado_pago: sendToPosCart ? 'EN_TICKET_POS' : (metodoPago === 'CORTESIA' ? 'CORTESIA' : 'PAGADO'),
+    registrar_en_caja: !sendToPosCart
+  };
+
+  try {
+    const res = await fetch('/api/pharmaceutical-care', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'Error al guardar registro', 'error');
+      return;
+    }
+
+    const rec = data.record;
+    closePharmaCareModal();
+    await loadPharmaceuticalCareData(farmaciaId);
+
+    if (sendToPosCart) {
+      const detParts = [];
+      if (rec.presion_sistolica && rec.presion_diastolica) detParts.push(`PA: ${rec.presion_sistolica}/${rec.presion_diastolica} mmHg`);
+      if (rec.glicemia_mg_dl) detParts.push(`Glicemia: ${rec.glicemia_mg_dl} mg/dL`);
+      sysState.posCart.push({
+        is_pharma_service: true,
+        nombre_comercial: rec.nombre_servicio,
+        presentacion: 'SERVICIO',
+        cantidad: 1,
+        unit_price: Number(rec.precio_cobrado || 0),
+        subtotal: Number(rec.precio_cobrado || 0),
+        detalle_clinico: `Paciente: ${rec.paciente_nombre} • Toma: ${rec.fecha_toma} ${rec.hora_toma} • ${detParts.join(' | ')}`
+      });
+      renderPosCart();
+      showToast(`🛒 Servicio "${rec.nombre_servicio}" cargado al Carrito POS (${formatRD(rec.precio_cobrado)})`);
+    } else {
+      showToast(`✅ Registro #${rec.codigo_atencion} guardado correctamente.`);
+      if (typeof refreshPharmacyWorkspace === 'function') {
+        refreshPharmacyWorkspace();
+      }
+    }
+
+    // Mostrar inmediatamente el comprobante imprimible con fecha y hora de toma para entregar al paciente
+    openPharmaCarePrintModal(rec.id, rec);
+  } catch (err) {
+    console.error('Error al registrar Atención Farmacéutica:', err);
+    showToast('Error de conexión al guardar registro.', 'error');
+  }
+}
+
+function openPharmaCareTariffsModal() {
+  const container = document.getElementById('pharma-care-tariffs-form-list');
+  if (!container) return;
+  const tariffs = sysState.pharmaCareTariffs || [];
+  container.innerHTML = tariffs.map((t, idx) => `
+    <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">${t.icono || '🩺'}</span>
+        <div>
+          <p class="font-extrabold text-slate-900">${t.nombre_servicio}</p>
+          <p class="text-[10px] text-slate-500">${t.descripcion || ''}</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <span class="font-bold text-slate-600">RD$</span>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          data-tariff-code="${t.codigo_servicio}"
+          data-tariff-name="${t.nombre_servicio}"
+          data-tariff-desc="${t.descripcion || ''}"
+          value="${Number(t.precio_rd).toFixed(2)}"
+          class="pharma-tariff-price-inp w-28 px-3 py-1.5 rounded-xl border-2 border-teal-500 bg-white font-mono font-black text-sm text-right"
+        />
+      </div>
+    </div>
+  `).join('');
+  showModal('modal-pharma-care-tariffs');
+}
+
+function closePharmaCareTariffsModal() {
+  hideModal('modal-pharma-care-tariffs');
+}
+
+async function submitPharmaCareTariffsForm(e) {
+  e.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const inputs = document.querySelectorAll('.pharma-tariff-price-inp');
+  const tariffsPayload = Array.from(inputs).map(inp => ({
+    codigo_servicio: inp.getAttribute('data-tariff-code'),
+    nombre_servicio: inp.getAttribute('data-tariff-name'),
+    descripcion: inp.getAttribute('data-tariff-desc'),
+    precio_rd: parseFloat(inp.value || '0')
+  }));
+
+  try {
+    const res = await fetch('/api/pharmaceutical-care/tariffs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        tariffs: tariffsPayload
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      sysState.pharmaCareTariffs = data.tariffs || [];
+      renderPharmaCareTariffsCards();
+      closePharmaCareTariffsModal();
+      showToast('✅ Precios de servicios de Atención Farmacéutica actualizados.');
+    }
+  } catch (err) {
+    showToast('Error al guardar precios', 'error');
+  }
+}
+
+function openPharmaCarePrintModal(recordId, directRecordObj = null) {
+  const rec = directRecordObj || (sysState.pharmaCareRecords || []).find(r => Number(r.id) === Number(recordId));
+  if (!rec) {
+    showToast('Registro no encontrado para imprimir.', 'error');
+    return;
+  }
+  sysState.lastPrintedPharmaCareRecord = rec;
+  const f = sysState.authenticatedPharmacy || {};
+  const area = document.getElementById('printable-pharma-care-area');
+  if (!area) return;
+
+  const hasPA = rec.presion_sistolica && rec.presion_diastolica;
+  const hasGlic = rec.glicemia_mg_dl && Number(rec.glicemia_mg_dl) > 0;
+
+  area.innerHTML = `
+    <div class="text-center space-y-0.5 pb-2 border-b-2 border-dashed border-slate-300">
+      <h3 class="text-base font-black text-slate-900 uppercase">${f.nombre || 'Farmacia Davalsi'}</h3>
+      <p class="text-[11px] font-bold text-rose-700 uppercase">SERVICIO DE ATENCIÓN FARMACÉUTICA</p>
+      <p class="text-[10px] font-mono text-slate-500">RNC: ${f.rnc || '1-31-99887-2'} • Tel: ${f.telefono || f.telefono_whatsapp || '809-555-0900'}</p>
+      <p class="text-[10px] text-slate-500">${f.direccion || ''}</p>
+    </div>
+
+    <!-- Recuadro de Fecha y Hora Exacta de la Toma -->
+    <div class="p-2.5 rounded-xl bg-slate-100 border border-slate-300 flex items-center justify-between text-[11px]">
+      <div>
+        <span class="text-slate-500 font-bold block">CONTROL N°: <strong class="font-mono text-slate-900">#${rec.codigo_atencion}</strong></span>
+        <span class="text-slate-800 font-extrabold">📅 FECHA DE TOMA: <span class="font-mono">${rec.fecha_toma}</span></span>
+      </div>
+      <div class="text-right">
+        <span class="px-2 py-0.5 rounded bg-rose-600 text-white font-black text-[10px] uppercase">REGISTRO OFICIAL</span>
+        <span class="block text-slate-900 font-black mt-0.5">⏰ HORA: <span class="font-mono">${rec.hora_toma}</span></span>
+      </div>
+    </div>
+
+    <!-- Datos del Paciente Crónico -->
+    <div class="space-y-1 text-[11px] border-b border-slate-200 pb-2">
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Paciente:</span><strong class="text-slate-900">${rec.paciente_nombre}</strong></div>
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Cédula / Tel:</span><span class="font-mono font-bold">${rec.paciente_cedula || 'S/C'} • ${rec.paciente_telefono || '-'}</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 font-semibold">Condición Crónica:</span><strong class="text-teal-800">${rec.diagnostico_cronico || 'Control Preventivo'}</strong></div>
+      ${rec.medicamento_habitual ? `<div class="flex justify-between"><span class="text-slate-500 font-semibold">Medicación Habitual:</span><span class="font-bold">${rec.medicamento_habitual}</span></div>` : ''}
+    </div>
+
+    <!-- Resultados Clínicos Registrados -->
+    <div class="space-y-2 py-1">
+      <p class="text-[10px] font-black uppercase text-slate-500 tracking-wider">RESULTADOS DE LA TOMA REGISTRADA:</p>
+
+      ${hasPA ? `
+        <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-black text-rose-950 text-xs">🩺 PRESIÓN ARTERIAL (PA):</span>
+            <span class="text-base font-black font-mono text-slate-900">${rec.presion_sistolica} / ${rec.presion_diastolica} mmHg</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-700">
+            <span>♥ Pulso / FC: <strong class="font-mono">${rec.pulso_bpm || '-'} lpm</strong></span>
+            <span>${rec.brazo_toma || 'Brazo Izq.'} • ${rec.postura_paciente || 'Sentado'}</span>
+          </div>
+          <div class="pt-1 border-t border-rose-200/60 text-[11px] font-extrabold text-rose-900">
+            Interpretación: ${rec.clasificacion_pa || 'Registrada'}
+          </div>
+        </div>
+      ` : ''}
+
+      ${hasGlic ? `
+        <div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-black text-indigo-950 text-xs">🩸 GLICEMIA CAPILAR:</span>
+            <span class="text-base font-black font-mono text-slate-900">${rec.glicemia_mg_dl} mg/dL</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-700">
+            <span>Condición de toma:</span>
+            <strong class="font-bold">${rec.condicion_ayuno || 'En Ayunas'}</strong>
+          </div>
+          <div class="pt-1 border-t border-indigo-200/60 text-[11px] font-extrabold text-indigo-900">
+            Interpretación: ${rec.clasificacion_glicemia || 'Registrada'}
+          </div>
+        </div>
+      ` : ''}
+
+      ${(rec.peso_kg || rec.saturacion_o2) ? `
+        <div class="p-2 rounded-lg bg-slate-50 border border-slate-200 flex justify-around text-[11px] font-bold">
+          ${rec.peso_kg ? `<span>⚖️ Peso: <strong>${rec.peso_kg} kg</strong></span>` : ''}
+          ${rec.saturacion_o2 ? `<span>🫁 SpO2: <strong>${rec.saturacion_o2}%</strong></span>` : ''}
+        </div>
+      ` : ''}
+    </div>
+
+    ${rec.observaciones ? `
+      <div class="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px]">
+        <span class="font-black text-amber-900 block uppercase text-[10px]">Recomendación Farmacéutica:</span>
+        <p class="text-slate-800 font-medium mt-0.5">${rec.observaciones}</p>
+      </div>
+    ` : ''}
+
+    <!-- Comprobante de Pago del Servicio Secundario -->
+    <div class="pt-2 border-t-2 border-dashed border-slate-300 space-y-1 text-[11px]">
+      <div class="flex justify-between font-bold text-slate-700">
+        <span>Servicio Realizado:</span>
+        <span>${rec.nombre_servicio}</span>
+      </div>
+      <div class="flex justify-between items-baseline text-sm font-black text-slate-900">
+        <span>MONTO DEL SERVICIO:</span>
+        <span class="text-teal-700 font-mono">${formatRD(rec.precio_cobrado)} (${rec.estado_pago})</span>
+      </div>
+      <div class="flex justify-between text-[10px] text-slate-500">
+        <span>Atendido por: ${rec.atendido_por || 'Farmacéutico'}</span>
+        <span>Pago: ${rec.metodo_pago}</span>
+      </div>
+    </div>
+
+    <div class="pt-4 text-center space-y-1">
+      <div class="border-t border-slate-400 w-44 mx-auto pt-1 text-[10px] font-bold text-slate-600">
+        Firma / Sello de Atención Farmacéutica
+      </div>
+      <p class="text-[9px] text-slate-400 italic">Conserve este comprobante para el control médico de su tratamiento crónico.</p>
+    </div>
+  `;
+
+  showModal('modal-pharma-care-print');
+}
+
+function closePharmaCarePrintModal() {
+  hideModal('modal-pharma-care-print');
+}
+
+function printCurrentPharmaCareReport() {
+  const area = document.getElementById('printable-pharma-care-area');
+  if (!area) return;
+  const win = window.open('', '_blank', 'width=420,height=700');
+  if (!win) {
+    window.print();
+    return;
+  }
+  win.document.write(`
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Comprobante Atención Farmacéutica - Toma de Presión / Glicemia</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 14px; color: #0f172a; font-size: 12px; }
+        .voucher { max-width: 320px; margin: 0 auto; border: 1px dashed #334155; padding: 12px; border-radius: 8px; }
+        h3 { margin: 0 0 4px 0; font-size: 15px; text-align: center; }
+        p { margin: 2px 0; }
+        .box { border: 1px solid #94a3b8; padding: 8px; border-radius: 6px; margin: 8px 0; background: #f8fafc; }
+        .row { display: flex; justify-content: space-between; margin: 3px 0; }
+        @media print { body { padding: 0; } .voucher { border: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="voucher">${area.innerHTML}</div>
+      <script>
+        window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 400); };
+      </script>
+    </body>
+    </html>
+  `);
+  win.document.close();
+}
+
+async function deletePharmaCareRecord(recordId) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  try {
+    const res = await fetch('/api/pharmaceutical-care/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: Number(f.id || 1), record_id: Number(recordId) })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('Registro eliminado.');
+      await loadPharmaceuticalCareData(f.id);
+    }
+  } catch (e) {
+    showToast('No se pudo eliminar el registro.', 'error');
+  }
+}
+
+window.loadPromotionalKits = loadPromotionalKits;
+window.renderPosQuickKits = renderPosQuickKits;
+window.openPosKitDetailModal = openPosKitDetailModal;
+window.handlePosKitSellerPriceChange = handlePosKitSellerPriceChange;
+window.applyPosKitSellerQuickDiscount = applyPosKitSellerQuickDiscount;
+window.closePosKitDetailModal = closePosKitDetailModal;
+window.executeAddKitFromModal = executeAddKitFromModal;
+window.addKitToPosCart = addKitToPosCart;
+window.renderKitsManagementView = renderKitsManagementView;
+window.saveSellerQuickKitOffer = saveSellerQuickKitOffer;
+window.openKitBuilderModal = openKitBuilderModal;
+window.closeKitBuilderModal = closeKitBuilderModal;
+window.addProductToKitBuilder = addProductToKitBuilder;
+window.removeProductFromKitBuilder = removeProductFromKitBuilder;
+window.submitKitBuilderForm = submitKitBuilderForm;
+
+window.loadPharmaceuticalCareData = loadPharmaceuticalCareData;
+window.openPharmaCareModal = openPharmaCareModal;
+window.openPharmaCareModalForPatient = openPharmaCareModalForPatient;
+window.closePharmaCareModal = closePharmaCareModal;
+window.handleSelectChronicPatientForCare = handleSelectChronicPatientForCare;
+window.handlePharmaCareServiceTypeChange = handlePharmaCareServiceTypeChange;
+window.updateLivePharmaCareClassification = updateLivePharmaCareClassification;
+window.submitPharmaCareRecord = submitPharmaCareRecord;
+window.openPharmaCareTariffsModal = openPharmaCareTariffsModal;
+window.closePharmaCareTariffsModal = closePharmaCareTariffsModal;
+window.submitPharmaCareTariffsForm = submitPharmaCareTariffsForm;
+window.openPharmaCarePrintModal = openPharmaCarePrintModal;
+window.closePharmaCarePrintModal = closePharmaCarePrintModal;
+window.printCurrentPharmaCareReport = printCurrentPharmaCareReport;
+window.deletePharmaCareRecord = deletePharmaCareRecord;

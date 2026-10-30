@@ -203,6 +203,9 @@
       </div>
 
       <div class="flex items-center gap-2">
+                <button type="button" onclick="openChronicPatientModal()" title="Programa Pacientes Crónicos & Alerta 10 días" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-extrabold border border-purple-500/40 flex items-center gap-1.5 transition cursor-pointer">
+          <span>🩺</span> <span class="hidden sm:inline">Pacientes Crónicos</span>
+        </button>
         <a href="/descargar-apk" download="Farmacia_Davalsi_App_Movil.apk" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-extrabold border border-emerald-500/40 flex items-center gap-1.5 transition">
           <span>📲</span> <span class="hidden sm:inline">Instalar APK Móvil</span>
         </a>
@@ -258,6 +261,68 @@
           </div>
         </div>
       </div>
+
+      <!-- BANNER DEL PROGRAMA DE PACIENTES CRÓNICOS & RECORDATORIO 10 DÍAS -->
+      <div class="bg-gradient-to-r from-purple-950/70 via-slate-900 to-indigo-950/70 rounded-3xl p-4 sm:p-5 border border-purple-500/30 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-start gap-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-purple-600/30 border border-purple-400/40 flex items-center justify-center text-2xl shrink-0 shadow-inner">
+            🩺
+          </div>
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                Programa Gratuito de Fidelización y Salud Continua
+              </span>
+            </div>
+            <h3 class="text-base sm:text-lg font-extrabold text-white">¿Tomas medicamentos todos los meses?</h3>
+            <p class="text-xs text-purple-200/80 max-w-2xl">
+              Inscríbete en nuestro <strong>Programa de Pacientes Crónicos</strong>. La farmacia apartará tu medicamento para que nunca te falte y te contactaremos por <strong>WhatsApp 10 días antes</strong> de que se termine tu tratamiento para coordinar entrega o retiro sin filas.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 w-full md:w-auto">
+          <button type="button" onclick="openChronicPatientModal()" class="flex-1 md:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer">
+            <span>📝</span> <span>Inscribir Medicación</span>
+          </button>
+          <button type="button" onclick="openMyChronicTreatmentsModal()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 font-bold text-xs border border-purple-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer">
+            <span>📋</span> <span class="hidden sm:inline">Mis Tratamientos</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- =====================================================================
+           SECCIÓN: KITS ALIVIO EN 1 CLIC (OFERTAS SEMANALES & COMBOS EXPRESS)
+           ===================================================================== -->
+      <section id="section-app-kits" class="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-teal-500/10 rounded-3xl p-4 sm:p-6 border border-amber-400/40 shadow-md space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-300/30">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shadow-xs flex items-center gap-1">
+                <span>⚡</span> OFERTAS SEMANALES EN 1 CLIC
+              </span>
+              <span class="text-xs font-extrabold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-300/60">
+                ¡Hasta 25% de Ahorro!
+              </span>
+            </div>
+            <h2 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <span>📦</span> Kits Alivio en 1 Clic
+            </h2>
+            <p class="text-xs text-slate-600 max-w-2xl font-medium">
+              Combos integrales listos para despachar con todo lo que necesitas para tu recuperación inmediata (antigripal, vitaminas, hidratación y más) con descuento especial de la semana.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-xs font-bold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-amber-200 shadow-xs flex items-center gap-1.5">
+              <span>⚡</span> <span>Despacho Rápido en Farmacia</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Grid de Tarjetas de Kits Semanales -->
+        <div id="app-kits-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Renderizado dinámicamente por app.js -->
+        </div>
+      </section>
 
       <!-- CINTILLO EN VIVO DE DISPONIBILIDAD DE SERVICIOS (CONTROLADO DESDE EL POS) -->
       <div class="bg-white rounded-2xl px-4 py-3 shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -712,6 +777,266 @@ function dismissPwaBanner() {
   if (banner) banner.classList.add('hidden');
 }
 </script>
+
+  <!-- =====================================================================
+       MODAL: SUSTITUTOS INTELIGENTES Y ALTERNATIVAS DE AHORRO (APP PACIENTE)
+       ===================================================================== -->
+  <div id="modal-app-substitutes" class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs hidden items-center justify-center p-3 sm:p-5">
+    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[85vh]">
+      <div class="p-4 bg-gradient-to-r from-teal-700 to-emerald-800 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">💡</span>
+          <div>
+            <h3 class="font-extrabold text-sm sm:text-base">Alternativas de Ahorro y Genéricos</h3>
+            <p class="text-[11px] text-teal-100">Medicamentos con el mismo principio activo</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeAppSubstitutesModal()" class="text-white/80 hover:text-white font-extrabold text-lg p-1">✕</button>
+      </div>
+
+      <div class="p-4 space-y-3 overflow-y-auto flex-1 text-xs">
+        <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Consultando:</span>
+            <p id="app-sub-orig-name" class="font-extrabold text-slate-900">-</p>
+            <p id="app-sub-orig-pa" class="text-[11px] text-teal-700 font-bold">-</p>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] text-slate-400 font-bold">Precio</span>
+            <p id="app-sub-orig-price" class="font-black text-slate-900 font-mono text-sm">RD$ 0.00</p>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <p class="font-extrabold text-slate-700 text-[11px] uppercase">Opciones Disponibles en Farmacia Davalsi:</p>
+          <div id="app-substitutes-list" class="space-y-2">
+            <!-- Dynamic items -->
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+        <button type="button" onclick="closeAppSubstitutesModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-xs">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+<!-- =====================================================================
+       MODAL: REGISTRO DE PACIENTE CRÓNICO DESDE LA APP
+       ===================================================================== -->
+  <div id="modal-app-chronic-register" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="max-w-xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 my-8">
+      <!-- Modal Header -->
+      <div class="bg-gradient-to-r from-purple-800 via-indigo-800 to-slate-900 text-white p-5 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center text-xl shadow">
+            🩺
+          </div>
+          <div>
+            <h3 class="text-base sm:text-lg font-extrabold">Inscripción Programa Crónico</h3>
+            <p class="text-xs text-purple-200">Alerta 10 días de anticipación por WhatsApp • Farmacia Davalsi</p>
+          </div>
+        </div>
+        <button onclick="closeChronicPatientModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center transition">✕</button>
+      </div>
+
+      <!-- Modal Body / Form -->
+      <form id="form-app-chronic-register" onsubmit="submitChronicPatientFromApp(event)" class="p-5 sm:p-6 space-y-4 text-xs">
+        
+        <div class="bg-purple-50 border border-purple-200 rounded-2xl p-3 flex items-start gap-2.5 text-purple-900">
+          <span class="text-base">🔔</span>
+          <p class="text-[11px] leading-relaxed">
+            Al inscribirte, la farmacia reservará tu stock y nuestro equipo te escribirá a tu <strong>WhatsApp con 10 días de anticipación</strong> para coordinar tu reposición con descuento de cliente frecuente.
+          </p>
+        </div>
+
+        <!-- Nombre y WhatsApp -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Nombre Completo del Paciente *</label>
+            <input id="pac-chronic-name" type="text" required placeholder="Ej. Juan Pérez" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">WhatsApp Móvil (Para la Alerta 10d) *</label>
+            <input id="pac-chronic-phone" type="tel" required placeholder="Ej. 8095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono font-bold focus:border-purple-600 focus:outline-none" />
+          </div>
+        </div>
+
+        <!-- Cédula y Condición -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Cédula de Identidad (Opcional)</label>
+            <input id="pac-chronic-cedula" type="text" placeholder="001-XXXXXXX-X" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono focus:border-purple-600 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Condición / Diagnóstico Médico *</label>
+            <select id="pac-chronic-diag" required onchange="handleChronicDiagChange(this.value)" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold bg-white focus:border-purple-600 focus:outline-none">
+              <option value="Hipertensión Arterial">Hipertensión Arterial (Presión Alta)</option>
+              <option value="Diabetes Mellitus">Diabetes Mellitus (Azúcar / Glucosa)</option>
+              <option value="Cardiopatía / Cardíaco">Cardiopatía / Insuficiencia Cardíaca</option>
+              <option value="Asma / EPOC">Asma / Alergia Respiratoria / EPOC</option>
+              <option value="Colesterol / Triglicéridos">Colesterol / Triglicéridos (Dislipidemia)</option>
+              <option value="Hipotiroidismo / Tiroides">Hipotiroidismo / Tiroides</option>
+              <option value="Artritis / Dolor Crónico">Artritis / Dolor Crónico / Reumatología</option>
+              <option value="OTRO">Otra condición (especificar)...</option>
+            </select>
+            <input id="pac-chronic-diag-custom" type="text" placeholder="Escribe tu diagnóstico médico..." class="hidden mt-1.5 w-full px-3 py-2 rounded-xl border border-purple-300 bg-purple-50 font-semibold" />
+          </div>
+        </div>
+
+        <!-- Medicamento y Principio Activo -->
+        <div class="space-y-1.5 relative">
+          <label class="block font-bold text-slate-700">Medicamento que tomas continuamente *</label>
+          <div class="relative">
+            <input
+              id="pac-chronic-med"
+              type="text"
+              required
+              autocomplete="off"
+              oninput="handleChronicMedSearch(this.value)"
+              placeholder="Buscar en farmacia (ej. Losartán 50mg, Metformina, Amlodipina...)"
+              class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none"
+            />
+            <span class="absolute left-3 top-2.5 text-slate-400">💊</span>
+            <input type="hidden" id="pac-chronic-prod-id" value="0" />
+          </div>
+          <!-- Dropdown sugerencias autocompletado -->
+          <div id="pac-chronic-med-suggestions" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-2xl shadow-2xl max-h-48 overflow-y-auto z-50 p-1.5 space-y-1">
+            <!-- Items dinámicos -->
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Principio Activo (Opcional)</label>
+            <input id="pac-chronic-pa" type="text" placeholder="Ej. Losartán, Metformina..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Dosis / Indicación de toma</label>
+            <input id="pac-chronic-dose" type="text" value="1 comprimido diario en la mañana" placeholder="Ej. 1 tableta cada 24 horas" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none" />
+          </div>
+        </div>
+
+        <!-- Duración del tratamiento y Fecha Última Compra -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">¿Cada cuántos días compras tu medicina? *</label>
+            <select id="pac-chronic-days" onchange="updateChronicRefillCalc()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold bg-white focus:border-purple-600 focus:outline-none">
+              <option value="30" selected>Cada 30 días (1 mes - Estándar)</option>
+              <option value="15">Cada 15 días (Quincenal)</option>
+              <option value="60">Cada 60 días (2 meses)</option>
+              <option value="90">Cada 90 días (3 meses)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Fecha de última compra o inicio *</label>
+            <input id="pac-chronic-date" type="date" required onchange="updateChronicRefillCalc()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none" />
+          </div>
+        </div>
+
+        <!-- TARJETA DINÁMICA DE CÁLCULO DE ALERTA -->
+        <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl p-3.5 border border-purple-500/40 space-y-1.5 shadow-sm">
+          <div class="flex items-center justify-between text-[11px] font-bold text-purple-300">
+            <span>🗓️ Calendario de Reposición Calculado:</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px]">Alerta Activa</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs pt-1">
+            <div class="bg-white/10 rounded-xl p-2 border border-white/10">
+              <span class="text-[10px] text-slate-300 block">Tu medicación dura hasta:</span>
+              <span id="calc-chronic-end-date" class="font-extrabold text-amber-300">-</span>
+            </div>
+            <div class="bg-purple-600/30 rounded-xl p-2 border border-purple-400/30">
+              <span class="text-[10px] text-purple-200 block">Te avisaremos por WhatsApp el:</span>
+              <span id="calc-chronic-alert-date" class="font-extrabold text-emerald-300">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Servicio Secundario Opcional: Atención Farmacéutica (Toma de Presión o Glicemia) -->
+        <div class="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-black text-rose-900 uppercase text-[11px] flex items-center gap-1.5">
+              <span>🩺</span> <span>Servicio Secundario Opcional: Atención Farmacéutica</span>
+            </span>
+            <span class="px-2 py-0.5 rounded-full bg-white text-rose-700 border border-rose-300 font-bold text-[10px]">Reporte Impreso con Fecha y Hora</span>
+          </div>
+          <p class="text-[11px] text-slate-600">
+            Como paciente crónico puedes adquirir en farmacia el servicio de <strong>Toma de Presión Arterial</strong> o <strong>Prueba de Glicemia Capilar</strong> y recibir tu ficha impresa con fecha y hora de toma.
+          </p>
+        </div>
+
+        <!-- Notas adicionales -->
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Notas o Indicaciones Especiales del Médico (Opcional)</label>
+          <textarea id="pac-chronic-notes" rows="2" placeholder="Ej. Tomar en ayunas, no suspender sin indicación..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"></textarea>
+        </div>
+
+        <div id="pac-chronic-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
+
+        <!-- Botones de Acción -->
+        <div class="pt-2 flex items-center justify-end gap-2.5">
+          <button type="button" onclick="closeChronicPatientModal()" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition">
+            Cancelar
+          </button>
+          <button type="submit" id="btn-submit-chronic-app" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold shadow-lg transition flex items-center gap-2 cursor-pointer">
+            <span>✅</span> <span>Completar Inscripción</span>
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL: MIS TRATAMIENTOS CRÓNICOS (CONSULTA DESDE LA APP)
+       ===================================================================== -->
+  <div id="modal-app-my-chronic" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="max-w-2xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 my-8">
+      <!-- Modal Header -->
+      <div class="bg-gradient-to-r from-purple-800 via-indigo-800 to-slate-900 text-white p-5 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center text-xl shadow">
+            📋
+          </div>
+          <div>
+            <h3 class="text-base sm:text-lg font-extrabold">Mis Tratamientos Crónicos</h3>
+            <p class="text-xs text-purple-200">Monitoreo de medicación y reposición anticipada • Farmacia Davalsi</p>
+          </div>
+        </div>
+        <button onclick="closeMyChronicTreatmentsModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center transition">✕</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-5 sm:p-6 space-y-4 text-xs">
+        <!-- Barra de Búsqueda por Teléfono -->
+        <div class="flex items-center gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200">
+          <span class="text-slate-500 pl-2">📱 Teléfono WhatsApp:</span>
+          <input id="my-chronic-phone-input" type="tel" placeholder="Ingresa tu teléfono..." class="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 font-mono font-bold bg-white text-xs" />
+          <button type="button" onclick="loadMyChronicTreatments()" class="px-3.5 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs shadow transition">
+            Consultar
+          </button>
+        </div>
+
+        <!-- Lista de Tratamientos -->
+        <div id="my-chronic-treatments-container" class="space-y-3 max-h-96 overflow-y-auto pr-1">
+          <!-- Renderizado por app.js -->
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <button type="button" onclick="closeMyChronicTreatmentsModal(); openChronicPatientModal();" class="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-extrabold flex items-center gap-1.5 transition cursor-pointer">
+            <span>➕</span> <span>Inscribir Otro Medicamento</span>
+          </button>
+          <button type="button" onclick="closeMyChronicTreatmentsModal()" class="px-4 py-2.5 rounded-xl bg-slate-800 text-white font-bold transition">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </body>
 
 </html>
