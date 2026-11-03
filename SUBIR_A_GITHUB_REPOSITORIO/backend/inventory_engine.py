@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Motor Matemático de Conversión de Empaques, Control de Inventario Unificado
 y Evaluador de Alertas de Vencimiento (FEFO)

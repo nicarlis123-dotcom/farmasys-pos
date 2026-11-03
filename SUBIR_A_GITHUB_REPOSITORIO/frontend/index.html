@@ -11,6 +11,12 @@
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#0d9488" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Farmacia Davalsi" />
+  <!-- Leaflet Interactive Maps CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="/styles.css" />
   <script>
     tailwind.config = {
@@ -41,6 +47,53 @@
       }
     }
   </script>
+
+  <style>
+    @keyframes farmaia-float {
+      0%, 100% { transform: translateY(0px) rotate(0deg); }
+      50% { transform: translateY(-8px) rotate(1.5deg); }
+    }
+    @keyframes farmaia-pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.08); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    @keyframes farmaia-glow {
+      0%, 100% { filter: drop-shadow(0 0 12px rgba(20, 184, 166, 0.45)); }
+      50% { filter: drop-shadow(0 0 24px rgba(52, 211, 153, 0.85)); }
+    }
+    .farmaia-3d-avatar {
+      animation: farmaia-float 3.6s ease-in-out infinite, farmaia-glow 3s ease-in-out infinite;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .farmaia-3d-avatar:hover {
+      transform: scale(1.08) translateY(-4px) rotate(-2deg);
+    }
+    .farmaia-3d-fab {
+      position: fixed;
+      bottom: 84px;
+      right: 20px;
+      z-index: 45;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .farmaia-speech-bubble {
+      animation: farmaia-float 4s ease-in-out infinite;
+    }
+  </style>
+
+
+  <script>
+    window.openAppAiModal = function(tab, query) {
+      if (typeof openAppAiAssistantModal === 'function') {
+        openAppAiAssistantModal(tab, query);
+      } else if (typeof window.openAppAiAssistantModal === 'function') {
+        window.openAppAiAssistantModal(tab, query);
+      }
+    };
+  </script>
+
 </head>
 <body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
   <!-- =====================================================================
@@ -75,6 +128,20 @@
   </div>
 
 
+  <!-- BANNER DE EMERGENCIA OFFLINE (MODO FUERA DE LÍNEA PWA) -->
+  <div id="app-offline-emergency-banner" class="hidden bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 text-white px-3 py-2 flex items-center justify-between shadow-md sticky top-0 z-50 text-xs font-bold">
+    <div class="flex items-center gap-2">
+      <span class="text-lg">📡</span>
+      <div>
+        <p class="font-black leading-tight text-white">Modo Offline de Emergencia Activo</p>
+        <p class="text-[11px] text-amber-100 font-normal">Estás sin conexión a internet. Catálogo de emergencia, botiquín y primeros auxilios disponibles.</p>
+      </div>
+    </div>
+    <a href="tel:8095550199" class="px-2.5 py-1 rounded-lg bg-white text-rose-900 font-black text-xs shadow hover:bg-amber-50 transition cursor-pointer">
+      📞 Llamar Urgencia
+    </a>
+  </div>
+
   <!-- Banner de Instalacion de la App Movil en Celulares -->
   <div id="pwa-install-banner" class="hidden bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white px-3 py-2 sm:px-4 sm:py-2.5 flex items-center justify-between shadow-lg sticky top-0 z-50 text-xs font-bold">
     <div class="flex items-center gap-2">
@@ -96,10 +163,15 @@
 
 
   <!-- =====================================================================
-       PANTALLA DE ACCESO POR CLAVE PARA PACIENTES (PATIENT LOGIN GATE)
+       PANTALLA DE ACCESO POR CLAVE PARA PACIENTES (PATIENT LOGIN MODAL)
        ===================================================================== -->
-  <div id="patient-auth-gate-screen" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+  <div id="patient-auth-gate-screen" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 overflow-y-auto" style="display: none;">
+    <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 relative animate-in fade-in zoom-in-95 duration-200">
+      <!-- Botón de Cerrar Modal (Para entrar y navegar libremente como invitado) -->
+      <button type="button" onclick="closePatientAuthModal()" class="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-black/25 hover:bg-black/40 text-white font-black flex items-center justify-center text-sm transition cursor-pointer" title="Cerrar y continuar a la app">
+        ✕
+      </button>
+
       <div class="bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white p-6 text-center relative">
         <div class="w-12 h-12 mx-auto rounded-2xl bg-white/20 flex items-center justify-center mb-3 shadow">
           <span class="text-2xl">🔐</span>
@@ -111,10 +183,10 @@
       <div class="p-6 space-y-4">
         <!-- Selector Modo: Iniciar Sesión vs Registro -->
         <div class="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
-          <button type="button" id="tab-patient-login" onclick="switchPatientAuthMode('login')" class="flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition">
+          <button type="button" id="tab-patient-login" onclick="switchPatientAuthMode('login')" class="flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition cursor-pointer">
             Iniciar Sesión
           </button>
-          <button type="button" id="tab-patient-register" onclick="switchPatientAuthMode('register')" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition">
+          <button type="button" id="tab-patient-register" onclick="switchPatientAuthMode('register')" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition cursor-pointer">
             Crear Cuenta Nueva
           </button>
         </div>
@@ -130,7 +202,7 @@
             <input id="pac-login-password" type="password" required placeholder="Ingresa tu clave secreta..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
           </div>
           <div id="pac-login-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
-          <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow transition">
+          <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow transition cursor-pointer">
             Entrar a la App ➜
           </button>
         </form>
@@ -160,15 +232,20 @@
             <input id="pac-reg-dir" type="text" placeholder="Calle, sector, referencia..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
           </div>
           <div id="pac-reg-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
-          <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow transition">
+          <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow transition cursor-pointer">
             Registrarme y Entrar
           </button>
         </form>
-</div>
+
+        <!-- Botón para cerrar y continuar explorando sin login obligatorio -->
+        <div class="pt-2 text-center border-t border-slate-100">
+          <button type="button" onclick="closePatientAuthModal()" class="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer">
+            <span>🛍️</span> <span>Continuar a la tienda sin iniciar sesión</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
-
 
   <!-- BARRA SUPERIOR DE ARQUITECTURA OMNICANAL (CONMUTADOR DE MÓDULOS) -->
   <header class="sticky top-0 z-40 bg-slate-900 text-white shadow-lg border-b border-slate-800">
@@ -192,23 +269,49 @@
       </div>
       <!-- Selector de Módulo Activo -->
       
-      <!-- Perfil de Paciente Autenticado -->
-      <div id="patient-auth-badge" class="hidden flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl">
+      <!-- Perfil de Paciente Autenticado (Oculto si no hay sesión) -->
+      <div id="patient-auth-badge" class="hidden items-center gap-1.5 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl" style="display: none;">
         <span class="text-xs text-teal-300 font-bold flex items-center gap-1">
           <span>👤</span> <span id="header-patient-name">Paciente</span>
         </span>
-        <button type="button" onclick="handlePatientLogout()" title="Cerrar Sesión de Paciente" class="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 pl-2 border-l border-slate-700">
+        <button type="button" onclick="handlePatientLogout()" title="Cerrar Sesión de Paciente" class="text-[10px] text-rose-400 hover:text-rose-300 font-bold ml-1 pl-2 border-l border-slate-700 cursor-pointer">
           Salir
         </button>
       </div>
 
+      <!-- Botón Iniciar Sesión (Visible cuando no hay paciente logueado) -->
+      <button type="button" id="btn-open-patient-login" onclick="openPatientAuthModal()" title="Accede con tu cuenta o regístrate" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-xs shadow transition flex items-center gap-1.5 cursor-pointer">
+        <span>👤</span> <span>Iniciar Sesión</span>
+      </button>
+      <!-- Acceso Directo al Sistema POS / Administrador -->
+      <a href="/pos?auto=admin" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer shrink-0" title="Entrar directamente al Sistema POS de Mostrador con Cuenta Administrador">
+        <span>🖥️</span> <span>Entrar al POS (Admin)</span>
+      </a>
+
+
       <div class="flex items-center gap-2">
-                <button type="button" onclick="openChronicPatientModal()" title="Programa Pacientes Crónicos & Alerta 10 días" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-extrabold border border-purple-500/40 flex items-center gap-1.5 transition cursor-pointer">
-          <span>🩺</span> <span class="hidden sm:inline">Pacientes Crónicos</span>
+        <!-- RASTREO DELIVERY EN VIVO CON MAPA -->
+        <button type="button" onclick="openDeliveryTrackingModal()" title="Rastreo de Pedido y Delivery en Tiempo Real con Mapa" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-teal-600/30 hover:bg-teal-600/50 text-teal-300 text-xs font-extrabold border border-teal-500/40 flex items-center gap-1.5 transition cursor-pointer">
+          <span>🛵</span> <span class="hidden sm:inline">Rastrear Delivery</span>
         </button>
+
+        <!-- INSTALAR PWA DIRECTO -->
+        <button type="button" onclick="triggerPwaInstall()" title="Instalar App en tu pantalla de inicio" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 text-xs font-extrabold border border-emerald-500/40 flex items-center gap-1.5 transition cursor-pointer">
+          <span>📲</span> <span class="hidden md:inline">Instalar PWA</span>
+        </button>
+
         <a href="/descargar-apk" download="Farmacia_Davalsi_App_Movil.apk" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-extrabold border border-emerald-500/40 flex items-center gap-1.5 transition">
           <span>📲</span> <span class="hidden sm:inline">Instalar APK Móvil</span>
         </a>
+
+        <!-- BOTÓN DEMO DE COMPRA (AL LADO DE LA DESCARGA DE LA APP) -->
+        <button type="button" onclick="iniciarDemoCompraVisual()" title="Aprende cómo comprar y pedir por WhatsApp con un ejemplo visual interactivo guiado por FarmaIA" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500/25 to-teal-500/25 hover:from-emerald-500/40 hover:to-teal-500/40 text-emerald-300 text-xs font-black border border-emerald-400/50 flex items-center gap-1.5 shadow-xs transition cursor-pointer">
+          <span>🎓</span> <span>¿Cómo Comprar? (Demo)</span>
+        </button>
+        <button type="button" onclick="document.getElementById('section-buzon-quejas-aparte')?.scrollIntoView({ behavior: 'smooth' })" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-extrabold text-xs border border-rose-500/40 shadow-xs transition flex items-center gap-1 cursor-pointer" title="Buzón Oficial de Quejas y Sugerencias">
+          <span>📢</span> <span class="hidden md:inline">Buzón de Quejas</span>
+        </button>
+
         <button type="button" onclick="configurePosServerIp()" title="Conectar con IP del servidor POS en red o usar Modo Autónomo" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold border border-slate-700 flex items-center gap-1 transition cursor-pointer">
           <span>🌐</span> <span class="hidden md:inline">Red POS</span>
         </button>
@@ -262,33 +365,74 @@
         </div>
       </div>
 
-      <!-- BANNER DEL PROGRAMA DE PACIENTES CRÓNICOS & RECORDATORIO 10 DÍAS -->
-      <div class="bg-gradient-to-r from-purple-950/70 via-slate-900 to-indigo-950/70 rounded-3xl p-4 sm:p-5 border border-purple-500/30 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div class="flex items-start gap-3.5">
-          <div class="w-12 h-12 rounded-2xl bg-purple-600/30 border border-purple-400/40 flex items-center justify-center text-2xl shrink-0 shadow-inner">
-            🩺
-          </div>
-          <div class="space-y-1">
-            <div class="flex items-center gap-2">
-              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-400/30">
-                Programa Gratuito de Fidelización y Salud Continua
+      
+
+      <!-- ALERTA AUTOMÁTICA FARMA-IA: RECORDATORIO 5 DÍAS ANTES DE TERMINAR MEDICAMENTO CRÓNICO -->
+      <div id="app-chronic-5d-alert-banner" class="hidden p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-rose-500/15 to-purple-900/20 border-2 border-amber-400 shadow-md space-y-2.5">
+        <!-- Renderizado dinámicamente cuando el paciente tiene medicación crónica a <= 5 días de agotarse -->
+      </div>
+
+      <!-- =====================================================================
+           CUADRO PRINCIPAL DE ASISTENCIA CLÍNICA FARMA-IA
+           (Funciones Clínicas: Principio Activo, Medicamentos Crónicos, Signos Vitales y Subir Receta)
+           ===================================================================== -->
+      <section id="section-app-farmaia-hub" class="rounded-3xl p-5 sm:p-6 bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 text-white border-2 border-indigo-400/60 shadow-2xl space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-center gap-3.5">
+            <div class="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-900 to-teal-900 border-2 border-teal-400/60 flex items-center justify-center shrink-0 shadow-lg cursor-pointer" onclick="openAppAiModal()">
+              <img src="/farmaia_model.jpg" alt="FarmaIA 3D" class="w-13 h-13 object-contain farmaia-3d-avatar" onerror="this.src='/farmaia_avatar.png'" />
+              <span class="absolute -bottom-1 -right-1 flex h-4 w-4">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-4 w-4 bg-teal-500"></span>
               </span>
             </div>
-            <h3 class="text-base sm:text-lg font-extrabold text-white">¿Tomas medicamentos todos los meses?</h3>
-            <p class="text-xs text-purple-200/80 max-w-2xl">
-              Inscríbete en nuestro <strong>Programa de Pacientes Crónicos</strong>. La farmacia apartará tu medicamento para que nunca te falte y te contactaremos por <strong>WhatsApp 10 días antes</strong> de que se termine tu tratamiento para coordinar entrega o retiro sin filas.
-            </p>
+            <div>
+              <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 text-[10px] font-black uppercase tracking-wider border border-teal-400/40">
+                <span>🤖</span> <span>Asistencia Farmacológica y Clínica IA</span>
+              </div>
+              <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight mt-1">Asistente Inteligente FarmaIA</h2>
+              <p class="text-xs text-indigo-200 font-medium">Recomendación por principio activo, control de medicamentos crónicos, signos vitales y lectura de recetas</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="openAppAiModal()" class="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 font-black text-xs shadow-lg transition flex items-center justify-center gap-2 cursor-pointer shrink-0">
+              <span>Abrir Asistente Clínico</span> <span>➔</span>
+            </button>
           </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0 w-full md:w-auto">
-          <button type="button" onclick="openChronicPatientModal()" class="flex-1 md:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer">
-            <span>📝</span> <span>Inscribir Medicación</span>
+
+        <!-- 4 Tarjetas Clínicas de Acceso Directo (Guía de compra y Buzón de quejas removidos de este cuadro) -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-indigo-800/50 text-xs">
+          <button type="button" onclick="openAppAiModal('principio_activo')" class="p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-indigo-300/20 text-left transition flex flex-col justify-between cursor-pointer group">
+            <span class="text-2xl">💊</span>
+            <div>
+              <span class="font-extrabold text-white text-xs block mt-1.5 group-hover:text-teal-300">Principio Activo</span>
+              <span class="text-[10px] text-indigo-300 block">Sustitutos y bioequivalentes</span>
+            </div>
           </button>
-          <button type="button" onclick="openMyChronicTreatmentsModal()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 font-bold text-xs border border-purple-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer">
-            <span>📋</span> <span class="hidden sm:inline">Mis Tratamientos</span>
+          <button type="button" onclick="openAppAiModal('cronicos_5d')" class="p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-indigo-300/20 text-left transition flex flex-col justify-between cursor-pointer group">
+            <span class="text-2xl">⏰</span>
+            <div>
+              <span class="font-extrabold text-white text-xs block mt-1.5 group-hover:text-amber-300">Medicamentos Crónicos</span>
+              <span class="text-[10px] text-indigo-300 block">Registro y próxima compra</span>
+            </div>
+          </button>
+          <button type="button" onclick="openAppAiModal('presion_azucar_peso')" class="p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-indigo-300/20 text-left transition flex flex-col justify-between cursor-pointer group">
+            <span class="text-2xl">🩺</span>
+            <div>
+              <span class="font-extrabold text-white text-xs block mt-1.5 group-hover:text-teal-300">Signos Vitales</span>
+              <span class="text-[10px] text-indigo-300 block">PA, Azúcar, Peso y Talla</span>
+            </div>
+          </button>
+          <button type="button" onclick="openAppAiModal('receta_ia')" class="p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-indigo-300/20 text-left transition flex flex-col justify-between cursor-pointer group">
+            <span class="text-2xl">📸</span>
+            <div>
+              <span class="font-extrabold text-white text-xs block mt-1.5 group-hover:text-blue-300">Subir Receta Médica</span>
+              <span class="text-[10px] text-indigo-300 block">Visión IA & alergias</span>
+            </div>
           </button>
         </div>
-      </div>
+      </section>
 
       <!-- =====================================================================
            SECCIÓN: KITS ALIVIO EN 1 CLIC (OFERTAS SEMANALES & COMBOS EXPRESS)
@@ -305,10 +449,10 @@
               </span>
             </div>
             <h2 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span>📦</span> Kits Alivio en 1 Clic
+              <span>🤖</span> Kits Médicos IA Multi-Dosis (Alivio en 1 Clic)
             </h2>
             <p class="text-xs text-slate-600 max-w-2xl font-medium">
-              Combos integrales listos para despachar con todo lo que necesitas para tu recuperación inmediata (antigripal, vitaminas, hidratación y más) con descuento especial de la semana.
+              Esquemas médicos completos de más de 1 dosis (Gripe 3 días, Cuadro Parasitario, Cuadro Gástrico 5 días, Fiebre/Dolor y Anemia/Nutrición) armados con nuestros medicamentos en stock.
             </p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -323,6 +467,12 @@
           <!-- Renderizado dinámicamente por app.js -->
         </div>
       </section>
+
+      <!-- =====================================================================
+           SECCIÓN: ASISTENTE INTELIGENTE FARMA-IA PARA EL CLIENTE EN LA APP
+           (1. Principio Activo | 2. Crónicos 5 Días | 3. Presión/Azúcar/Peso/Talla | 4. Guía App & WhatsApp)
+           ===================================================================== -->
+      <!-- [Centralizado]: Opciones de FarmaIA consolidadas exclusivamente en el Asistente 3D Flotante y barra superior -->
 
       <!-- CINTILLO EN VIVO DE DISPONIBILIDAD DE SERVICIOS (CONTROLADO DESDE EL POS) -->
       <div class="bg-white rounded-2xl px-4 py-3 shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -414,6 +564,60 @@
       <div id="app-products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <!-- Renderizado dinámicamente por app.js -->
       </div>
+
+      <!-- =====================================================================
+           SECCIÓN APARTE: BUZÓN OFICIAL DE QUEJAS Y SUGERENCIAS
+           (Separado de la asistencia clínica de FarmaIA, con seguimiento directo de gerencia)
+           ===================================================================== -->
+      <section id="section-buzon-quejas-aparte" class="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-slate-900 via-rose-950/40 to-slate-900 text-white border-2 border-rose-500/40 shadow-xl space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-rose-500/30">
+          <div class="flex items-center gap-3.5">
+            <div class="w-14 h-14 rounded-2xl bg-rose-600/30 border border-rose-400/50 flex items-center justify-center text-3xl shadow-md shrink-0">
+              📢
+            </div>
+            <div>
+              <span class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-black uppercase tracking-wider border border-rose-400/40">
+                Atención al Cliente • FarmaIA
+              </span>
+              <h3 class="text-xl font-black text-white mt-1">Buzón Oficial de Quejas y Sugerencias</h3>
+              <p class="text-xs text-rose-200 font-medium">Tu opinión nos ayuda a mejorar. Cada mensaje genera un ticket con seguimiento y notificación inmediata a gerencia.</p>
+            </div>
+          </div>
+          <span class="text-xs text-rose-300 bg-rose-900/40 px-3.5 py-2 rounded-xl border border-rose-700/50 font-bold self-start sm:self-auto flex items-center gap-1.5">
+            <span>🛡️</span> <span>Respuesta y Seguimiento Inmediato</span>
+          </span>
+        </div>
+
+        <form id="form-app-queja-aparte" onsubmit="handleCustomerComplaintSubmitAparte(event)" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-black uppercase tracking-wide text-rose-200 mb-1.5">Tu Nombre Completo</label>
+              <input id="app-queja-nombre-input-aparte" type="text" placeholder="Ej. Carlos Gómez" class="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-rose-500/30 text-white placeholder-slate-400 focus:outline-none focus:border-rose-400 text-xs font-semibold" />
+            </div>
+            <div>
+              <label class="block text-xs font-black uppercase tracking-wide text-rose-200 mb-1.5">Teléfono Móvil / WhatsApp *</label>
+              <input id="app-queja-telefono-input-aparte" type="tel" required placeholder="809-555-1234" class="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-rose-500/30 text-white placeholder-slate-400 focus:outline-none focus:border-rose-400 text-xs font-semibold" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-black uppercase tracking-wide text-rose-200 mb-1.5">Detalle de tu Queja, Reclamación o Sugerencia *</label>
+            <textarea id="app-queja-mensaje-input-aparte" rows="3" required placeholder="Cuéntanos con detalle qué ocurrió, con qué producto o servicio, o qué te gustaría que mejoremos..." class="w-full px-4 py-3 rounded-xl bg-slate-950/60 border border-rose-500/30 text-white placeholder-slate-400 focus:outline-none focus:border-rose-400 text-xs font-medium"></textarea>
+          </div>
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+            <span class="text-[11px] text-slate-400">
+              🔒 Tu mensaje será tratado con total confidencialidad por el equipo de regencia y gerencia.
+            </span>
+            <button type="submit" id="btn-submit-app-queja-aparte" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-black text-xs shadow-lg transition flex items-center justify-center gap-2 cursor-pointer shrink-0">
+              <span>📨 Enviar Queja / Sugerencia</span> <span>➔</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Tarjeta de Respuesta Interactiva de la Queja -->
+        <div id="app-queja-result-card-aparte" class="hidden p-4 rounded-2xl bg-slate-950 text-white border-2 border-rose-400 shadow-xl space-y-3">
+          <!-- Inyectado dinámicamente -->
+        </div>
+      </section>
     </section>
 
     <!-- ===================================================================
@@ -533,15 +737,15 @@
 
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1">Nombre Completo del Paciente *</label>
-            <input id="app-client-name" type="text" value="Carlos Eduardo Gómez" placeholder="Ej. Juan Pérez" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
+            <input id="app-client-name" type="text" value="" placeholder="Ej. Juan Pérez" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
           </div>
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1">Número de WhatsApp (Para recibir confirmación de orden) *</label>
-            <input id="app-client-phone" type="tel" value="18095558291" placeholder="Ej. 18095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-mono font-semibold" />
+            <input id="app-client-phone" type="tel" value="" placeholder="Ej. 18095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-mono font-semibold" />
           </div>
           <div id="app-address-field-wrap">
             <label id="app-address-label" class="block text-xs font-bold text-slate-700 mb-1">Dirección Exacta de Entrega a Domicilio *</label>
-            <input id="app-client-address" type="text" value="Calle Polibio Díaz #44, Evaristo Morales, Santo Domingo" placeholder="Sector, calle, número de casa o edificio..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
+            <input id="app-client-address" type="text" value="" placeholder="Sector, calle, número de casa o edificio..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
           </div>
         </div>
 
@@ -635,7 +839,7 @@
               <span class="font-bold text-slate-700">Terminal Azul / CardNet RD</span>
               <span class="text-[11px] text-emerald-700 font-bold">🔒 Transacción Segura</span>
             </div>
-            <input id="app-card-ref" type="text" value="VISA-****-4920" placeholder="Últimos 4 dígitos o referencia" class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs bg-white" />
+            <input id="app-card-ref" type="text" value="" placeholder="Últimos 4 dígitos o referencia" class="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs bg-white" />
           </div>
 
           <!-- Detalles de Depósito a Cuenta Bancaria -->
@@ -648,7 +852,7 @@
             </p>
             <div>
               <label class="block font-bold text-sky-950 mb-1">Número de Comprobante / Referencia de Depósito *</label>
-              <input id="app-deposit-ref" type="text" value="DEP-POPULAR-77410" placeholder="Ej. 00948122" class="w-full px-3 py-2 rounded-lg border border-sky-300 font-mono text-xs bg-white" />
+              <input id="app-deposit-ref" type="text" value="" placeholder="Ej. 00948122" class="w-full px-3 py-2 rounded-lg border border-sky-300 font-mono text-xs bg-white" />
             </div>
           </div>
         </div>
@@ -747,6 +951,8 @@
   <!-- TOAST NOTIFICATION -->
   <div id="toast-container" class="fixed top-16 right-4 z-50 space-y-2 pointer-events-none"></div>
 
+    <script src="/three.min.js"></script>
+  <script src="/farmaia_3d_engine.js"></script>
   <script src="/app.js"></script>
 
 <script>
@@ -837,7 +1043,7 @@ function dismissPwaBanner() {
           </div>
           <div>
             <h3 class="text-base sm:text-lg font-extrabold">Inscripción Programa Crónico</h3>
-            <p class="text-xs text-purple-200">Alerta 10 días de anticipación por WhatsApp • Farmacia Davalsi</p>
+            <p class="text-xs text-purple-200">Recordatorio IA 5 días antes de terminarse • Farmacia Davalsi</p>
           </div>
         </div>
         <button onclick="closeChronicPatientModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center transition">✕</button>
@@ -849,7 +1055,7 @@ function dismissPwaBanner() {
         <div class="bg-purple-50 border border-purple-200 rounded-2xl p-3 flex items-start gap-2.5 text-purple-900">
           <span class="text-base">🔔</span>
           <p class="text-[11px] leading-relaxed">
-            Al inscribirte, la farmacia reservará tu stock y nuestro equipo te escribirá a tu <strong>WhatsApp con 10 días de anticipación</strong> para coordinar tu reposición con descuento de cliente frecuente.
+            Al inscribirte, la farmacia reservará tu stock y nuestro equipo te escribirá a tu <strong>WhatsApp 5 días antes</strong> para coordinar tu reposición con descuento de cliente frecuente.
           </p>
         </div>
 
@@ -860,7 +1066,7 @@ function dismissPwaBanner() {
             <input id="pac-chronic-name" type="text" required placeholder="Ej. Juan Pérez" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-purple-600 focus:outline-none" />
           </div>
           <div>
-            <label class="block font-bold text-slate-700 mb-1">WhatsApp Móvil (Para la Alerta 10d) *</label>
+            <label class="block font-bold text-slate-700 mb-1">WhatsApp Móvil (Para el Recordatorio 5d) *</label>
             <input id="pac-chronic-phone" type="tel" required placeholder="Ej. 8095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-mono font-bold focus:border-purple-600 focus:outline-none" />
           </div>
         </div>
@@ -949,7 +1155,7 @@ function dismissPwaBanner() {
               <span id="calc-chronic-end-date" class="font-extrabold text-amber-300">-</span>
             </div>
             <div class="bg-purple-600/30 rounded-xl p-2 border border-purple-400/30">
-              <span class="text-[10px] text-purple-200 block">Te avisaremos por WhatsApp el:</span>
+              <span class="text-[10px] text-purple-200 block">Recordatorio IA (5 días antes):</span>
               <span id="calc-chronic-alert-date" class="font-extrabold text-emerald-300">-</span>
             </div>
           </div>
@@ -1037,6 +1243,976 @@ function dismissPwaBanner() {
     </div>
   </div>
 
-</body>
 
+  <!-- =====================================================================
+       MODAL CENTRAL FARMA-IA PARA EL CLIENTE DE LA APP (4 FUNCIONES CLAVE):
+       1. Recomendación por Principio Activo si no se encuentra el que busca
+       2. Recordatorio 5 Días Antes para Medicamentos de Uso Crónico
+       3. Presión Arterial, Azúcar, Peso y Talla tomados con nosotros
+       4. Ayuda de Uso de la App, Cómo Comprar y Cómo Usar WhatsApp al Pedir
+       ===================================================================== -->
+  <div id="modal-app-interactive-vitals" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs hidden items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div class="max-w-4xl w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-indigo-200 my-4 flex flex-col max-h-[92vh]">
+      <!-- Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-indigo-950 via-purple-900 to-teal-900 text-white flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="relative w-20 h-20 rounded-3xl bg-gradient-to-tr from-slate-950 via-indigo-950 to-teal-950 border-2 border-teal-300/80 shadow-2xl flex items-center justify-center shrink-0 overflow-hidden cursor-pointer" onclick="if(window.farmaIaModal3D) window.farmaIaModal3D.triggerSalute();" title="Haz clic para interactuar con FarmaIA 3D">
+            <div id="farmaia-modal-3d-canvas" class="w-full h-full flex items-center justify-center">
+              <img src="/farmaia_model.jpg" alt="FarmaIA 3D" class="w-full h-full object-contain farmaia-3d-avatar" />
+            </div>
+            <span class="absolute bottom-1 right-1 px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950 font-black text-[8px] uppercase tracking-wider">3D LIVE</span>
+          </div>
+          <div>
+            <span class="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase">ASISTENTE INTELIGENTE DEL PACIENTE • FARMA-IA</span>
+            <h3 class="text-base sm:text-lg font-black mt-0.5">Ayuda de Compra por Principio Activo, Crónicos (5 Días), Controles y WhatsApp</h3>
+          </div>
+        </div>
+        <button type="button" onclick="closeAppInteractiveVitalsModal()" class="w-8 h-8 rounded-xl bg-white/15 hover:bg-rose-600 text-white font-bold cursor-pointer flex items-center justify-center">✕</button>
+      </div>
+
+      <!-- Pestañas del Asistente IA del Cliente (Clínico) -->
+      <div class="bg-slate-100 px-3 sm:px-5 py-2.5 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto shrink-0 text-xs font-extrabold">
+        <button type="button" id="app-ai-tab-btn-principio_activo" onclick="switchAppAiTab('principio_activo')" class="px-3.5 py-2 rounded-xl bg-indigo-600 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>💊</span> <span>1. Principio Activo</span>
+        </button>
+        <button type="button" id="app-ai-tab-btn-cronicos_5d" onclick="switchAppAiTab('cronicos_5d')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>⏰</span> <span>2. Medicamentos Crónicos</span>
+          <span id="app-ai-tab-badge-5d" class="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[10px]">0</span>
+        </button>
+        <button type="button" id="app-ai-tab-btn-presion_azucar_peso" onclick="switchAppAiTab('presion_azucar_peso')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>🩺</span> <span>3. Presión, Azúcar, Peso y Talla</span>
+        </button>
+        <button type="button" id="app-ai-tab-btn-receta_ia" onclick="switchAppAiTab('receta_ia')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>📸</span> <span>4. Receta Médica con IA</span>
+        </button>
+        <button type="button" onclick="closeAppInteractiveVitalsModal(); document.getElementById('section-buzon-quejas-aparte')?.scrollIntoView({ behavior: 'smooth' });" class="px-3 py-2 rounded-xl bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-300 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ml-auto" title="Abrir Buzón de Quejas y Sugerencias Oficial">
+          <span>📢</span> <span>Buzón de Quejas (Aparte) ➔</span>
+        </button>
+      </div>
+
+      <!-- Cuerpo de las 4 Pestañas -->
+      <div class="p-4 sm:p-5 space-y-4 text-xs overflow-y-auto flex-1 bg-slate-50/60">
+
+        <!-- =================================================================
+             PESTAÑA 1: RECOMENDACIÓN POR PRINCIPIO ACTIVO PARA LA COMPRA
+             ================================================================= -->
+        <div id="app-ai-tab-view-principio_activo" class="space-y-4">
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-teal-50 border border-indigo-200 space-y-3">
+            <h4 class="font-black text-indigo-950 text-sm">🧬 ¿No encuentras el medicamento que buscas? Te recomendamos los que tienen el mismo Principio Activo</h4>
+            <p class="text-xs text-slate-600">
+              Escribe el nombre del medicamento que te recetaron o que buscas (por ejemplo: <strong>Panadol, Advil, Zentel, Losec, Tabcin, Cozaar, Glucophage</strong>). Nuestra IA detecta su <strong>Principio Activo</strong> y te muestra los medicamentos disponibles en la farmacia que contienen exactamente lo mismo para que puedas comprarlos por <strong>Unidad, Blíster o Caja</strong>.
+            </p>
+            <form onsubmit="handleAppAiModalSubSubmit(event)" class="flex flex-col sm:flex-row gap-2">
+              <input id="app-ai-modal-sub-input" type="text" placeholder="Escribe el medicamento o principio activo (ej. Panadol, Zentel, Losec, Paracetamol, Albendazol)..." class="flex-1 px-4 py-2.5 rounded-xl border-2 border-indigo-300 bg-white font-bold text-slate-900 focus:outline-none focus:border-indigo-600" />
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow cursor-pointer">
+                🔍 Buscar por Principio Activo
+              </button>
+            </form>
+            <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span class="font-bold text-slate-500">Ejemplos rápidos:</span>
+              <button type="button" onclick="searchAppAiModalSubstitute('Panadol')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">💊 Panadol / Tylenol</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Advil')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🔥 Advil / Motrin</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Zentel')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🪱 Zentel (Parásitos)</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Losec')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🛡️ Losec (Gastritis)</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Tabcin')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🤧 Tabcin (Gripe)</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Cozaar')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">❤️ Cozaar (Presión)</button>
+              <button type="button" onclick="searchAppAiModalSubstitute('Glucophage')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🩸 Glucophage (Azúcar)</button>
+            </div>
+          </div>
+
+          <div id="app-ai-modal-sub-results" class="space-y-3">
+            <!-- Renderizado por app.js -->
+          </div>
+        </div>
+
+        <!-- =================================================================
+             PESTAÑA 2: RECORDATORIO DE 5 DÍAS ANTES PARA MEDICAMENTOS CRÓNICOS
+             ================================================================= -->
+        <div id="app-ai-tab-view-cronicos_5d" class="hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-purple-50 to-indigo-50 border border-amber-300 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2.5">
+                <span class="text-2xl">⏰</span>
+                <div>
+                  <span class="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase">ALERTA PREVENTIVA 5 DÍAS ANTES</span>
+                  <h4 class="font-black text-slate-900 text-sm mt-0.5">Recordatorio de Tus Medicamentos de Uso Crónico (5 Días Antes)</h4>
+                </div>
+              </div>
+              <button type="button" onclick="closeAppInteractiveVitalsModal(); openChronicPatientModal();" class="px-3.5 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black text-xs shadow cursor-pointer">
+                ➕ Inscribir Nuevo Medicamento Crónico
+              </button>
+            </div>
+            <p class="text-xs text-slate-600">
+              Ingresa tu número de teléfono para ver tus medicamentos de uso continuo. La IA te avisa automáticamente <strong>5 días antes de que se termine tu medicamento</strong> para que lo agregues al carrito o lo pidas por WhatsApp sin quedarte sin dosis.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input id="app-ai-chronic-5d-phone" type="tel" placeholder="Ingresa tu teléfono WhatsApp (o déjalo vacío para ver alertas activas)..." class="flex-1 px-3.5 py-2 rounded-xl border border-purple-300 bg-white font-mono font-bold text-xs" />
+              <button type="button" onclick="loadAppChronic5DayReminders()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs cursor-pointer shadow">
+                🔄 Consultar Recordatorios (5 Días)
+              </button>
+            </div>
+          </div>
+
+          <div id="app-ai-chronic-5d-results" class="space-y-3">
+            <!-- Renderizado por app.js -->
+          </div>
+        </div>
+
+        <!-- =================================================================
+             PESTAÑA 3: PRESIÓN ARTERIAL, AZÚCAR, PESO Y TALLA TOMADOS CON NOSOTROS
+             ================================================================= -->
+        <div id="app-ai-tab-view-presion_azucar_peso" class="hidden space-y-4">
+          <!-- Bloque A: Historial de Tomas Realizadas con Nosotros en la Farmacia -->
+          <div class="p-4 rounded-2xl bg-white border-2 border-teal-200 space-y-3 shadow-2xs">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span class="px-2 py-0.5 rounded-full bg-teal-100 text-teal-900 font-black text-[10px] uppercase">HISTORIAL CLÍNICO DE LA FARMACIA</span>
+                <h4 class="font-black text-slate-900 text-sm mt-0.5">📋 Mis Controles de Presión Arterial, Azúcar, Peso y Talla Tomados con Nosotros</h4>
+                <p class="text-[11px] text-slate-500">Consulta las mediciones que te has tomado en la farmacia con su fecha, hora, IMC e interpretación.</p>
+              </div>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input id="app-my-vitals-search" type="text" placeholder="Busca por tu Teléfono, Cédula o Nombre (ej. 809555... o tu nombre)..." class="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 bg-slate-50 font-semibold text-xs" />
+              <button type="button" onclick="loadMyPharmacyVitalsHistory()" class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs cursor-pointer shadow">
+                🔍 Ver Mis Tomas en Farmacia
+              </button>
+            </div>
+            <div id="app-my-vitals-history-list" class="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+              <!-- Renderizado por app.js -->
+            </div>
+          </div>
+
+          <!-- Bloque B: Evaluador y Registro Interactivo con IA (Presión + Azúcar + Peso + Talla) -->
+          <div class="p-4 rounded-2xl bg-white border border-rose-200 space-y-3.5 shadow-2xs">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 font-black text-[10px] uppercase">EVALUADOR Y REGISTRO INTERACTIVO FARMA-IA</span>
+                <h4 class="font-black text-slate-900 text-sm mt-0.5">🩺 Evaluar o Registrar Presión Arterial, Azúcar, Peso y Talla</h4>
+              </div>
+              <span id="app-vital-quality-badge" class="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-black text-[10px]">100% Toma Adecuada (5/5)</span>
+            </div>
+
+            <!-- Paso 1: Checklist de Toma Adecuada -->
+            <div class="p-3 rounded-2xl bg-teal-50/70 border border-teal-200 space-y-1.5">
+              <span class="font-black text-teal-950 uppercase text-[11px] block">✅ Paso 1: Verifica las condiciones de toma adecuada</span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-1.5 text-[11px] font-semibold text-slate-700">
+                <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer">
+                  <input type="checkbox" id="app-chk-reposo" checked onchange="evaluateAppVitalsLive()" />
+                  <span>🪑 5 min en reposo</span>
+                </label>
+                <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer">
+                  <input type="checkbox" id="app-chk-postura" checked onchange="evaluateAppVitalsLive()" />
+                  <span>🦶 Espalda/pies apoyados</span>
+                </label>
+                <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer">
+                  <input type="checkbox" id="app-chk-brazo" checked onchange="evaluateAppVitalsLive()" />
+                  <span>💪 Brazo altura corazón</span>
+                </label>
+                <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer">
+                  <input type="checkbox" id="app-chk-cafe" checked onchange="evaluateAppVitalsLive()" />
+                  <span>☕ Sin café/tabaco 30m</span>
+                </label>
+                <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer">
+                  <input type="checkbox" id="app-chk-manos" checked onchange="evaluateAppVitalsLive()" />
+                  <span>🧼 Manos limpias/secas</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Paso 2: Presión Arterial, Azúcar, Peso y Talla -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <!-- Presión Arterial -->
+              <div class="p-3 rounded-2xl bg-rose-50/70 border border-rose-200 space-y-2">
+                <span class="font-black text-rose-900 uppercase text-[11px] block">🩺 Presión Arterial</span>
+                <div class="grid grid-cols-3 gap-1.5">
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Sistólica</label>
+                    <input id="app-vital-sys" type="number" placeholder="120" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-rose-300 bg-white font-mono font-black text-sm text-center" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Diastólica</label>
+                    <input id="app-vital-dia" type="number" placeholder="80" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-rose-300 bg-white font-mono font-black text-sm text-center" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Pulso</label>
+                    <input id="app-vital-pulso" type="number" placeholder="72" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-center" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Azúcar (Glicemia) -->
+              <div class="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-2">
+                <span class="font-black text-indigo-900 uppercase text-[11px] block">🩸 Azúcar (Glicemia)</span>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">mg/dL</label>
+                    <input id="app-vital-glic" type="number" placeholder="95" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-indigo-300 bg-white font-mono font-black text-sm text-center" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Condición</label>
+                    <select id="app-vital-cond" onchange="evaluateAppVitalsLive()" class="w-full px-1.5 py-1.5 rounded-xl border border-indigo-300 bg-white font-bold text-[11px]">
+                      <option value="En Ayunas (8h+)">En Ayunas</option>
+                      <option value="Postprandial (2h tras comida)">2h Post-Comida</option>
+                      <option value="Casual / Aleatoria">Casual</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Peso y Talla (IMC) -->
+              <div class="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
+                <span class="font-black text-emerald-900 uppercase text-[11px] block">⚖️ Peso y Talla (IMC)</span>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Peso (kg)</label>
+                    <input id="app-vital-peso" type="number" step="0.1" placeholder="72.5" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-emerald-300 bg-white font-mono font-black text-sm text-center" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Talla (cm)</label>
+                    <input id="app-vital-talla" type="number" step="0.1" placeholder="168" oninput="evaluateAppVitalsLive()" class="w-full px-2 py-1.5 rounded-xl border border-emerald-300 bg-white font-mono font-black text-sm text-center" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Paso 3: Resultado del Semáforo Clínico e Interpretación IA -->
+            <div id="app-vital-live-result" class="p-4 rounded-2xl bg-slate-900 text-white space-y-2">
+              <p class="text-xs text-slate-300">Ingresa arriba tu Presión Arterial, Azúcar, Peso (kg) y Talla (cm) para ver tu evaluación clínica e Índice de Masa Corporal (IMC) en tiempo real.</p>
+            </div>
+
+            <!-- Paso 4: Guardar en mi Historial de la Farmacia -->
+            <div class="p-3 rounded-2xl bg-slate-100 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:w-auto flex-1">
+                <input id="app-vital-save-name" type="text" placeholder="Tu Nombre y Apellido *" class="px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-xs" />
+                <input id="app-vital-save-phone" type="tel" placeholder="Tu Teléfono o Cédula *" class="px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-xs" />
+              </div>
+              <button type="button" onclick="savePatientVitalsFromApp()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow cursor-pointer shrink-0">
+                💾 Guardar en Mi Historial
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- =================================================================
+             PESTAÑA 4: CÓMO USAR LA APP, COMPRAR MEDICAMENTOS Y USAR WHATSAPP
+             ================================================================= -->
+        <div id="app-ai-tab-view-guia_app_whatsapp" class="hidden space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <!-- Guía 1: Cómo comprar los medicamentos en la App -->
+            <div class="p-4 rounded-2xl bg-white border-2 border-teal-200 space-y-2.5 shadow-2xs">
+              <div class="flex items-center gap-2">
+                <span class="w-8 h-8 rounded-xl bg-teal-100 text-teal-900 flex items-center justify-center font-black text-base">🛒</span>
+                <div>
+                  <span class="text-[10px] font-black uppercase text-teal-700">PASO A PASO EN LA APP</span>
+                  <h4 class="font-black text-slate-900 text-sm">¿Cómo Comprar tus Medicamentos en la App?</h4>
+                </div>
+              </div>
+              <ol class="space-y-1.5 text-xs text-slate-700 list-decimal list-inside font-medium">
+                <li><strong>Busca tu medicina:</strong> Escribe el nombre en el buscador. Si no hay esa marca, la IA te sugiere equivalentes con el <strong>mismo Principio Activo</strong>.</li>
+                <li><strong>Elige la presentación:</strong> En cada producto puedes tocar <strong>Unidad</strong>, <strong>Blíster</strong> o <strong>Caja</strong> (o elegir un <strong>Kit Alivio en 1 Clic</strong>) y pulsar <strong>«+ Agregar al Carrito»</strong>.</li>
+                <li><strong>Revisa tu Carrito (🛒 arriba a la derecha):</strong> Elige si deseas <strong>🛵 Envío a Domicilio</strong> o <strong>🏥 Retiro en Farmacia</strong>.</li>
+                <li><strong>Selecciona cómo pagar:</strong> Efectivo contra entrega, Tarjeta, Transferencia Bancaria o con tu <strong>Seguro Médico (ARS)</strong>.</li>
+              </ol>
+              <button type="button" onclick="closeAppInteractiveVitalsModal(); toggleCartDrawer();" class="w-full py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs cursor-pointer shadow">
+                🛒 Ir a Mi Carrito de Compra Ahora
+              </button>
+            </div>
+
+            <!-- Guía 2: Cómo usar WhatsApp cuando estén pidiendo los medicamentos -->
+            <div class="p-4 rounded-2xl bg-white border-2 border-emerald-200 space-y-2.5 shadow-2xs">
+              <div class="flex items-center gap-2">
+                <span class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-900 flex items-center justify-center font-black text-base">📲</span>
+                <div>
+                  <span class="text-[10px] font-black uppercase text-emerald-700">ATENCIÓN DIRECTA POR WHATSAPP</span>
+                  <h4 class="font-black text-slate-900 text-sm">¿Cómo Usar WhatsApp al Pedir tus Medicamentos?</h4>
+                </div>
+              </div>
+              <ol class="space-y-1.5 text-xs text-slate-700 list-decimal list-inside font-medium">
+                <li><strong>Confirmación Automática:</strong> Al confirmar tu pedido en el carrito, la App prepara automáticamente el mensaje hacia el <strong>WhatsApp de la Farmacia</strong> con tu código de orden y detalle de medicamentos.</li>
+                <li><strong>Enviar Receta o Carnet ARS:</strong> Si tu medicamento pide receta o aplicas seguro médico, puedes enviar la foto directamente en el chat de WhatsApp de tu pedido.</li>
+                <li><strong>Enviar Comprobante de Pago:</strong> Si pagas por transferencia, envía el baucher por WhatsApp para despacho inmediato.</li>
+                <li><strong>Ayuda o Pedido Rápido:</strong> También puedes pulsar el botón de abajo para chatear ahora mismo con el farmacéutico.</li>
+              </ol>
+              <button type="button" onclick="openDirectPharmacyWhatsAppHelp()" class="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer shadow flex items-center justify-center gap-1.5">
+                <span>📲</span> <span>Abrir WhatsApp de la Farmacia Ahora</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chat Interactivo de Ayuda al Usuario de la App -->
+          <div class="p-4 rounded-2xl bg-slate-900 text-white space-y-3">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 rounded-xl bg-slate-800 p-1 border border-teal-400/50 flex items-center justify-center shrink-0">
+                <img src="/farmaia_avatar.png" alt="FarmaIA 3D" class="w-full h-full object-contain farmaia-3d-avatar" />
+              </div>
+              <div>
+                <span class="px-2 py-0.5 rounded-full bg-teal-400/20 text-teal-300 border border-teal-400/30 text-[10px] font-black uppercase">Copiloto Inteligente 3D</span>
+                <h4 class="font-black text-sm text-amber-300 mt-0.5">Pregúntale a FarmaIA sobre el Uso de la App, WhatsApp o tus Medicamentos</h4>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 text-[11px]">
+              <button type="button" onclick="askAppGuideQuestion('¿Cómo compro mis medicamentos en la App paso a paso?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🛒 ¿Cómo comprar en la App?</button>
+              <button type="button" onclick="askAppGuideQuestion('¿Cómo uso WhatsApp cuando estoy pidiendo mis medicamentos?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">📲 ¿Cómo pedir por WhatsApp?</button>
+              <button type="button" onclick="askAppGuideQuestion('¿Qué hago si no encuentro el medicamento que busco?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🧬 ¿Buscar por Principio Activo?</button>
+              <button type="button" onclick="askAppGuideQuestion('¿Cómo funciona el recordatorio de 5 días antes para crónicos?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">⏰ ¿Recordatorio 5 días antes?</button>
+              <button type="button" onclick="askAppGuideQuestion('¿Cómo veo mi presión arterial, azúcar, peso y talla tomados en la farmacia?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">❤️‍🩹 ¿Ver mi Presión, Azúcar, Peso y Talla?</button>
+            </div>
+            <form onsubmit="handleAppGuideFormSubmit(event)" class="flex flex-col sm:flex-row gap-2">
+              <input id="app-ai-guide-input" type="text" placeholder="Escribe tu duda (ej: ¿Cómo mando mi pedido por WhatsApp? o ¿Qué tienen con el principio activo de Panadol?)..." class="flex-1 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-xs font-semibold focus:outline-none focus:border-teal-400" />
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs cursor-pointer">Preguntar a la IA</button>
+            </form>
+            <div id="app-ai-guide-answer" class="p-3.5 rounded-2xl bg-white/10 border border-white/15 space-y-2 text-xs">
+              <!-- Respuesta interactiva -->
+            </div>
+          </div>
+        </div>
+
+        <!-- =================================================================
+             PESTAÑA 5: BUZÓN DE QUEJAS Y RECLAMOS ASISTIDO POR IA
+             ================================================================= -->
+        <div id="app-ai-tab-view-quejas_ia" class="hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-rose-50 via-amber-50 to-orange-50 border border-rose-200 space-y-2.5">
+            <div class="flex items-center gap-2">
+              <span class="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-black text-sm">📢</span>
+              <div>
+                <span class="text-[10px] font-black uppercase text-rose-700">CANAL OFICIAL DE ATENCIÓN Y MEJORA CONTINUA</span>
+                <h4 class="font-black text-slate-900 text-sm">Exclama tus Quejas o Sugerencias con la Asistencia de FarmaIA</h4>
+              </div>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed font-medium">
+              ¿Tuviste un inconveniente con la atención, demoras en despacho, un precio o un medicamento que no encontraste? Escribe tu mensaje con tranquilidad. Nuestra <strong>Inteligencia Artificial</strong> lo clasificará, generará un <strong>número de ticket</strong> y lo transmitirá en tiempo real a la <strong>pantalla del vendedor o administrador</strong> en la farmacia física para su pronta resolución.
+            </p>
+          </div>
+
+          <form onsubmit="handleCustomerComplaintSubmit(event)" class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] font-black uppercase text-slate-600 mb-1">Tu Nombre Completo *</label>
+                <input id="app-queja-nombre-input" type="text" placeholder="Ej. Juan Pérez" required class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-rose-500 focus:outline-none text-xs font-semibold" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-black uppercase text-slate-600 mb-1">Teléfono o WhatsApp (Para Contactarte) *</label>
+                <input id="app-queja-telefono-input" type="tel" placeholder="Ej. 809-555-1234" required class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-rose-500 focus:outline-none text-xs font-semibold" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-black uppercase text-slate-600 mb-1">Escribe tu Queja, Reclamo o Sugerencia *</label>
+              <textarea id="app-queja-mensaje-input" rows="4" placeholder="Describe lo sucedido detalladamente (ej: El servicio tardó mucho, no tenían disponible el medicamento que me recetaron, mala actitud de personal, etc.)..." required class="w-full p-3.5 rounded-xl border border-slate-300 focus:border-rose-500 focus:outline-none text-xs font-medium leading-relaxed"></textarea>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 pt-2">
+              <span class="text-[11px] text-slate-500 font-medium">🔒 Tu mensaje se envía cifrado y formalizado a la gerencia.</span>
+              <button type="submit" id="btn-submit-app-queja" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-extrabold text-xs shadow-md transition flex items-center gap-2 cursor-pointer">
+                <span>Enviar Queja a FarmaIA</span> <span>➔</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Tarjeta de Respuesta Interactiva de la IA -->
+          <div id="app-queja-result-card" class="hidden p-4 rounded-2xl bg-slate-900 text-white border-2 border-teal-400 shadow-xl space-y-3">
+            <!-- Renderizado dinámicamente por app.js -->
+          </div>
+        </div>
+
+        <!-- =================================================================
+             PESTAÑA 6: SUBIR RECETA MÉDICA CON VISIÓN IA Y VALIDACIÓN DE ALERGIAS
+             ================================================================= -->
+        <div id="app-ai-tab-view-receta_ia" class="hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-blue-50 via-indigo-50 to-teal-50 border border-blue-200 space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">📸</span>
+              <h4 class="font-black text-indigo-950 text-sm">Escáner de Recetas Médicas con Visión IA y Farmacovigilancia</h4>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed">
+              Sube la foto de la receta médica que te dio tu médico tratante. Nuestra IA leerá los medicamentos, verificará automáticamente si eres <strong>alérgico a alguno (Penicilinas, Sulfas, etc.)</strong> y te permitirá agregarlos a tu pedido con un solo toque.
+            </p>
+          </div>
+
+          <!-- Selector de Recetas Clínicas para Demostración o Carga de Foto -->
+          <div class="p-4 rounded-2xl bg-white border-2 border-dashed border-blue-300 space-y-3 text-center">
+            <span class="text-xs font-black text-slate-800 uppercase block">Selecciona una receta clínica de prueba o sube tu foto:</span>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onclick="executeAppRecetaOcr('receta_demo_amoxicilina.jpg')" class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5">
+                <span>🩺 Receta: Amoxicilina 500mg</span>
+                <span class="text-[10px] bg-black/20 px-1 py-0.5 rounded">Carlos Morales (Alérgico)</span>
+              </button>
+              <button type="button" onclick="executeAppRecetaOcr('receta_demo_sulfas.jpg')" class="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5">
+                <span>🩺 Receta: Trimetoprim/Sulfa</span>
+                <span class="text-[10px] bg-black/20 px-1 py-0.5 rounded">María Fernández (Alérgica)</span>
+              </button>
+              <button type="button" onclick="executeAppRecetaOcr('receta_demo_segura.jpg')" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5">
+                <span>🩺 Receta: Azitromicina 500mg</span>
+                <span class="text-[10px] bg-black/20 px-1 py-0.5 rounded">Segura sin Alergias</span>
+              </button>
+            </div>
+
+            <div class="pt-2">
+              <label class="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-extrabold cursor-pointer inline-flex items-center gap-2 text-xs">
+                <span>📷 Tomar Foto o Subir Receta (JPG, PNG)</span>
+                <input type="file" id="app-receta-file-input" accept="image/*" class="hidden" onchange="handleAppCustomRecetaFile(this)" />
+              </label>
+            </div>
+          </div>
+
+          <!-- Spinner de Carga -->
+          <div id="app-ocr-loading" class="hidden p-6 rounded-2xl bg-indigo-950 text-white text-center space-y-2">
+            <div class="inline-block animate-spin text-3xl">⚙️</div>
+            <p class="font-black text-sm">FarmaIA Vision está interpretando tu receta médica...</p>
+            <p class="text-xs text-indigo-300">Validando principios activos y comprobando si tienes alergia registrada.</p>
+          </div>
+
+          <!-- Resultados de Transcripción en App -->
+          <div id="app-ocr-results" class="hidden space-y-3">
+            <div class="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-1">
+              <div class="flex items-center justify-between">
+                <span id="app-ocr-doc-title" class="font-extrabold text-slate-900 text-xs">Dr. Alejandro Castillo M.</span>
+                <span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">Receta Verificada</span>
+              </div>
+              <p id="app-ocr-diag-text" class="text-xs text-slate-600">Diagnóstico: Infección bacteriana</p>
+              <p id="app-ocr-patient-text" class="text-[10px] text-slate-500 font-mono">Paciente: Carlos Morales • Céd: 402-1234567-1</p>
+            </div>
+
+            <!-- Lista de Medicamentos -->
+            <div id="app-ocr-meds-list" class="space-y-2">
+              <!-- Inyectado por app.js -->
+            </div>
+
+            <!-- Botón de Acción -->
+            <button type="button" id="app-btn-preload-recipe" onclick="preloadAppRecipeToCart()" class="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-lg transition flex items-center justify-center gap-2 cursor-pointer">
+              <span>🛒 Agregar Medicamentos Aprobados al Pedido</span>
+            </button>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+  </div>
+
+
+  
+
+
+  <!-- =====================================================================
+       MODAL: RASTREO EN TIEMPO REAL DE PEDIDOS / DELIVERY CON MAPA INTERACTIVO
+       ===================================================================== -->
+  <div id="modal-delivery-tracking" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 text-white flex items-center justify-between border-b border-teal-700">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-2xl shadow-inner">
+            🛵
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-black uppercase text-emerald-300 tracking-wider">DELIVERY EXPRESS</span>
+              <span id="tracking-badge-status" class="px-2 py-0.2 rounded-full text-[9px] font-black bg-emerald-400 text-slate-950 tracking-wider">EN CAMINO</span>
+            </div>
+            <h3 class="text-base sm:text-lg font-black text-white">Rastreo de tu Pedido en Tiempo Real</h3>
+          </div>
+        </div>
+        <button type="button" onclick="closeDeliveryTrackingModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-xs transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs flex-1">
+        <!-- Stepper de Progreso -->
+        <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+          <div class="flex items-center justify-between text-[11px] font-extrabold text-slate-700" id="tracking-stepper-container">
+            <!-- Inyectado dinámicamente -->
+          </div>
+        </div>
+
+        <!-- Contenedor del Mapa Interactivo (Leaflet con Fallback) -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+              <span>🗺️</span> <span>Mapa Interactivo de Trayecto en Vivo</span>
+            </span>
+            <span id="tracking-eta-pill" class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+              ⏱️ ETA: ~8 minutos
+            </span>
+          </div>
+
+          <div id="delivery-map-wrapper" class="relative rounded-2xl overflow-hidden border-2 border-teal-500/40 shadow-md h-64 bg-slate-100">
+            <!-- Leaflet Map Container -->
+            <div id="delivery-leaflet-map" style="height:100%; width:100%;"></div>
+            
+            <!-- Floating overlay legend -->
+            <div class="absolute bottom-2 left-2 z-[1000] bg-white/95 backdrop-blur-xs p-2 rounded-xl shadow-md border border-slate-200 text-[10px] space-y-1 font-bold">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
+                <span>🏥 Farmacia Davalsi</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs">🛵</span>
+                <span>Repartidor en Movimiento</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-600 inline-block"></span>
+                <span>🏠 Tu Domicilio</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tarjeta del Repartidor -->
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 border border-teal-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-2xl shadow-sm">
+              🧑‍✈️
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h4 id="tracking-courier-name" class="text-xs font-black text-slate-900">Pedro Ramírez</h4>
+                <span class="px-2 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold">Oficial Davalsi</span>
+              </div>
+              <p id="tracking-courier-vehicle" class="text-[11px] text-slate-600 font-semibold mt-0.5">Motocicleta Honda C-90 (Placa K-084213)</p>
+              <p id="tracking-destination-address" class="text-[10px] text-teal-800 font-bold mt-0.5">📍 Destino: Calle Francisco Prats Ramírez #14</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <a id="tracking-call-btn" href="tel:8095558899" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-sm transition flex items-center gap-1 cursor-pointer">
+              <span>📞</span> <span>Llamar</span>
+            </a>
+            <a id="tracking-wa-btn" href="https://wa.me/18095558899" target="_blank" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition flex items-center gap-1 cursor-pointer">
+              <span>💬</span> <span>WhatsApp</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+        <span class="text-[11px] text-slate-500">🟢 Rastreo satelital GPS activo para seguridad de tu entrega.</span>
+        <button type="button" onclick="closeDeliveryTrackingModal()" class="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 font-bold text-slate-700 transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: INSTRUCCIONES DE INSTALACIÓN PWA (IOS & ANDROID) -->
+  <div id="modal-pwa-ios-instructions" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 text-xs">
+      <div class="text-center space-y-1">
+        <div class="w-14 h-14 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-3xl mx-auto shadow-md">
+          📲
+        </div>
+        <h3 class="text-base font-black text-slate-900">Instalar en Pantalla de Inicio</h3>
+        <p class="text-[11px] text-slate-500">Accede directamente como una app nativa en tu celular</p>
+      </div>
+
+      <div class="space-y-2.5 p-3.5 rounded-2xl bg-teal-50 border border-teal-200 font-semibold text-slate-800">
+        <div class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-teal-600 text-white flex items-center justify-center font-bold text-xs shrink-0">1</span>
+          <span>Toca el botón <strong>Compartir</strong> (icono de cuadrado con flecha hacia arriba <span class="text-base">⎋</span>) en Safari o los <strong>3 puntos</strong> en Chrome.</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-teal-600 text-white flex items-center justify-center font-bold text-xs shrink-0">2</span>
+          <span>Desplaza hacia abajo y selecciona <strong>«Agregar a pantalla de inicio»</strong> (<span class="font-bold">+</span>).</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-teal-600 text-white flex items-center justify-center font-bold text-xs shrink-0">3</span>
+          <span>Presiona <strong>«Agregar»</strong> arriba a la derecha. ¡Listo!</span>
+        </div>
+      </div>
+
+      <button type="button" onclick="document.getElementById('modal-pwa-ios-instructions').classList.add('hidden')" class="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs transition cursor-pointer">
+        Entendido
+      </button>
+    </div>
+  </div>
+
+
+      <!-- =====================================================================
+       MODAL DE DEMOSTRACIÓN VISUAL: FARMAIA GUÍA PASO A PASO TU COMPRA
+       (Interactiva: FarmaIA te dice exactamente lo que vas a hacer en cada paso)
+       ===================================================================== -->
+  <div id="modal-demo-compra-visual" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-2xl w-full flex flex-col shadow-2xl border-2 border-emerald-500/50 overflow-hidden my-auto animate-in fade-in zoom-in duration-200">
+      
+      <!-- Header del Simulador Interactivo FarmaIA -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-900">
+        <div class="flex items-center gap-3">
+          <div class="relative w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-400 to-indigo-600 p-0.5 shadow-lg shrink-0">
+            <img id="demo-farmaia-avatar-top" src="/farmaia_model.jpg" alt="FarmaIA" class="w-full h-full object-contain rounded-[14px]" onerror="this.src='/farmaia_avatar.png'" />
+            <span class="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-slate-900 animate-ping"></span>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950">
+                FARMAIA • GUÍA INTERACTIVA EN VIVO
+              </span>
+              <span class="text-[10px] text-teal-300 font-bold hidden sm:inline">• Simulación Educativa</span>
+            </div>
+            <h3 class="font-extrabold text-sm sm:text-base text-white mt-0.5">FarmaIA te enseña: Cómo Comprar y Pedir por WhatsApp</h3>
+          </div>
+        </div>
+        <button type="button" onclick="cerrarDemoCompraVisual()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Barra de Progreso de Pasos (1 -> 2 -> 3 -> 4) -->
+      <div class="bg-slate-900 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between gap-1 overflow-x-auto text-xs">
+        <button type="button" id="demo-step-tab-1" onclick="mostrarPasoDemo(1)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs shadow cursor-pointer">
+          <span>1</span> <span>Elegir Fármaco</span>
+        </button>
+        <span class="text-slate-600 font-bold">➔</span>
+        <button type="button" id="demo-step-tab-2" onclick="mostrarPasoDemo(2)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 font-medium text-xs cursor-pointer">
+          <span>2</span> <span>Suma al Carrito</span>
+        </button>
+        <span class="text-slate-600 font-bold">➔</span>
+        <button type="button" id="demo-step-tab-3" onclick="mostrarPasoDemo(3)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 font-medium text-xs cursor-pointer">
+          <span>3</span> <span>Revisar Entrega</span>
+        </button>
+        <span class="text-slate-600 font-bold">➔</span>
+        <button type="button" id="demo-step-tab-4" onclick="mostrarPasoDemo(4)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 font-medium text-xs cursor-pointer">
+          <span>4</span> <span>WhatsApp Listo</span>
+        </button>
+      </div>
+
+      <!-- Contenedor de la Guía Paso a Paso -->
+      <div class="p-5 sm:p-6 space-y-4">
+
+        <!-- ============================================================
+             PASO 1: FARMAIA TE INDICA HACER CLIC EN AGREGAR AL CARRITO
+             ============================================================ -->
+        <div id="demo-step-content-1" class="space-y-4">
+          <!-- Globo de Diálogo de FarmaIA Hablándote -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-teal-400 shadow-xl text-white flex items-start gap-3.5">
+            <div class="w-16 h-16 rounded-2xl bg-teal-500/20 border border-teal-400/50 p-1 flex items-center justify-center shrink-0">
+              <img src="assets/robot_apuntar_izq.png" alt="FarmaIA Apuntando" class="w-full h-full object-contain" onerror="this.src='/farmaia_model.jpg'" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black uppercase text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded-full border border-teal-400/30">Paso 1 de 4</span>
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>🤖</span> <span>FarmaIA te dice:</span>
+                </span>
+              </div>
+              <p id="demo-farmaia-bubble-text-1" class="text-xs sm:text-sm text-slate-100 leading-relaxed font-medium">
+                «¡Hola! 👋 Soy FarmaIA. Te voy a enseñar en tiempo real cómo comprar aquí. Mira la caja de <strong>Paracetamol 500mg</strong> aquí abajo: 👉 <strong>Haz clic en el botón verde "Agregar al Carrito"</strong> para ver cómo se añade a tu orden de prueba.»
+              </p>
+            </div>
+          </div>
+
+          <!-- Tarjeta de Producto Interactiva Señalada -->
+          <div class="p-4 rounded-2xl border-2 border-emerald-400 bg-gradient-to-br from-white to-slate-50 shadow-lg relative overflow-hidden">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="flex items-center gap-3.5">
+                <div class="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-center text-3xl shadow-inner shrink-0">
+                  💊
+                </div>
+                <div>
+                  <span class="px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-black uppercase">Analgésico / Fiebre</span>
+                  <h4 class="font-black text-slate-900 text-base sm:text-lg mt-0.5">Paracetamol 500 mg (Caja 20 tabletas)</h4>
+                  <p class="text-xs text-slate-500">Laboratorios Davalsi RD • Venta Libre</p>
+                  <p class="font-black text-teal-700 text-sm sm:text-base mt-1">RD$ 150.00 <span class="text-[11px] font-normal text-slate-500">(RD$ 7.50 c/u)</span></p>
+                </div>
+              </div>
+
+              <!-- Botón que FarmaIA te pide presionar -->
+              <div class="relative shrink-0 flex items-center justify-end">
+                <button type="button" onclick="simularPaso2Agregar()" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg flex items-center gap-2 transition cursor-pointer ring-4 ring-emerald-400/60 animate-pulse">
+                  <span>🛒</span> <span>Agregar al Carrito</span>
+                </button>
+                <div class="absolute -bottom-8 right-4 text-2xl animate-bounce">
+                  👆
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button type="button" onclick="simularPaso2Agregar()" class="px-5 py-2.5 rounded-xl bg-slate-900 text-emerald-400 hover:bg-slate-800 font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer transition">
+              <span>Siguiente: Ver cómo se suma al Carrito</span> <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ============================================================
+             PASO 2: FARMAIA TE INDICA VER EL CARRITO Y ABRIRLO
+             ============================================================ -->
+        <div id="demo-step-content-2" class="hidden space-y-4">
+          <!-- Diálogo de FarmaIA Celebrando -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-emerald-400 shadow-xl text-white flex items-start gap-3.5">
+            <div class="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 p-1 flex items-center justify-center shrink-0">
+              <img src="assets/robot_celebracion.png" alt="FarmaIA Celebrando" class="w-full h-full object-contain" onerror="this.src='/farmaia_model.jpg'" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black uppercase text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">Paso 2 de 4</span>
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>🎉</span> <span>¡Excelente clic! FarmaIA te dice:</span>
+                </span>
+              </div>
+              <p id="demo-farmaia-bubble-text-2" class="text-xs sm:text-sm text-slate-100 leading-relaxed font-medium">
+                «¿Viste lo que pasó? El producto voló a la esquina superior derecha y tu carrito ahora marca <strong>1 producto y RD$ 150.00</strong>. Ahora 👉 <strong>toca el botón de abajo "Abrir Carrito para Revisar"</strong> para ver los datos de tu entrega.»
+              </p>
+            </div>
+          </div>
+
+          <!-- Barra Superior Simulada -->
+          <div class="p-4 rounded-2xl bg-slate-900 text-white flex items-center justify-between shadow-lg border border-slate-700">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span class="font-black text-sm text-white">Barra Superior de la App</span>
+            </div>
+
+            <!-- Botón del Carrito en 1 -->
+            <div class="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-extrabold flex items-center gap-2 shadow-lg ring-4 ring-emerald-400/60 animate-pulse">
+              <span>🛒</span>
+              <span>RD$ 150.00</span>
+              <span class="px-2 py-0.5 bg-white text-teal-900 rounded-full text-xs font-black">1</span>
+            </div>
+          </div>
+
+          <div class="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs text-slate-700 flex items-center justify-between">
+            <span class="font-bold text-emerald-950">FarmaIA te pide continuar:</span>
+            <button type="button" onclick="simularPaso3AbrirCarrito()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition">
+              <span>Abrir Carrito para Revisar</span> <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ============================================================
+             PASO 3: FARMAIA TE GUÍA LA DIRECCIÓN Y EL BOTÓN DE WHATSAPP
+             ============================================================ -->
+        <div id="demo-step-content-3" class="hidden space-y-4">
+          <!-- Diálogo de FarmaIA -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-teal-400 shadow-xl text-white flex items-start gap-3.5">
+            <div class="w-16 h-16 rounded-2xl bg-teal-500/20 border border-teal-400/50 p-1 flex items-center justify-center shrink-0">
+              <img src="assets/robot_atencion.png" alt="FarmaIA Atencion" class="w-full h-full object-contain" onerror="this.src='/farmaia_model.jpg'" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black uppercase text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded-full border border-teal-400/30">Paso 3 de 4</span>
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>📋</span> <span>FarmaIA te indica:</span>
+                </span>
+              </div>
+              <p id="demo-farmaia-bubble-text-3" class="text-xs sm:text-sm text-slate-100 leading-relaxed font-medium">
+                «Aquí revisas tu pedido completo. Puedes elegir <strong>Envío a Domicilio</strong> o <strong>Retiro en Sucursal</strong>, y seleccionar si pagas en efectivo o tarjeta. Ahora 👉 <strong>haz clic en el botón verde resplandeciente "Pedir por WhatsApp a la Farmacia"</strong>.»
+              </p>
+            </div>
+          </div>
+
+          <!-- Comanda Simulada del Carrito -->
+          <div class="p-4 rounded-2xl border border-slate-200 bg-white space-y-3 text-xs shadow-md">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div class="flex items-center gap-2 font-bold text-slate-800">
+                <span>💊</span> <span>1x Paracetamol 500mg (Caja 20 tabletas)</span>
+              </div>
+              <span class="font-black text-slate-900">RD$ 150.00</span>
+            </div>
+
+            <div class="space-y-1.5 text-[11px] text-slate-700 bg-emerald-50/60 p-3 rounded-xl border border-emerald-200">
+              <p>🛵 <strong>Modalidad:</strong> Envío a Domicilio (Delivery Express)</p>
+              <p>📍 <strong>Dirección de Entrega:</strong> Tu sector y calle (configurada en tu cuenta)</p>
+              <p>💵 <strong>Forma de Pago:</strong> Efectivo contra entrega (Llevar cambio exacto)</p>
+            </div>
+
+            <div class="pt-2 flex items-center justify-between font-black text-sm text-slate-900 border-t border-slate-100">
+              <span>TOTAL A PAGAR:</span>
+              <span class="text-teal-700 text-lg">RD$ 150.00</span>
+            </div>
+
+            <!-- Botón WhatsApp Señalado con FarmaIA -->
+            <button type="button" onclick="simularPaso4WhatsApp()" class="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-lg ring-4 ring-emerald-400/60 flex items-center justify-center gap-2 transition cursor-pointer animate-pulse">
+              <span>📲</span> <span>Pedir por WhatsApp a la Farmacia</span>
+            </button>
+          </div>
+
+          <div class="flex justify-between items-center text-xs">
+            <button type="button" onclick="mostrarPasoDemo(2)" class="text-slate-500 font-bold hover:underline cursor-pointer">
+              ← Volver al paso 2
+            </button>
+            <button type="button" onclick="simularPaso4WhatsApp()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer transition">
+              <span>Ver Simulación de WhatsApp</span> <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ============================================================
+             PASO 4: FARMAIA TE MUESTRA EL CHAT DE WHATSAPP
+             ============================================================ -->
+        <div id="demo-step-content-4" class="hidden space-y-4">
+          <!-- Diálogo Final de FarmaIA -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border-2 border-emerald-400 shadow-xl text-white flex items-start gap-3.5">
+            <div class="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 p-1 flex items-center justify-center shrink-0">
+              <img src="/farmaia_model.jpg" alt="FarmaIA Explicando" class="w-full h-full object-contain rounded-xl" onerror="this.src='/farmaia_avatar.png'" />
+            </div>
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black uppercase text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">Paso 4 de 4</span>
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>📱</span> <span>¡Mágico! FarmaIA concluye:</span>
+                </span>
+              </div>
+              <p id="demo-farmaia-bubble-text-4" class="text-xs sm:text-sm text-slate-100 leading-relaxed font-medium">
+                «¡Listo! 📱 La app redacta el mensaje automáticamente con tus productos, dirección y monto en RD$. Tú solo presionas Enviar en WhatsApp y la farmacia te responde de inmediato para que el motorista salga a tu casa. ¡Ya aprendiste a comprar!»
+              </p>
+            </div>
+          </div>
+
+          <!-- Pantalla Realista de WhatsApp -->
+          <div class="rounded-2xl overflow-hidden border-2 border-emerald-600 shadow-xl bg-[#e5ddd5]">
+            <!-- Header WhatsApp -->
+            <div class="bg-[#075e54] text-white p-3 flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-full bg-white text-teal-800 font-black flex items-center justify-center text-sm">
+                  💊
+                </div>
+                <div>
+                  <h5 class="font-bold text-xs text-white">Farmacia Davalsi RD</h5>
+                  <p class="text-[10px] text-emerald-200">En línea • Despacho Inmediato</p>
+                </div>
+              </div>
+              <span class="text-[11px] text-emerald-200 font-bold">WhatsApp Oficial</span>
+            </div>
+
+            <!-- Chat Burbujas -->
+            <div class="p-3.5 space-y-3 text-xs" style="background-image:radial-gradient(#d4cbbe 1px, transparent 1px); background-size:16px 16px;">
+              <!-- Mensaje saliente del paciente (verde) -->
+              <div class="flex justify-end">
+                <div class="max-w-[85%] bg-[#dcf8c6] text-slate-800 rounded-2xl rounded-tr-none p-3 shadow-md space-y-1.5 border border-emerald-200/60">
+                  <p class="font-bold text-slate-900 text-[11px]">Hola *Farmacia Davalsi*, deseo ordenar desde la App Móvil:</p>
+                  <p class="text-[11px] text-slate-700 leading-relaxed font-mono">
+                    👤 *Cliente:* [Tu Nombre Registrado]<br/>
+                    📞 *Tel:* [Tu Número de WhatsApp]<br/>
+                    📍 *Dirección:* [Tu Dirección de Entrega]<br/>
+                    🛵 *Modalidad:* Envío a Domicilio (Delivery)<br/>
+                    💵 *Pago:* Efectivo contra entrega<br/><br/>
+                    💊 *Pedido:*<br/>
+                    • 1x Paracetamol 500mg (Caja 20 tab.) — RD$ 150.00<br/><br/>
+                    💰 *TOTAL:* RD$ 150.00
+                  </p>
+                  <div class="flex items-center justify-between text-[9px] text-slate-500 pt-1 border-t border-emerald-200">
+                    <span>¿Tienen delivery disponible ahora?</span>
+                    <span class="text-emerald-700 font-bold">10:42 AM ✓✓</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Respuesta entrante de la farmacia (blanco) -->
+              <div class="flex justify-start">
+                <div class="max-w-[85%] bg-white text-slate-800 rounded-2xl rounded-tl-none p-3 shadow-md space-y-1 border border-slate-200">
+                  <p class="font-bold text-emerald-800 text-[11px]">Farmacia Davalsi:</p>
+                  <p class="text-[11px] text-slate-700 leading-relaxed">
+                    ¡Hola! 👋 Sí, tenemos disponibilidad inmediata. Tu orden ya fue empaquetada y el repartidor sale hacia tu dirección en 15-20 minutos. 🛵💨
+                  </p>
+                  <span class="text-[9px] text-slate-400 block text-right">10:43 AM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Aviso de Tranquilidad -->
+          <div class="p-3 rounded-2xl bg-slate-900 text-white text-xs flex items-center justify-between gap-3 shadow-md border border-slate-800">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">🛡️</span>
+              <p class="text-[11px] text-slate-300">
+                <strong>Modo Demostración Educativa:</strong> Esta fue una práctica guiada por FarmaIA. No se realizó ningún cargo ni se registró pedido real en el sistema.
+              </p>
+            </div>
+          </div>
+
+          <!-- Botones de Acción -->
+          <div class="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+            <button type="button" onclick="mostrarPasoDemo(1)" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs transition cursor-pointer">
+              🔄 Repetir Guía con FarmaIA
+            </button>
+            <button type="button" onclick="finalizarDemoCompraVisual()" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg transition cursor-pointer flex items-center justify-center gap-2">
+              <span>🛍️ ¡Entendido FarmaIA! Ir a Comprar de Verdad</span> <span>➔</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // CONTROLADOR DE LA GUÍA VISUAL INTERACTIVA (FARMAIA TE GUÍA LA COMPRA)
+    // =========================================================================
+    let currentDemoStep = 1;
+
+    function iniciarDemoCompraVisual() {
+      const modal = document.getElementById("modal-demo-compra-visual");
+      if (modal) {
+        modal.classList.remove("hidden");
+        mostrarPasoDemo(1);
+      }
+    }
+
+    function cerrarDemoCompraVisual() {
+      const modal = document.getElementById("modal-demo-compra-visual");
+      if (modal) modal.classList.add("hidden");
+    }
+
+    function mostrarPasoDemo(paso) {
+      currentDemoStep = paso;
+      for (let i = 1; i <= 4; i++) {
+        const cont = document.getElementById(`demo-step-content-${i}`);
+        const tab = document.getElementById(`demo-step-tab-${i}`);
+        if (cont) cont.classList.toggle("hidden", i !== paso);
+        if (tab) {
+          if (i === paso) {
+            tab.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-black text-xs shadow cursor-pointer";
+          } else if (i < paso) {
+            tab.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-900/50 text-emerald-300 font-bold text-xs cursor-pointer";
+          } else {
+            tab.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 font-medium text-xs cursor-pointer";
+          }
+        }
+      }
+
+      // Animación suave del avatar en el header del modal
+      const headImg = document.getElementById("demo-farmaia-avatar-top");
+      if (headImg) {
+        headImg.style.transform = "scale(1.15) rotate(5deg)";
+        setTimeout(() => { headImg.style.transform = "scale(1) rotate(0deg)"; }, 300);
+      }
+    }
+
+    function simularPaso2Agregar() {
+      mostrarPasoDemo(2);
+    }
+
+    function simularPaso3AbrirCarrito() {
+      mostrarPasoDemo(3);
+    }
+
+    function simularPaso4WhatsApp() {
+      mostrarPasoDemo(4);
+    }
+
+    function finalizarDemoCompraVisual() {
+      cerrarDemoCompraVisual();
+      // Desplazar hacia los productos u ofertas para empezar compra real
+      const catalogEl = document.getElementById("section-app-kits") || document.getElementById("app-products-grid");
+      if (catalogEl) {
+        catalogEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    window.iniciarDemoCompraVisual = iniciarDemoCompraVisual;
+    window.cerrarDemoCompraVisual = cerrarDemoCompraVisual;
+    window.mostrarPasoDemo = mostrarPasoDemo;
+    window.simularPaso2Agregar = simularPaso2Agregar;
+    window.simularPaso3AbrirCarrito = simularPaso3AbrirCarrito;
+    window.simularPaso4WhatsApp = simularPaso4WhatsApp;
+    window.finalizarDemoCompraVisual = finalizarDemoCompraVisual;
+  </script>
+  <script src="/keep_alive_render.js"></script>
+  <script src="/farma_unified_agent.js"></script>
+</body>
 </html>

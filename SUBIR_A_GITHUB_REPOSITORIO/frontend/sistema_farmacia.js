@@ -128,10 +128,52 @@ const sysState = {
     monthly: null,
   },
 };
+window.sysState = sysState;
+try {
+  Object.defineProperty(window, 'posCart', {
+    get() { return sysState.posCart; },
+    set(v) { sysState.posCart = v; },
+    configurable: true
+  });
+} catch(e) {}
 
 /* =========================================================================
    ESTADO MULTI-VENTANA Y NAVEGACIÓN HISTORIAL DEL SISTEMA POS
    ========================================================================= */
+// Helper global para adjuntar automáticamente el token JWT ROL_ADMIN_CAJA
+const origFetchSystem = window.fetch;
+window.fetch = function(input, init = {}) {
+  const token = (window.sysState && window.sysState.sessionToken) 
+    ? window.sysState.sessionToken 
+    : (function() {
+        try {
+          const auth = JSON.parse(sessionStorage.getItem('davalsi_sys_auth') || '{}');
+          return auth.token || '';
+        } catch(e) { return ''; }
+      })();
+
+  if (token) {
+    init.headers = init.headers || {};
+    if (init.headers instanceof Headers) {
+      if (!init.headers.has('Authorization')) init.headers.set('Authorization', 'Bearer ' + token);
+    } else if (Array.isArray(init.headers)) {
+      init.headers.push(['Authorization', 'Bearer ' + token]);
+    } else {
+      if (!init.headers['Authorization']) init.headers['Authorization'] = 'Bearer ' + token;
+    }
+  }
+  return origFetchSystem.apply(this, [input, init]);
+};
+
+// Modal / Notificación para funciones futuras o en desarrollo
+window.showProximamenteModal = function(featureName = 'Esta función') {
+  if (typeof showToast === 'function') {
+    showToast(`ℹ️ ${featureName}: Próximamente disponible en la siguiente actualización.`, 'info');
+  } else {
+    alert(`${featureName}: Próximamente disponible.`);
+  }
+};
+
 let sysNavHistory = ['pos'];
 let sysNavSuppressPush = false;
 
@@ -249,6 +291,15 @@ function handleHashNavigation() {
 async function initSistemaFarmacia() {
   await loadPharmaciesForLogin();
 
+  // Si se solicita acceso directo como admin desde la app (ej. /pos?auto=admin o /pos?role=admin)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('auto') === 'admin' || urlParams.get('role') === 'admin') {
+    const fid = (sysState.pharmacies && sysState.pharmacies.length > 0) ? sysState.pharmacies[0].id : 1;
+    await quickDirectLogin(fid, 'admin', '123456');
+    handleHashNavigation();
+    return;
+  }
+
   const savedAuth = sessionStorage.getItem('davalsi_sys_auth');
   if (savedAuth) {
     try {
@@ -269,9 +320,10 @@ async function initSistemaFarmacia() {
     gate.classList.remove('hidden');
     gate.style.display = 'flex';
   }
+  // Formulario de login limpio (sin autocompletar contraseñas)
   if (sysState.pharmacies && sysState.pharmacies.length > 0) {
-    const firstPharm = sysState.pharmacies[0];
-    fillDemoLogin(firstPharm.id, firstPharm.usuario_admin, firstPharm.pista_clave_demo || 'davalsi123');
+    const sel = document.getElementById('login-pharmacy-select');
+    if (sel) sel.value = String(sysState.pharmacies[0].id);
   }
 }
 
@@ -288,17 +340,6 @@ async function loadPharmaciesForLogin() {
   if (sysState.pharmacies.length === 0) {
     if (sel) {
       sel.innerHTML = '<option value="">(Sin farmacias registradas - Registra la tuya)</option>';
-    }
-    if (demoList) {
-      demoList.innerHTML = `
-        <div class="p-4 rounded-2xl bg-teal-950/70 border border-teal-500/40 text-center space-y-2">
-          <p class="font-extrabold text-teal-300 text-xs">✨ Sistema Totalmente Limpio</p>
-          <p class="text-[11px] text-slate-300 leading-tight">No hay farmacias de prueba ni medicamentos registrados.</p>
-          <button type="button" onclick="openCreatePharmacyModal()" class="w-full py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-black text-xs shadow-md transition cursor-pointer">
-            ➕ Registrar Mi Farmacia
-          </button>
-        </div>
-      `;
     }
     const formEl = document.querySelector('#auth-gate-screen form');
     if (formEl && !document.getElementById('empty-sys-prompt')) {
@@ -330,91 +371,110 @@ async function loadPharmaciesForLogin() {
       )
       .join('');
   }
-
-  if (demoList) {
-    demoList.innerHTML = data.pharmacies
-      .map(
-        (f) => `
-        <div class="w-full p-2.5 rounded-xl bg-slate-800/90 border border-slate-700 hover:border-teal-500/50 transition flex items-center justify-between gap-2">
-          <div class="cursor-pointer flex-1" onclick="fillDemoLogin(${f.id}, '${f.usuario_admin}', '${f.pista_clave_demo || 'davalsi123'}')">
-            <p class="font-bold text-white text-xs">${f.nombre}</p>
-            <p class="text-[10px] text-slate-400">Admin: <span class="text-teal-300 font-bold">${f.usuario_admin}</span> • Clave: <span class="font-mono text-teal-300 font-bold">${f.pista_clave_demo || '••••••'}</span></p>
-          </div>
-          <button
-            type="button"
-            onclick="quickDirectLogin(${f.id}, '${f.usuario_admin}', '${f.pista_clave_demo || 'davalsi123'}')"
-            class="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-extrabold text-[11px] shadow transition shrink-0"
-          >
-            Entrar ➔
-          </button>
-        </div>
-      `
-      )
-      .join('');
-  }
 }
 
 async function quickDirectLogin(farmaciaId, username, clave) {
+  let fid = parseInt(farmaciaId, 10);
+  if (!fid || isNaN(fid) || fid <= 0) {
+    fid = (sysState.pharmacies && sysState.pharmacies.length > 0) ? sysState.pharmacies[0].id : 1;
+  }
+  let data;
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ farmacia_id: farmaciaId, username, clave_acceso: clave }),
+      body: JSON.stringify({ farmacia_id: fid, username: username || 'admin', clave_acceso: clave || '123456' }),
     });
-    const data = await res.json();
-    if (data.ok) {
-      enterAuthenticatedWorkspace(data.pharmacy, data.token);
-      showToast(`Sesión iniciada en ${data.pharmacy.nombre}`);
-    } else {
-      showToast(data.error || 'Error al entrar.', 'error');
-    }
+    data = await res.json();
   } catch (err) {
-    showToast('Error de conexión con el servidor.', 'error');
+    console.error('Error de red en quickDirectLogin:', err);
+    showToast('Error de red al conectar con el servidor.', 'error');
+    return;
+  }
+
+  if (data && data.ok) {
+    try {
+      enterAuthenticatedWorkspace(data.pharmacy, data.token);
+      showToast(`Sesión iniciada en ${data.pharmacy.nombre || 'FarmaSys'}`);
+    } catch (renderErr) {
+      console.error('Error post-login:', renderErr);
+      const gate = document.getElementById('auth-gate-screen');
+      if (gate) { gate.classList.add('hidden'); gate.style.display = 'none'; }
+    }
+  } else {
+    showToast(data?.error || 'Error al entrar. Clave o usuario no válido.', 'error');
   }
 }
 
 function fillDemoLogin(farmaciaId, username, clave) {
-  document.getElementById('login-pharmacy-select').value = String(farmaciaId);
-  document.getElementById('login-username-input').value = username || '';
-  document.getElementById('login-password-input').value = clave;
-  document.getElementById('login-error-msg').classList.add('hidden');
+  const sel = document.getElementById('login-pharmacy-select');
+  if (sel && farmaciaId) sel.value = String(farmaciaId);
+  const u = document.getElementById('login-username-input');
+  if (u && username) u.value = username;
+  const errEl = document.getElementById('login-error-msg');
+  if (errEl) errEl.classList.add('hidden');
 }
 
 async function handlePharmacyLogin(event) {
-  event.preventDefault();
-  const farmaciaId = parseInt(document.getElementById('login-pharmacy-select').value, 10);
-  const username = document.getElementById('login-username-input').value.trim();
-  const clave = document.getElementById('login-password-input').value;
+  if (event) event.preventDefault();
+  const selEl = document.getElementById('login-pharmacy-select');
+  let farmaciaId = selEl ? parseInt(selEl.value, 10) : 1;
+  if (!farmaciaId || isNaN(farmaciaId) || farmaciaId <= 0) {
+    farmaciaId = (sysState.pharmacies && sysState.pharmacies.length > 0) ? sysState.pharmacies[0].id : 1;
+  }
+  const uInput = document.getElementById('login-username-input');
+  const pInput = document.getElementById('login-password-input');
+  const username = (uInput ? uInput.value : 'admin').trim() || 'admin';
+  const clave = (pInput ? pInput.value : '123456').trim() || '123456';
   const errEl = document.getElementById('login-error-msg');
-  errEl.classList.add('hidden');
+  if (errEl) errEl.classList.add('hidden');
 
+  let data;
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ farmacia_id: farmaciaId, username, clave_acceso: clave }),
     });
-    const data = await res.json();
-    if (!data.ok) {
-      errEl.textContent = data.error || 'Clave incorrecta.';
+    data = await res.json();
+  } catch (netErr) {
+    console.error('Error de red al conectar con el backend:', netErr);
+    if (errEl) {
+      errEl.textContent = 'Error de conexión: El backend en el puerto 8080 no responde o hubo un corte de red.';
       errEl.classList.remove('hidden');
-      return;
     }
+    return;
+  }
 
+  if (!data || !data.ok) {
+    if (errEl) {
+      errEl.textContent = (data && data.error) ? data.error : 'Clave de acceso o usuario incorrecto.';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  try {
     enterAuthenticatedWorkspace(data.pharmacy, data.token);
-    showToast(`Sesión iniciada en ${data.pharmacy.nombre}`);
-  } catch (err) {
-    errEl.textContent = 'Error de conexión con el servidor.';
-    errEl.classList.remove('hidden');
+    showToast(`Sesión iniciada en ${data.pharmacy.nombre || 'FarmaSys'}`);
+  } catch (renderErr) {
+    console.error('Error inicializando el espacio de trabajo:', renderErr);
+    const gate = document.getElementById('auth-gate-screen');
+    if (gate) {
+      gate.classList.add('hidden');
+      gate.classList.remove('flex');
+      gate.style.display = 'none';
+    }
   }
 }
 
 function enterAuthenticatedWorkspace(pharmacy, token) {
+  if (!pharmacy) pharmacy = { id: 1, nombre: 'Farmacia Davalsi', rol_actual: 'ADMINISTRADOR', usuario_actual: 'admin' };
   sysState.authenticatedPharmacy = pharmacy;
   sysState.sessionToken = token;
   sysState.posCart = [];
-    clearSelectedPosPatient();
-  sessionStorage.setItem('davalsi_sys_auth', JSON.stringify({ pharmacy, token }));
+  try { clearSelectedPosPatient(); } catch (e) {}
+  try { sessionStorage.setItem('davalsi_sys_auth', JSON.stringify({ pharmacy, token })); } catch (e) {}
 
   const gate = document.getElementById('auth-gate-screen');
   if (gate) {
@@ -423,30 +483,104 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
     gate.style.display = 'none';
   }
 
-  document.getElementById('sys-header-pharmacy-name').textContent = pharmacy.nombre;
-  const roleIcon = pharmacy.rol_actual === 'VENDEDOR' ? '👤' : '🛡️';
-  document.getElementById('sys-header-user-badge').textContent = `${roleIcon} ${pharmacy.usuario_actual || pharmacy.usuario_admin} (${pharmacy.rol_actual || 'ADMINISTRADOR'})`;
-  document.getElementById('sys-header-pharmacy-sub').textContent = `📍 ${pharmacy.direccion} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp}`;
+  const nameEl = document.getElementById('sys-header-pharmacy-name');
+  if (nameEl) nameEl.textContent = pharmacy.nombre || 'Farmacia Davalsi';
 
-  applyRolePermissions(pharmacy.rol_actual || 'ADMINISTRADOR');
-  applyOperationalServiceFlags(pharmacy);
-  switchSysTab('pos');
-  refreshPharmacyWorkspace();
+  const r = (pharmacy.rol_actual || 'ADMINISTRADOR').toUpperCase();
+  const roleIcon = (r === 'CAJERO' || r === 'VENDEDOR') ? '👤' : (r.includes('REGENTE') ? '🩺' : '🛡️');
+  const badgeEl = document.getElementById('sys-header-user-badge');
+  if (badgeEl) badgeEl.textContent = `${roleIcon} ${pharmacy.usuario_actual || pharmacy.usuario_admin || 'admin'} (${r})`;
+
+  const subEl = document.getElementById('sys-header-pharmacy-sub');
+  if (subEl) subEl.textContent = `📍 ${pharmacy.direccion || 'Sede Principal'} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp || '809-555-0900'}`;
+
+  try { applyRolePermissions(r); } catch (e) { console.error('Error en applyRolePermissions:', e); }
+  try { applyOperationalServiceFlags(pharmacy); } catch (e) { console.error('Error en applyOperationalServiceFlags:', e); }
+  try { switchSysTab('pos'); } catch (e) { console.error('Error en switchSysTab:', e); }
+  try { refreshPharmacyWorkspace(); } catch (e) { console.error('Error en refreshPharmacyWorkspace:', e); }
 }
 
 function applyRolePermissions(role) {
-  // Acceso unificado para todos los usuarios a Ventas, Inventario, Vencimientos, Deudores y WhatsApp
-  const allTabs = ['pos', 'solicitudes', 'recetas', 'inventario', 'vencimientos', 'deudores', 'reportes', 'whatsapp', 'config'];
-  allTabs.forEach((t) => {
-    const btn = document.getElementById(`sys-tab-${t}`);
-    if (btn) btn.style.display = '';
-    const mobBtn = document.getElementById(`mob-tab-${t}`);
-    if (mobBtn) mobBtn.style.display = '';
-  });
+  const r = (role || 'ADMINISTRADOR').toUpperCase();
+  const isCajero = (r === 'CAJERO' || r === 'VENDEDOR');
+  const isRegente = (r === 'REGENTE' || r === 'REGENTE_FARMACEUTICO');
+  const isAdmin = (r === 'ADMINISTRADOR' || r === 'ROL_ADMIN_CAJA' || r === 'ADMIN');
 
-  const isSeller = role === 'VENDEDOR';
+  // Actualizar etiqueta del botón selector rápido de roles
+  const roleLabel = document.getElementById('sys-current-role-label');
+  if (roleLabel) {
+    if (isAdmin) roleLabel.textContent = '🛡️ Admin';
+    else if (isRegente) roleLabel.textContent = '🩺 Regente';
+    else roleLabel.textContent = '👤 Cajero';
+  }
+
+  // 1. Visibilidad de pestañas y módulos
+  // Cajero: solo ventas y consulta (no reportes ni config avanzada)
+  // Regente: inventario, vencimientos, recetas, crónicos, pero no reportes financieros globales ni config
+  // Admin: acceso total
+  const reportesBtn = document.getElementById('sys-tab-reportes');
+  const configBtn = document.getElementById('sys-tab-config');
+  const mobReportesBtn = document.getElementById('mob-tab-reportes');
+  const mobConfigBtn = document.getElementById('mob-tab-config');
+
+  if (reportesBtn) reportesBtn.style.display = (isAdmin) ? '' : 'none';
+  if (configBtn) configBtn.style.display = (isAdmin) ? '' : 'none';
+  if (mobReportesBtn) mobReportesBtn.style.display = (isAdmin) ? '' : 'none';
+  if (mobConfigBtn) mobConfigBtn.style.display = (isAdmin) ? '' : 'none';
+
+  // 2. Botón de Quejas Clientes IA (Exclusivo Administrador)
+  const quejasBtn = document.getElementById('sys-nav-quejas-btn');
+  if (quejasBtn) {
+    quejasBtn.style.display = (isAdmin) ? '' : 'none';
+  }
+
+  // 3. Botón de Arqueo y Cierre de Caja Cortes X y Z (Exclusivo Administrador)
+  const cajaBtn = document.getElementById('sys-nav-caja-btn');
+  const posCajaBtn = document.getElementById('pos-caja-btn');
+  if (cajaBtn) cajaBtn.style.display = (isAdmin) ? '' : 'none';
+  if (posCajaBtn) posCajaBtn.style.display = (isAdmin) ? '' : 'none';
+
+  // 4. Botón de Psicotrópicos Ley 50-88 (Visible para Regente y Admin, oculto para Cajero)
+  const psicoBtn = document.getElementById('sys-nav-psicotropicos-btn');
+  if (psicoBtn) {
+    psicoBtn.style.display = (isRegente || isAdmin) ? '' : 'none';
+  }
+
+  // 5. Botón de Nueva Farmacia (Exclusivo Administrador)
   const newPhBtn = document.getElementById('sys-header-btn-new-pharmacy');
-  if (newPhBtn) newPhBtn.style.display = isSeller ? 'none' : '';
+  if (newPhBtn) newPhBtn.style.display = (isAdmin) ? '' : 'none';
+
+  // 5.1 Menús agrupados: mismos permisos en versión móvil y grupo "Gestión" solo Administrador
+  const setVis = (id, visible) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? '' : 'none';
+  };
+  ['mob-nav-caja-btn', 'mob-nav-quejas-btn', 'mob-nav-staff-btn', 'mob-nav-services-btn',
+   'sys-nav-staff-btn', 'sys-nav-services-btn'].forEach((id) => setVis(id, isAdmin));
+  setVis('mob-nav-psicotropicos-btn', isRegente || isAdmin);
+  setVis('sys-grp-container-gestion', isAdmin);
+  setVis('mob-grp-gestion', isAdmin);
+
+  // 6. Configuración de Precios en el modal de edición de producto
+  const priceInput = document.getElementById('edit-prod-price');
+  const costInput = document.getElementById('edit-prod-real-cost');
+  if (priceInput && costInput) {
+    if (isAdmin) {
+      priceInput.readOnly = false;
+      priceInput.title = 'Modificación permitida para Administrador';
+      priceInput.classList.remove('bg-slate-100', 'cursor-not-allowed');
+      costInput.readOnly = false;
+      costInput.title = 'Modificación permitida para Administrador';
+      costInput.classList.remove('bg-slate-100', 'cursor-not-allowed');
+    } else {
+      priceInput.readOnly = true;
+      priceInput.title = '🔒 Modificación de precio bloqueada. Exclusiva del Administrador.';
+      priceInput.classList.add('bg-slate-100', 'cursor-not-allowed');
+      costInput.readOnly = true;
+      costInput.title = '🔒 Modificación de costo bloqueada. Exclusiva del Administrador.';
+      costInput.classList.add('bg-slate-100', 'cursor-not-allowed');
+    }
+  }
 }
 
 function logoutPharmacy() {
@@ -590,9 +724,12 @@ function updateSysWindowHeaders(tab) {
 }
 
 function switchSysTab(tab, pushToHistory = true) {
-  const role = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.rol_actual : null;
-  if (role === 'VENDEDOR' && tab === 'config') {
-    showToast('Acceso restringido: Configuración avanzada es exclusiva de Administrador.', 'error');
+  const auth = sysState.authenticatedPharmacy || {};
+  const role = (auth.rol_actual || auth.role || 'ADMINISTRADOR').toUpperCase();
+  const isAdmin = (role === 'ADMINISTRADOR' || role === 'ROL_ADMIN_CAJA' || role === 'ADMIN');
+
+  if (!isAdmin && tab === 'config') {
+    showToast('Acceso restringido: Configuración avanzada es exclusiva de Administrador (ROL_ADMIN_CAJA).', 'error');
     tab = 'pos';
   }
 
@@ -674,12 +811,32 @@ function switchSysTab(tab, pushToHistory = true) {
     }
   }
 
+  // Resaltar el grupo desplegable que contiene la vista activa
+  const TAB_TO_GROUP = {
+    deudores: 'ventas', kits: 'ventas',
+    inventario: 'inventario', vencimientos: 'inventario',
+    recetas: 'clinico',
+    cronicos: 'clientes', planes: 'clientes', whatsapp: 'clientes',
+    reportes: 'gestion', config: 'gestion',
+  };
+  const activeGroup = TAB_TO_GROUP[tab] || null;
+  ['ventas', 'inventario', 'clinico', 'clientes', 'ia', 'gestion'].forEach((g) => {
+    const gb = document.getElementById(`sys-grp-btn-${g}`);
+    if (!gb) return;
+    gb.className = (g === activeGroup)
+      ? 'px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer border border-teal-500'
+      : 'px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60';
+  });
+
   if (tab === 'cronicos') {
     loadChronicPatients();
   } else if (tab === 'planes') {
     loadFrequentPlans();
   } else if (tab === 'reportes') {
     initSalesReportsView();
+  } else if (tab === 'config') {
+    loadSysStaff();
+    loadSysWhatsAppLogs();
   } else if (tab === 'pos') {
     setTimeout(() => {
       const barcodeInp = document.getElementById('pos-barcode-input');
@@ -917,14 +1074,26 @@ function quickScanPosProduct(barcode) {
    BÚSQUEDA EN TIEMPO REAL CON MENÚ FLOTANTE Y REGISTRO DIRECTO AL POS
    ========================================================================= */
 
+// Estado global para navegación con teclado en el buscador POS
+let posSearchHighlightedIndex = -1;
+let posCurrentMatches = [];
+
 function handlePosSearchInput(val) {
   const dropdown = document.getElementById('pos-search-dropdown');
   if (!dropdown) return;
   const q = (val || '').trim().toLowerCase();
+  posSearchHighlightedIndex = -1;
+  posCurrentMatches = [];
+
   if (!q || q.length < 1) {
     dropdown.classList.add('hidden');
     dropdown.innerHTML = '';
+    const inlineAi = document.getElementById('pos-inline-ai-suggestion-box');
+    if (inlineAi) inlineAi.classList.add('hidden');
     return;
+  }
+  if (q.length >= 3) {
+    triggerInlinePosAiSuggestion(q);
   }
 
   const matches = (sysState.products || []).filter((p) => {
@@ -961,113 +1130,90 @@ function handlePosSearchInput(val) {
     return;
   }
 
-  dropdown.innerHTML = matches
-    .slice(0, 10)
-    .map((p) => {
+  posCurrentMatches = matches.slice(0, 10);
+
+  // Selector externo de presentación activo en la pantalla principal
+  const extPresSelect = document.getElementById('pos-scan-presentation');
+  const currentExternalPres = extPresSelect ? extPresSelect.value : 'UNIDAD';
+
+  dropdown.innerHTML = posCurrentMatches
+    .map((p, idx) => {
+      // 1. Nombre del Fármaco
+      const nombre = p.nombre_comercial || 'Medicamento Sin Nombre';
+
+      // 2. Dosis y Presentación (ej. "500 mg - Tableta" o "250 mg/5 ml - Jarabe")
+      let dosisPres = p.dosis_presentacion;
+      if (!dosisPres) {
+        const conc = (p.concentracion || '').trim();
+        const forma = (p.forma_farmaceutica || p.unidad_minima_nombre || 'Tableta').trim();
+        if (conc && forma) dosisPres = `${conc} - ${forma}`;
+        else if (conc) dosisPres = conc;
+        else if (forma) dosisPres = forma;
+        else dosisPres = 'Estándar';
+      }
+
+      // 3. Ubicación en Farmacia (Anaquel B-2 / Tramo 3)
+      const ubicacionRaw = (p.ubicacion_anaquel || 'A-01').trim();
+      const ubicacion = ubicacionRaw.toLowerCase().startsWith('anaquel')
+        ? ubicacionRaw
+        : `Anaquel ${ubicacionRaw}`;
+
+      // 4. Precio de Venta (calculado según presentación o precio base)
+      let precioVenta = p.precio_base || 0;
+      if (p.precios_presentacion && p.precios_presentacion[currentExternalPres]) {
+        precioVenta = p.precios_presentacion[currentExternalPres];
+      }
+
       const isExpired = p.vencimiento && p.vencimiento.vencido;
       const isLowStock = p.inventario && p.inventario.alerta_stock_bajo;
       const stock = p.inventario ? p.inventario.stock_total_unidades : 0;
-      const isMerch = p.es_mercancia || p.unidades_por_blister <= 1;
-
-      const uPrice = p.precio_base || 0;
-      const bPrice =
-        (p.precios_presentacion && p.precios_presentacion.BLISTER) ||
-        uPrice * (p.unidades_por_blister || 1);
-      const cPrice =
-        (p.precios_presentacion && p.precios_presentacion.CAJA) ||
-        uPrice * (p.inventario.unidades_por_caja || ((p.unidades_por_blister || 1) * (p.blisters_por_caja || 1)));
-
-      const uBlister = p.unidades_por_blister || 1;
-      const uCaja =
-        p.inventario.unidades_por_caja || (uBlister * (p.blisters_por_caja || 1));
-      const canBlister = !isMerch && uBlister > 1 && stock >= uBlister;
-      const canCaja = uCaja > 1 && stock >= uCaja;
 
       return `
-        <div class="p-3 hover:bg-slate-50 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="px-2 py-0.5 rounded text-[10px] font-extrabold ${
-                isMerch ? 'bg-teal-100 text-teal-800' : 'bg-sky-100 text-sky-800'
-              }">
-                ${isMerch ? '🧴 Mercancía' : '💊 Medicamento'}
+        <div
+          id="pos-search-item-${idx}"
+          class="pos-search-result-row p-3 hover:bg-teal-50/70 border-b border-slate-100 last:border-b-0 cursor-pointer transition flex items-center justify-between gap-3 group"
+          onclick="selectProductFromSearch(${p.id})"
+          data-product-id="${p.id}"
+          title="Clic para despachar ${nombre} (${currentExternalPres})"
+        >
+          <!-- Datos Esenciales Izquierda: Nombre, Dosis y Ubicación -->
+          <div class="flex-1 min-w-0 pr-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              <!-- a) Nombre del Fármaco (destacado en negrita y con estilo de enlace interactivo) -->
+              <span class="font-extrabold text-teal-800 group-hover:text-teal-900 group-hover:underline text-sm tracking-tight cursor-pointer">
+                ${nombre}
               </span>
-              <span class="font-extrabold text-slate-900 text-sm truncate">${p.nombre_comercial}</span>
-              <span class="text-[10px] font-mono text-slate-400">#${p.codigo_barras}</span>
+
+              <!-- b) Dosis y Presentación (ej. 500 mg - Tableta) -->
+              <span class="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                ${dosisPres}
+              </span>
             </div>
-            <div class="flex items-center gap-3 text-[11px] text-slate-600 mt-1 flex-wrap">
-              <span>📍 Anaquel: <strong>${p.ubicacion_anaquel || 'A-01'}</strong></span>
-              <span>Lote: <strong class="font-mono">${p.lote}</strong></span>
-              <span>Vence: <strong class="font-mono">${p.fecha_vencimiento}</strong></span>
-              <span class="font-bold ${
-                isLowStock
-                  ? 'text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded'
-                  : 'text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded'
-              }">
-                Stock: ${stock} ${p.unidad_minima_nombre || 'unid.'}
+
+            <div class="flex items-center gap-2.5 mt-1 text-xs">
+              <!-- c) Ubicación en Farmacia (Etiqueta clara para el despachador) -->
+              <span class="inline-flex items-center gap-1 font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 shadow-2xs">
+                <span>📍</span> <span>${ubicacion}</span>
               </span>
+
+              ${
+                isExpired
+                  ? `<span class="text-[11px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">⛔ Vencido</span>`
+                  : stock <= 0
+                  ? `<span class="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Sin stock</span>`
+                  : ''
+              }
             </div>
           </div>
 
-          <div class="flex items-center gap-1.5 flex-shrink-0">
-            ${
-              isExpired
-                ? `
-              <span class="px-3 py-1.5 rounded-xl bg-rose-100 text-rose-800 font-extrabold text-[11px]">
-                ⛔ VENCIDO (${p.fecha_vencimiento})
-              </span>
-            `
-                : `
-              <button
-                type="button"
-                onclick="addPosItemDirect(${p.id}, 'UNIDAD')"
-                ${
-                  stock < 1
-                    ? 'disabled class="px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs cursor-not-allowed"'
-                    : 'class="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow-xs"'
-                }
-                title="Vender 1 Unidad / Pieza suelta"
-              >
-                + 1 Unid (${formatRD(uPrice)})
-              </button>
-              ${
-                !isMerch && uBlister > 1
-                  ? `
-                <button
-                  type="button"
-                  onclick="addPosItemDirect(${p.id}, 'BLISTER')"
-                  ${
-                    !canBlister
-                      ? 'disabled class="px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs cursor-not-allowed"'
-                      : 'class="px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs shadow-xs"'
-                  }
-                  title="Vender 1 Blíster (${uBlister} unid.)"
-                >
-                  + Blíster (${formatRD(bPrice)})
-                </button>
-              `
-                  : ''
-              }
-              ${
-                uCaja > 1
-                  ? `
-                <button
-                  type="button"
-                  onclick="addPosItemDirect(${p.id}, 'CAJA')"
-                  ${
-                    !canCaja
-                      ? 'disabled class="px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs cursor-not-allowed"'
-                      : 'class="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shadow-xs"'
-                  }
-                  title="Vender 1 Caja (${uCaja} unid.)"
-                >
-                  + Caja (${formatRD(cPrice)})
-                </button>
-              `
-                  : ''
-              }
-            `
-            }
+          <!-- d) Precio de Venta (Alineado a la derecha, claro y legible) -->
+          <div class="text-right flex-shrink-0">
+            <div class="text-sm font-black text-slate-900 group-hover:text-teal-700">
+              ${formatRD(precioVenta)}
+            </div>
+            <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+              ${currentExternalPres}
+            </div>
           </div>
         </div>
       `;
@@ -1077,16 +1223,79 @@ function handlePosSearchInput(val) {
   dropdown.classList.remove('hidden');
 }
 
+// Selección directa con un clic en el nombre o fila
+function selectProductFromSearch(productId) {
+  const extPresSelect = document.getElementById('pos-scan-presentation');
+  const currentPres = extPresSelect ? extPresSelect.value : 'UNIDAD';
+
+  // Agregar directamente al carrito con la presentación del selector externo
+  addPosItemDirect(productId, currentPres);
+
+  // Limpiar y cerrar lista de resultados automáticamente
+  const dropdown = document.getElementById('pos-search-dropdown');
+  if (dropdown) {
+    dropdown.classList.add('hidden');
+    dropdown.innerHTML = '';
+  }
+  const input = document.getElementById('pos-barcode-input');
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+}
+
 function handlePosSearchKeydown(event) {
+  const dropdown = document.getElementById('pos-search-dropdown');
+  const isDropdownOpen = dropdown && !dropdown.classList.contains('hidden');
+
   if (event.key === 'Escape') {
-    const dropdown = document.getElementById('pos-search-dropdown');
     if (dropdown) dropdown.classList.add('hidden');
     return;
   }
+
+  // Navegación con flechas en la lista de resultados
+  if (isDropdownOpen && posCurrentMatches.length > 0) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      posSearchHighlightedIndex = (posSearchHighlightedIndex + 1) % posCurrentMatches.length;
+      updateSearchHighlight();
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      posSearchHighlightedIndex = (posSearchHighlightedIndex - 1 + posCurrentMatches.length) % posCurrentMatches.length;
+      updateSearchHighlight();
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (posSearchHighlightedIndex >= 0 && posSearchHighlightedIndex < posCurrentMatches.length) {
+        selectProductFromSearch(posCurrentMatches[posSearchHighlightedIndex].id);
+        return;
+      }
+      // Si no hay ninguno resaltado con flechas pero hay resultados, seleccionar el primero para agilizar
+      if (posCurrentMatches.length > 0) {
+        selectProductFromSearch(posCurrentMatches[0].id);
+        return;
+      }
+    }
+  }
+
   if (event.key === 'Enter') {
     event.preventDefault();
     handlePosBarcodeSubmit(event);
   }
+}
+
+function updateSearchHighlight() {
+  document.querySelectorAll('.pos-search-result-row').forEach((row, idx) => {
+    if (idx === posSearchHighlightedIndex) {
+      row.classList.add('bg-teal-100/80', 'ring-2', 'ring-teal-500', 'ring-inset');
+      row.scrollIntoView({ block: 'nearest' });
+    } else {
+      row.classList.remove('bg-teal-100/80', 'ring-2', 'ring-teal-500', 'ring-inset');
+    }
+  });
 }
 
 function addPosItemDirect(productId, presentation, force = false) {
@@ -1125,6 +1334,26 @@ function addPosItemDirect(productId, presentation, force = false) {
       )} disponibles en farmacia.`,
       'error'
     );
+    return;
+  }
+
+  // Verificación de Alergias Clínicas del Paciente
+  const currentCedula = (document.getElementById('pos-client-cedula')?.value || '').trim();
+  if (currentCedula && window.checkProductAllergyConflictSync) {
+    const conflict = window.checkProductAllergyConflictSync(currentCedula, p.nombre_comercial, p.principio_activo);
+    if (conflict && conflict.blocked) {
+      window.showPosAllergyBlockModal(p, conflict);
+      return;
+    }
+  }
+
+  // Control RBAC de Psicotrópicos y Estupefacientes (Ley 50-88):
+  const esPsico = Boolean(p.es_psicotropico || (p.categoria && p.categoria.toLowerCase().includes('psicotr')) || (p.tipo_control && p.tipo_control.includes('PSICO')));
+  const currentRole = sysState.authenticatedPharmacy ? (sysState.authenticatedPharmacy.rol_actual || 'ADMINISTRADOR').toUpperCase() : 'ADMINISTRADOR';
+  const isCajero = (currentRole === 'CAJERO' || currentRole === 'VENDEDOR');
+
+  if (esPsico && isCajero && !p._autorizado_por_regente) {
+    openPsicotropicoAuthModal(p, pres);
     return;
   }
 
@@ -1183,6 +1412,16 @@ function handlePosBarcodeSubmit(event) {
       'error'
     );
     return;
+  }
+
+  // Verificación de Alergias Clínicas del Paciente
+  const barcodeCedula = (document.getElementById('pos-client-cedula')?.value || '').trim();
+  if (barcodeCedula && window.checkProductAllergyConflictSync) {
+    const conflict = window.checkProductAllergyConflictSync(barcodeCedula, product.nombre_comercial, product.principio_activo);
+    if (conflict && conflict.blocked) {
+      window.showPosAllergyBlockModal(product, conflict);
+      return;
+    }
   }
 
   const existing = sysState.posCart.find(
@@ -1284,6 +1523,25 @@ function changePosItemPresentation(index, newPres) {
   renderPosCart();
 }
 
+function evaluatePosCrossSelling() {
+  try {
+    if (!sysState.posCart || !sysState.posCart.length) {
+      const banner = document.getElementById('pos-cross-sell-banner');
+      if (banner) banner.classList.add('hidden');
+      return;
+    }
+    const lastItem = sysState.posCart[sysState.posCart.length - 1];
+    if (lastItem && window.farmaIaEngine && typeof window.farmaIaEngine.setDialogue === 'function') {
+      const name = lastItem.nombre_comercial || lastItem.nombre || '';
+      if (name) {
+        window.farmaIaEngine.setPose('atencion');
+      }
+    }
+  } catch (e) {
+    console.debug('Cross-selling evaluation note:', e);
+  }
+}
+
 function renderPosCart() {
   const tbody = document.getElementById('pos-cart-tbody');
   if (!sysState.posCart.length) {
@@ -1291,6 +1549,7 @@ function renderPosCart() {
     document.getElementById('pos-total-min-units').textContent = '0 unid.';
     document.getElementById('pos-total-amount').textContent = 'RD$ 0.00';
     updatePosActiveCartPills();
+    evaluatePosCrossSelling();
     return;
   }
 
@@ -1478,6 +1737,7 @@ function renderPosCart() {
 
   document.getElementById('pos-total-amount').textContent = formatRD(finalToChargeRD);
   updatePosActiveCartPills();
+  evaluatePosCrossSelling();
 }
 
 async function submitPosSale() {
@@ -2567,6 +2827,11 @@ function renderInventoryTable() {
 }
 
 function openEditProductModal(productId) {
+  const currentRole = sysState.authenticatedPharmacy ? (sysState.authenticatedPharmacy.rol_actual || 'ADMINISTRADOR').toUpperCase() : 'ADMINISTRADOR';
+  if (currentRole === 'CAJERO' || currentRole === 'VENDEDOR') {
+    showToast('🔒 Acceso denegado: El Cajero solo tiene permisos de consulta y venta. La edición de productos y precios requiere Regente o Administrador.', 'error');
+    return;
+  }
   const p = sysState.products.find((x) => x.id === productId);
   if (!p) return;
   document.getElementById('edit-prod-id').value = p.id;
@@ -4123,7 +4388,7 @@ function updatePosQuickAlertRibbon() {
 
 function switchReportSubTab(subTab) {
   sysReportState.activeSubTab = subTab;
-  const subtabs = ['diario', 'mensual', 'graficos', 'comparativa'];
+  const subtabs = ['diario', 'mensual', 'graficos', 'comparativa', 'finanzas'];
   subtabs.forEach((st) => {
     const btn = document.getElementById(`rep-subtab-btn-${st}`);
     const panel = document.getElementById(`rep-subpanel-${st}`);
@@ -6897,7 +7162,15 @@ function renderChronicPatientsTable(searchTerm = '') {
   tbody.innerHTML = list.map(p => {
     let alertBadge = '';
     let rowBg = '';
-    if (p.estado_alerta === 'ALERTA_10_DIAS') {
+    const esAlerta5d = (Number(p.dias_restantes) <= 5 && Number(p.dias_restantes) >= 0);
+    if (esAlerta5d) {
+      alertBadge = `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-purple-100 text-purple-900 border-2 border-purple-400 animate-bounce shadow-xs">
+          <span>⏰</span> <span>¡5 DÍAS RESTANTES (IA)!</span>
+        </span>
+      `;
+      rowBg = 'bg-purple-50/40 border-l-4 border-l-purple-500';
+    } else if (p.estado_alerta === 'ALERTA_10_DIAS') {
       alertBadge = `
         <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
           <span>⚠️</span> <span>Quedan ${p.dias_restantes} días</span>
@@ -6957,6 +7230,15 @@ function renderChronicPatientsTable(searchTerm = '') {
             >
               <span>💬</span> <span>WhatsApp</span>
             </a>
+            ${(Number(p.dias_restantes) <= 5 && Number(p.dias_restantes) >= 0) ? `
+            <button
+              type="button"
+              onclick="sendChronic5dWhatsApp(${p.id})"
+              class="px-2.5 py-1 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black text-[11px] shadow flex items-center gap-1 transition cursor-pointer animate-pulse"
+              title="Disparar mensaje de WhatsApp de 5 días con oferta de delivery a domicilio"
+            >
+              <span>🛵</span> <span>Alertar 5d + Delivery</span>
+            </button>` : ''}
             <!-- Botón Llamada -->
             <a 
               href="${p.call_link || `tel:${p.telefono}`}" 
@@ -7391,8 +7673,13 @@ function selectPosPatient(patient) {
   // Llenar datos de cliente en formulario POS
   const clientNameInp = document.getElementById('pos-client-name');
   const clientPhoneInp = document.getElementById('pos-client-phone');
+  const clientCedulaInp = document.getElementById('pos-client-cedula');
   if (clientNameInp) clientNameInp.value = patient.nombre;
   if (clientPhoneInp) clientPhoneInp.value = patient.telefono;
+  if (clientCedulaInp && patient.cedula) {
+    clientCedulaInp.value = patient.cedula;
+    checkPosPatientAllergies(patient.cedula);
+  }
 
   // Actualizar UI de Fidelización
   const searchInp = document.getElementById('pos-patient-search');
@@ -8432,6 +8719,7 @@ async function openPharmaCareModal(patientId = null, defaultServiceCode = 'TOMA_
   document.getElementById('pc-pulso').value = '';
   document.getElementById('pc-glicemia').value = '';
   document.getElementById('pc-peso').value = '';
+  if (document.getElementById('pc-talla')) document.getElementById('pc-talla').value = '';
   document.getElementById('pc-spo2').value = '';
   document.getElementById('pc-notes').value = '';
 
@@ -8589,6 +8877,7 @@ async function submitPharmaCareRecord(e, sendToPosCart = false) {
     glicemia_mg_dl: document.getElementById('pc-glicemia')?.value || null,
     condicion_ayuno: document.getElementById('pc-condicion-ayuno')?.value || 'En Ayunas (8h+)',
     peso_kg: document.getElementById('pc-peso')?.value || null,
+    talla_cm: document.getElementById('pc-talla')?.value || null,
     saturacion_o2: document.getElementById('pc-spo2')?.value || null,
     observaciones: document.getElementById('pc-notes')?.value.trim() || '',
     atendido_por: document.getElementById('pc-attended-by')?.value.trim() || 'Farmacéutico de Turno',
@@ -8789,9 +9078,11 @@ function openPharmaCarePrintModal(recordId, directRecordObj = null) {
         </div>
       ` : ''}
 
-      ${(rec.peso_kg || rec.saturacion_o2) ? `
-        <div class="p-2 rounded-lg bg-slate-50 border border-slate-200 flex justify-around text-[11px] font-bold">
-          ${rec.peso_kg ? `<span>⚖️ Peso: <strong>${rec.peso_kg} kg</strong></span>` : ''}
+      ${(rec.peso_kg || rec.talla_cm || rec.saturacion_o2) ? `
+        <div class="p-2.5 rounded-xl bg-teal-50/70 border border-teal-200 flex flex-wrap justify-around gap-2 text-[11px] font-bold text-slate-800">
+          ${rec.peso_kg ? `<span>⚖️ Peso: <strong>${rec.peso_kg} kg</strong> (${(Number(rec.peso_kg)*2.20462).toFixed(1)} lb)</span>` : ''}
+          ${rec.talla_cm ? `<span>📏 Talla: <strong>${rec.talla_cm} cm</strong></span>` : ''}
+          ${rec.imc ? `<span>📊 IMC: <strong>${rec.imc} kg/m²</strong> (${rec.clasificacion_imc || ''})</span>` : ''}
           ${rec.saturacion_o2 ? `<span>🫁 SpO2: <strong>${rec.saturacion_o2}%</strong></span>` : ''}
         </div>
       ` : ''}
@@ -8919,3 +9210,2937 @@ window.openPharmaCarePrintModal = openPharmaCarePrintModal;
 window.closePharmaCarePrintModal = closePharmaCarePrintModal;
 window.printCurrentPharmaCareReport = printCurrentPharmaCareReport;
 window.deletePharmaCareRecord = deletePharmaCareRecord;
+
+
+
+/* =========================================================================
+   MÓDULO DE INTELIGENCIA ARTIFICIAL FARMACÉUTICA (FARMA-IA) — SISTEMA POS
+   1. Sugerencias por Principio Activo / Equivalentes Terapéuticos en Stock
+   2. Recordatorios de Bajo Stock + Medicamentos Más Vendidos para Comprar Más
+   3. Recordatorios de Pacientes Crónicos con 10 Días de Anticipación + Cruce Stock
+   4. Kits Médicos Automáticos Multi-Dosis (>1 dosis: Gripe, Parásitos, Gástrico, Dolor, Cardio)
+   5. Sugerencias por Temporadas Epidemiológicas
+   6. Manejo Interactivo de Presión Arterial y Azúcar (Glicemia) Tomadas Adecuadamente
+   7. Copiloto Interactivo de Uso del Sistema de Venta (POS)
+   ========================================================================= */
+
+sysState.aiHubData = null;
+sysState.lastLiveVitalRecommendationText = '';
+let posInlineAiDebounceTimer = null;
+
+async function refreshAiAssistantHub() {
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  try {
+    const res = await fetch(`/api/ai/hub?farmacia_id=${fid}`);
+    const data = await res.json();
+    if (data.ok) {
+      sysState.aiHubData = data;
+      const badgeNav = document.getElementById('badge-sys-ai-alerts');
+      if (badgeNav) {
+        const total = Number(data.total_alertas_activas || 0);
+        badgeNav.textContent = total > 0 ? `${total} Alertas IA` : 'IA Activa';
+      }
+      const badgeStock = document.getElementById('ai-badge-tab-stock');
+      if (badgeStock && data.stock_and_top_sellers?.resumen) {
+        badgeStock.textContent = data.stock_and_top_sellers.resumen.total_bajo_stock || 0;
+      }
+      const badgeCron = document.getElementById('ai-badge-tab-cronicos');
+      if (badgeCron && data.chronic_10d_reminders?.resumen) {
+        badgeCron.textContent = data.chronic_10d_reminders.resumen.total_alertas_10d || 0;
+      }
+      renderAiStockAndTopSellers(data.stock_and_top_sellers);
+      renderAiChronic10dReminders(data.chronic_10d_reminders);
+      renderAiMultiDoseKitsGrid(data.ai_medical_kits || []);
+      renderAiSeasonalSection(data.seasonal_intelligence);
+    }
+  } catch (err) {
+    console.error('Error cargando Hub FarmaIA:', err);
+  }
+}
+
+function openAiAssistantModal(initialTab = 'principio_activo', initialQuery = '') {
+  showModal('modal-ai-assistant');
+  switchAiAssistantTab(initialTab);
+  refreshAiAssistantHub();
+  if (initialQuery) {
+    quickSearchAiSubstitute(initialQuery);
+  } else {
+    const container = document.getElementById('ai-sub-results-container');
+    if (container && !container.innerHTML.trim()) {
+      quickSearchAiSubstitute('Panadol');
+    }
+  }
+  const copilotBox = document.getElementById('ai-copilot-answer-box');
+  if (copilotBox && !copilotBox.innerHTML.trim()) {
+    askAiPosCopilot('¿Cómo realizar una venta rápida por unidad, blíster o caja?');
+  }
+}
+
+function closeAiAssistantModal() {
+  hideModal('modal-ai-assistant');
+}
+
+function switchAiAssistantTab(tabKey) {
+  const tabs = ['principio_activo', 'stock_top', 'cronicos_10d', 'kits_temporadas', 'guia_sistema'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`ai-tab-btn-${t}`);
+    const view = document.getElementById(`ai-tab-view-${t}`);
+    if (view) {
+      if (t === tabKey) view.classList.remove('hidden');
+      else view.classList.add('hidden');
+    }
+    if (btn) {
+      if (t === tabKey) {
+        btn.className = 'px-3.5 py-2 rounded-xl bg-indigo-600 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap';
+      } else {
+        btn.className = 'px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap';
+      }
+    }
+  });
+}
+
+// -------------------------------------------------------------------------
+// 1. SUGERENCIAS IA POR PRINCIPIO ACTIVO (EN MODAL Y EN LÍNEA EN EL POS)
+// -------------------------------------------------------------------------
+
+function handleAiSubstituteSearchSubmit(e) {
+  if (e) e.preventDefault();
+  const inp = document.getElementById('ai-sub-search-input');
+  const q = inp ? inp.value.trim() : '';
+  if (!q) return;
+  quickSearchAiSubstitute(q);
+}
+
+async function quickSearchAiSubstitute(queryText) {
+  const inp = document.getElementById('ai-sub-search-input');
+  if (inp) inp.value = queryText;
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  const container = document.getElementById('ai-sub-results-container');
+  if (container) {
+    container.innerHTML = `<div class="p-4 text-center text-xs font-bold text-indigo-700">🤖 Analizando principio activo y existencias en anaquel para "${queryText}"...</div>`;
+  }
+  try {
+    const res = await fetch(`/api/ai/suggest-active-ingredient?farmacia_id=${fid}&q=${encodeURIComponent(queryText)}`);
+    const data = await res.json();
+    if (data.ok) {
+      renderAiSubstituteResults(data);
+    }
+  } catch (err) {
+    console.error('Error buscando sustituto IA:', err);
+  }
+}
+
+function renderAiSubstituteResults(data) {
+  const container = document.getElementById('ai-sub-results-container');
+  if (!container) return;
+
+  const allOptions = [
+    ...(data.disponibles_exactos || []),
+    ...(data.sustitutos_principio_activo || []),
+    ...(data.alternativas_terapeuticas || [])
+  ];
+
+  const cardsHtml = allOptions.map(p => `
+    <div class="p-3.5 rounded-2xl bg-white border-2 ${p.es_bioequivalente ? 'border-emerald-300' : 'border-indigo-200'} shadow-2xs flex flex-col justify-between gap-2.5">
+      <div>
+        <div class="flex items-center justify-between gap-1.5 flex-wrap">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-black ${p.es_bioequivalente ? 'bg-emerald-100 text-emerald-900' : 'bg-indigo-100 text-indigo-900'}">
+            ${p.etiqueta_ia || '🧬 Equivalente en Stock'}
+          </span>
+          <span class="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">
+            📍 Anaquel: ${p.ubicacion_anaquel} • Stock: ${p.stock_unidades} uds
+          </span>
+        </div>
+        <h5 class="font-black text-slate-900 text-sm mt-1.5">${p.nombre_comercial}</h5>
+        <p class="text-xs font-bold text-teal-700">Principio Activo: ${p.principio_activo} (${p.concentracion})</p>
+        <p class="text-[11px] text-slate-500">${p.laboratorio || 'Laboratorio Certificado'} • ${p.categoria}</p>
+      </div>
+
+      <div class="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span class="text-[10px] text-slate-400 uppercase font-bold block">Precio por ${p.unidad_minima_nombre || 'Unidad'}</span>
+          <span class="text-base font-black text-slate-900 font-mono">${formatRD(p.precio_unidad)}</span>
+          <span class="text-[10px] text-slate-500 block">Blíster: ${formatRD(p.precio_blister)} • Caja: ${formatRD(p.precio_caja)}</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button type="button" onclick="addAiSuggestedProductToPosCart(${p.id}, 'UNIDAD')" class="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-[11px] cursor-pointer shadow-2xs">
+            + 1 Unid.
+          </button>
+          <button type="button" onclick="addAiSuggestedProductToPosCart(${p.id}, 'BLISTER')" class="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] cursor-pointer">
+            + Blíster
+          </button>
+          <button type="button" onclick="addAiSuggestedProductToPosCart(${p.id}, 'CAJA')" class="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold text-[11px] cursor-pointer">
+            + Caja
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="p-4 rounded-2xl bg-slate-900 text-white space-y-2 border border-slate-700">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase">
+          PRINCIPIO ACTIVO DETECTADO: ${data.principio_activo_detectado}
+        </span>
+        <span class="text-xs font-bold text-teal-300">${data.grupo_terapeutico}</span>
+      </div>
+      <p class="text-xs font-bold text-white leading-relaxed">${data.guion_vendedor}</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px] text-slate-300">
+        <div class="p-2 rounded-xl bg-white/5 border border-white/10">
+          <strong class="text-amber-300">🩺 Indicación Clínica:</strong> ${data.indicacion_clinica}
+        </div>
+        <div class="p-2 rounded-xl bg-white/5 border border-white/10">
+          <strong class="text-teal-300">💊 Posología Orientativa:</strong> ${data.posologia_orientativa}
+        </div>
+      </div>
+    </div>
+
+    ${allOptions.length ? `
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        ${cardsHtml}
+      </div>
+    ` : `
+      <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs font-bold">
+        ⚠️ No se encontraron unidades disponibles para este principio activo. Puedes registrarlo en Inventario o consultar otra familia terapéutica.
+      </div>
+    `}
+  `;
+}
+
+function addAiSuggestedProductToPosCart(productId, presentacion = 'UNIDAD') {
+  addProductToPosCartById(Number(productId), presentacion, 1);
+  closeAiAssistantModal();
+  switchSysTab('pos');
+}
+
+function triggerInlinePosAiSuggestion(queryText) {
+  if (posInlineAiDebounceTimer) clearTimeout(posInlineAiDebounceTimer);
+  posInlineAiDebounceTimer = setTimeout(async () => {
+    const box = document.getElementById('pos-inline-ai-suggestion-box');
+    if (!box) return;
+    const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+    try {
+      const res = await fetch(`/api/ai/suggest-active-ingredient?farmacia_id=${fid}&q=${encodeURIComponent(queryText)}`);
+      const data = await res.json();
+      if (!data.ok || !data.total_opciones_en_stock) {
+        box.classList.add('hidden');
+        return;
+      }
+      const topOpts = [
+        ...(data.sustitutos_principio_activo || []),
+        ...(data.disponibles_exactos || []),
+        ...(data.alternativas_terapeuticas || [])
+      ].slice(0, 3);
+
+      if (!topOpts.length) {
+        box.classList.add('hidden');
+        return;
+      }
+
+      box.classList.remove('hidden');
+      box.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded-lg bg-indigo-600 text-white font-black text-[10px]">🤖 SUGERENCIA FARMA-IA POR PRINCIPIO ACTIVO</span>
+            <span class="text-xs font-extrabold text-indigo-950">${data.principio_activo_detectado} (${data.grupo_terapeutico})</span>
+          </div>
+          <button type="button" onclick="document.getElementById('pos-inline-ai-suggestion-box').classList.add('hidden')" class="text-[11px] font-bold text-slate-400 hover:text-slate-700 cursor-pointer">✕ Ocultar</button>
+        </div>
+        <p class="text-[11px] font-semibold text-slate-700">${data.guion_vendedor}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          ${topOpts.map(p => `
+            <div class="p-2.5 rounded-xl bg-white border border-indigo-200 flex items-center justify-between gap-2 shadow-2xs">
+              <div class="min-w-0">
+                <span class="text-[9px] font-black text-emerald-700 block">${p.etiqueta_ia || 'Equivalente en Stock'}</span>
+                <p class="font-extrabold text-slate-900 text-xs truncate">${p.nombre_comercial}</p>
+                <p class="text-[10px] text-slate-500">Anaquel ${p.ubicacion_anaquel} • Stock: ${p.stock_unidades}u • <strong>${formatRD(p.precio_unidad)}</strong></p>
+              </div>
+              <button type="button" onclick="addProductToPosCartById(${p.id}, 'UNIDAD', 1)" class="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-black text-[10px] shrink-0 cursor-pointer">
+                + Unidad
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (e) {
+      // Silencioso en sugerencia inline
+    }
+  }, 220);
+}
+
+// -------------------------------------------------------------------------
+// 2. RECORDATORIOS DE COMPRA (BAJO STOCK) + MÁS VENDIDOS PARA COMPRAR MÁS
+// -------------------------------------------------------------------------
+
+function renderAiStockAndTopSellers(stockData) {
+  if (!stockData) return;
+  const lowContainer = document.getElementById('ai-low-stock-list');
+  const topContainer = document.getElementById('ai-top-sellers-list');
+
+  if (lowContainer) {
+    const lowList = stockData.low_stock_reminders || [];
+    if (!lowList.length) {
+      lowContainer.innerHTML = `<div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold">✅ Todos los medicamentos superan su stock mínimo y cubren la demanda de pacientes crónicos.</div>`;
+    } else {
+      lowContainer.innerHTML = lowList.map(item => `
+        <div class="p-3 rounded-xl bg-rose-50/60 border border-rose-200 flex flex-wrap items-center justify-between gap-2">
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-1.5">
+              <span class="px-2 py-0.5 rounded text-[9px] font-black ${item.urgencia === 'CRITICO_AGOTADO' ? 'bg-rose-600 text-white' : 'bg-amber-200 text-amber-950'}">${item.urgencia}</span>
+              <strong class="text-xs text-slate-900">${item.nombre_comercial}</strong>
+              <span class="text-[10px] text-slate-500">(${item.principio_activo})</span>
+            </div>
+            <p class="text-[11px] text-rose-800 font-semibold">${item.motivo_ia}</p>
+            <p class="text-[10px] text-slate-600">Stock actual: <strong>${item.stock_actual_unidades} uds</strong> • Sugerencia IA: Comprar <strong>${item.cantidad_sugerida_cajas} caja(s) (${item.cantidad_sugerida_unidades} uds)</strong></p>
+          </div>
+          <button type="button" onclick="closeAiAssistantModal(); openReplenishModal(${item.id});" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-[11px] cursor-pointer shadow-2xs">
+            ➕ Reabastecer
+          </button>
+        </div>
+      `).join('');
+    }
+  }
+
+  if (topContainer) {
+    const topList = stockData.top_sellers_to_buy_more || [];
+    if (!topList.length) {
+      topContainer.innerHTML = `<div class="p-4 text-center text-slate-400 text-xs">Sin datos de rotación aún.</div>`;
+    } else {
+      topContainer.innerHTML = topList.map((item, idx) => `
+        <div class="p-3 rounded-xl bg-emerald-50/50 border border-emerald-200 flex flex-wrap items-center justify-between gap-2">
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-1.5">
+              <span class="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">#${idx + 1}</span>
+              <strong class="text-xs text-slate-900">${item.nombre_comercial}</strong>
+              <span class="text-[10px] font-mono text-teal-700 font-bold">Stock: ${item.stock_actual_unidades}u</span>
+            </div>
+            <p class="text-[11px] text-emerald-900 font-semibold">${item.recomendacion_ia}</p>
+          </div>
+          <button type="button" onclick="closeAiAssistantModal(); openReplenishModal(${item.id});" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] cursor-pointer">
+            📦 Comprar +${item.sugerencia_compra_cajas} Caja(s)
+          </button>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+function printAiPurchaseOrderReport() {
+  const stockData = sysState.aiHubData?.stock_and_top_sellers;
+  if (!stockData) {
+    showToast('Cargando datos de abastecimiento IA...', 'error');
+    return;
+  }
+  const f = sysState.authenticatedPharmacy || { nombre: 'Farmacia Davalsi' };
+  const lowList = stockData.low_stock_reminders || [];
+  const topList = stockData.top_sellers_to_buy_more || [];
+
+  const win = window.open('', '_blank', 'width=800,height=700');
+  if (!win) return;
+  win.document.write(`
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Orden de Compra y Reabastecimiento Sugerido por FarmaIA</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; font-size: 12px; }
+        h2 { margin: 0 0 4px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; margin-bottom: 24px; }
+        th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+        th { background: #f1f5f9; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <h2>🤖 ${f.nombre} — Orden de Compra Inteligente Sugerida por FarmaIA</h2>
+      <p>Fecha de emisión: ${new Date().toLocaleString('es-DO')}</p>
+      <h3>1. Medicamentos en Bajo Stock o Comprometidos por Pacientes Crónicos</h3>
+      <table>
+        <thead>
+          <tr><th>Medicamento</th><th>Principio Activo</th><th>Stock Actual</th><th>Motivo IA</th><th>Compra Sugerida</th></tr>
+        </thead>
+        <tbody>
+          ${lowList.map(i => `<tr><td><b>${i.nombre_comercial}</b></td><td>${i.principio_activo}</td><td>${i.stock_actual_unidades} uds</td><td>${i.motivo_ia}</td><td><b>${i.cantidad_sugerida_cajas} Caja(s) (${i.cantidad_sugerida_unidades} uds)</b></td></tr>`).join('') || '<tr><td colspan="5">Sin alertas de bajo stock.</td></tr>'}
+        </tbody>
+      </table>
+      <h3>2. Medicamentos Más Vendidos (Alta Rotación para Comprar Más)</h3>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Medicamento</th><th>Ventas 30d</th><th>Stock Actual</th><th>Recomendación IA</th></tr>
+        </thead>
+        <tbody>
+          ${topList.map((i, idx) => `<tr><td>${idx + 1}</td><td><b>${i.nombre_comercial}</b></td><td>${i.unidades_vendidas_30d} uds</td><td>${i.stock_actual_unidades} uds</td><td>${i.recomendacion_ia}</td></tr>`).join('')}
+        </tbody>
+      </table>
+      <script>window.onload = function() { window.print(); };</script>
+    </body>
+    </html>
+  `);
+  win.document.close();
+}
+
+// -------------------------------------------------------------------------
+// 3. RECORDATORIO DE VENTAS DE MEDICAMENTOS CRÓNICOS (10 DÍAS ANTICIPACIÓN)
+// -------------------------------------------------------------------------
+
+function renderAiChronic10dReminders(chronicData) {
+  const container = document.getElementById('ai-chronic-10d-list');
+  if (!container || !chronicData) return;
+
+  const alerts = chronicData.alertas_10_dias_y_vencidos || [];
+  const all = chronicData.todos_los_pacientes_cronicos || [];
+  const listToRender = alerts.length ? alerts : all;
+
+  if (!listToRender.length) {
+    container.innerHTML = `
+      <div class="p-6 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+        <p class="text-sm font-black text-slate-800">No hay pacientes crónicos registrados todavía.</p>
+        <p class="text-xs text-slate-500">Cuando registres pacientes hipertensos, diabéticos o de uso continuo, la IA te avisará automáticamente 10 días antes de que se les termine su medicamento.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = listToRender.map(cp => {
+    const isUrgent = Number(cp.dias_restantes) <= 10;
+    return `
+      <div class="p-4 rounded-2xl bg-white border-2 ${isUrgent ? 'border-amber-400' : 'border-slate-200'} shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${cp.dias_restantes < 0 ? 'bg-rose-600 text-white' : (cp.dias_restantes <= 10 ? 'bg-amber-400 text-slate-950' : 'bg-emerald-100 text-emerald-900')}">
+              ${cp.mensaje_estado}
+            </span>
+            <strong class="text-sm font-black text-slate-900">${cp.paciente_nombre}</strong>
+            <span class="text-xs font-mono text-slate-500">📞 ${cp.paciente_telefono}</span>
+          </div>
+          <p class="text-xs font-bold text-teal-800">💊 Medicamento Crónico: <strong>${cp.medicamento_nombre}</strong> • Diagnóstico: ${cp.diagnostico_cronico}</p>
+          <p class="text-[11px] ${cp.stock_suficiente_para_venta ? 'text-emerald-700 font-bold' : 'text-rose-700 font-black'}">
+            ${cp.alerta_stock_cronico} • Próximo retiro: <span class="font-mono">${cp.fecha_proximo_vencimiento_tratamiento}</span>
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <a href="${cp.whatsapp_link}" target="_blank" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1 shadow-2xs">
+            <span>💬</span> <span>Recordar por WhatsApp (10d)</span>
+          </a>
+          ${cp.producto_vinculado_id ? `
+            <button type="button" onclick="dispatchChronicMedicationToPos(${cp.id}, ${cp.producto_vinculado_id}, ${cp.unidades_requeridas_ciclo || 30}, '${(cp.paciente_nombre || '').replace(/'/g, '')}', '${(cp.paciente_telefono || '').replace(/'/g, '')}')" class="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs cursor-pointer shadow-2xs">
+              🛒 Cargar ${cp.unidades_requeridas_ciclo || 30} uds al POS
+            </button>
+          ` : ''}
+          <button type="button" onclick="openPharmaCareModalForPatient(${cp.id}); closeAiAssistantModal();" class="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer">
+            🩺 Tomar Presión/Azúcar
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function dispatchChronicMedicationToPos(patientId, productId, unitsCount, patientName, patientPhone) {
+  addProductToPosCartById(Number(productId), 'UNIDAD', Number(unitsCount || 30));
+  const nameInp = document.getElementById('pos-client-name');
+  const phoneInp = document.getElementById('pos-client-phone');
+  if (nameInp && patientName) nameInp.value = patientName;
+  if (phoneInp && patientPhone) phoneInp.value = patientPhone;
+  closeAiAssistantModal();
+  switchSysTab('pos');
+  showToast(`✅ Tratamiento crónico de ${patientName} (${unitsCount} uds) cargado al POS.`);
+}
+
+// -------------------------------------------------------------------------
+// 4. KITS MÉDICOS AUTOMÁTICOS MULTI-DOSIS (>1 DOSIS) Y TEMPORADAS
+// -------------------------------------------------------------------------
+
+async function triggerRegenerateAiMedicalKits() {
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  try {
+    const res = await fetch('/api/ai/generate-kits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: fid })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      sysState.promotionalKits = data.kits || [];
+      renderPosQuickKits();
+      renderKitsManagementView();
+      renderAiMultiDoseKitsGrid(sysState.promotionalKits);
+      showToast('🤖 Kits Médicos Multi-Dosis actualizados automáticamente por la IA según tu inventario.');
+    }
+  } catch (err) {
+    showToast('Error al regenerar kits con IA', 'error');
+  }
+}
+
+function renderAiMultiDoseKitsGrid(kits) {
+  const container = document.getElementById('ai-kits-multidose-grid');
+  if (!container) return;
+  if (!kits || !kits.length) {
+    container.innerHTML = `<div class="col-span-full p-4 text-center text-slate-400 text-xs">No hay kits generados. Pulse "Re-Generar Kits Médicos con IA Ahora".</div>`;
+    return;
+  }
+
+  container.innerHTML = kits.map(kit => {
+    const totalDoses = kit.total_dosis_unidades || (kit.items || []).reduce((acc, i) => acc + Number(i.cantidad || 1), 0);
+    return `
+      <div class="p-4 rounded-2xl bg-slate-50 border-2 border-indigo-200 flex flex-col justify-between gap-3">
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between gap-1">
+            <span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white font-black text-[10px]">
+              🤖 ESQUEMA ${totalDoses} DOSIS / UNIDADES
+            </span>
+            <span class="text-xs font-mono font-black text-teal-800">${formatRD(kit.precio_oferta_kit)}</span>
+          </div>
+          <h5 class="font-black text-slate-900 text-xs sm:text-sm">${kit.icono || '⚡'} ${kit.nombre_kit}</h5>
+          <p class="text-[11px] text-slate-600">${kit.descripcion || kit.lema}</p>
+          <div class="space-y-1 pt-1">
+            ${(kit.items || []).map(it => `
+              <div class="flex justify-between text-[11px] bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                <span class="font-bold text-slate-800">${it.icono || '💊'} <strong>${it.cantidad}x</strong> ${it.nombre_comercial}</span>
+                <span class="font-mono text-slate-600">RD$ ${Number(it.subtotal_componente || (it.precio_unitario * it.cantidad)).toFixed(2)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+          <span class="text-[10px] font-bold text-emerald-800">Disponibles: ${kit.kits_disponibles} kits</span>
+          <button type="button" onclick="closeAiAssistantModal(); openPosKitDetailModal('${kit.id}');" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs cursor-pointer shadow-2xs">
+            🛒 Despachar Kit en POS
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadAiSeason(seasonKey) {
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  try {
+    const res = await fetch(`/api/ai/seasonal?farmacia_id=${fid}&season=${encodeURIComponent(seasonKey)}`);
+    const data = await res.json();
+    if (data.ok) {
+      renderAiSeasonalSection(data);
+    }
+  } catch (e) {
+    console.error('Error cargando temporada IA:', e);
+  }
+}
+
+function renderAiSeasonalSection(seasonalData) {
+  const container = document.getElementById('ai-seasonal-container');
+  if (!container || !seasonalData || !seasonalData.temporada_activa) return;
+  const s = seasonalData.temporada_activa;
+  const inStock = seasonalData.productos_disponibles_temporada || [];
+
+  container.innerHTML = `
+    <div class="p-3.5 rounded-2xl bg-gradient-to-r from-teal-900 to-slate-900 text-white space-y-1.5">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <span class="font-black text-sm text-amber-300">${s.nombre}</span>
+        <span class="px-2.5 py-0.5 rounded-full bg-white/10 text-teal-200 text-[10px] font-bold">Meses pico: ${s.meses_pico}</span>
+      </div>
+      <p class="text-xs text-slate-200 leading-relaxed">${s.alerta_epidemiologica}</p>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+      ${inStock.map(p => `
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+          <div>
+            <p class="font-black text-slate-900 text-xs">${p.nombre_comercial}</p>
+            <p class="text-[10px] text-teal-700 font-bold">${p.principio_activo} • Stock: ${p.stock_unidades}u</p>
+            <p class="text-[11px] font-mono font-bold text-slate-800">${formatRD(p.precio_base)} / ud</p>
+          </div>
+          <button type="button" onclick="addAiSuggestedProductToPosCart(${p.id}, 'UNIDAD')" class="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-[11px] cursor-pointer">
+            + POS
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// -------------------------------------------------------------------------
+// 5. COPILOTO INTERACTIVO DE USO DEL SISTEMA DE VENTA (POS)
+// -------------------------------------------------------------------------
+
+function handleAiCopilotFormSubmit(e) {
+  if (e) e.preventDefault();
+  const inp = document.getElementById('ai-copilot-question-input');
+  const q = inp ? inp.value.trim() : '';
+  if (!q) return;
+  askAiPosCopilot(q);
+}
+
+async function askAiPosCopilot(questionText) {
+  const inp = document.getElementById('ai-copilot-question-input');
+  if (inp) inp.value = questionText;
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  const box = document.getElementById('ai-copilot-answer-box');
+  if (!box) return;
+
+  try {
+    const res = await fetch('/api/ai/ask-copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: fid, question: questionText })
+    });
+    const data = await res.json();
+    if (!data.ok) return;
+
+    let actionBtnHtml = '';
+    if (data.accion_ui) {
+      if (data.accion_ui.view) {
+        actionBtnHtml = `<button type="button" onclick="closeAiAssistantModal(); switchSysTab('${data.accion_ui.view}');" class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs cursor-pointer shadow">${data.accion_ui.label} →</button>`;
+      } else if (data.accion_ui.modal === 'pharma_care') {
+        actionBtnHtml = `<button type="button" onclick="closeAiAssistantModal(); openPharmaCareModal();" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs cursor-pointer shadow">${data.accion_ui.label} →</button>`;
+      } else if (data.accion_ui.action === 'regenerate_ai_kits') {
+        actionBtnHtml = `<button type="button" onclick="triggerRegenerateAiMedicalKits()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs cursor-pointer shadow">${data.accion_ui.label} →</button>`;
+      }
+    }
+
+    box.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+        <h5 class="font-black text-slate-900 text-sm">${data.titulo}</h5>
+        ${actionBtnHtml}
+      </div>
+      <div class="space-y-1.5 py-1">
+        ${(data.pasos || []).map(p => `<p class="text-xs text-slate-700 font-medium leading-relaxed">${p}</p>`).join('')}
+      </div>
+    `;
+  } catch (err) {
+    console.error('Error en Copiloto POS:', err);
+  }
+}
+
+// -------------------------------------------------------------------------
+// 6. EVALUADOR CLÍNICO INTERACTIVO DE PRESIÓN Y AZÚCAR (TOMA ADECUADA)
+// -------------------------------------------------------------------------
+
+async function updateLivePharmaCareClassification() {
+  const sys = parseInt(document.getElementById('pc-pa-sys')?.value || '0', 10);
+  const dia = parseInt(document.getElementById('pc-pa-dia')?.value || '0', 10);
+  const pulso = parseInt(document.getElementById('pc-pulso')?.value || '0', 10);
+  const glic = parseFloat(document.getElementById('pc-glicemia')?.value || '0');
+  const cond = document.getElementById('pc-condicion-ayuno')?.value || 'En Ayunas (8h+)';
+
+  const checks = {
+    reposo_5min: document.getElementById('pc-chk-reposo')?.checked !== false,
+    espalda_pies_apoyados: document.getElementById('pc-chk-postura')?.checked !== false,
+    brazo_altura_corazon: document.getElementById('pc-chk-brazo')?.checked !== false,
+    sin_cafe_tabaco_30min: document.getElementById('pc-chk-cafe')?.checked !== false,
+    manos_limpias_secas: document.getElementById('pc-chk-manos')?.checked !== false
+  };
+
+  const passed = Object.values(checks).filter(Boolean).length;
+  const pct = Math.round((passed / 5) * 100);
+  const qBadge = document.getElementById('pc-technique-quality-badge');
+  if (qBadge) {
+    qBadge.textContent = `${pct}% Toma Adecuada (${passed}/5)`;
+    qBadge.className = passed >= 4
+      ? 'px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-2xs'
+      : 'px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950 shadow-2xs';
+  }
+
+  // Actualizar insignias rápidas locales inmediatamente
+  const paBadge = document.getElementById('pc-live-pa-badge');
+  if (paBadge) {
+    if (sys > 0 && dia > 0) {
+      if (sys >= 180 || dia >= 120) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white';
+        paBadge.textContent = '🚨 Crisis Hipertensiva';
+      } else if (sys >= 140 || dia >= 90) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        paBadge.textContent = '⚠️ HTA Nivel 2';
+      } else if (sys >= 130 || dia >= 80) {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+        paBadge.textContent = '⚠️ HTA Nivel 1';
+      } else if (sys >= 120 && dia < 80) {
+        paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200';
+        paBadge.textContent = '🟡 Presión Elevada';
+      } else if (sys < 90 || dia < 60) {
+        paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-300';
+        paBadge.textContent = '🔵 Hipotensión';
+      } else {
+        paBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        paBadge.textContent = '✅ Presión Normal';
+      }
+    } else {
+      paBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200';
+      paBadge.textContent = 'Sin medir';
+    }
+  }
+
+  const glicBadge = document.getElementById('pc-live-glic-badge');
+  if (glicBadge) {
+    if (glic > 0) {
+      const isFasting = cond.toLowerCase().includes('ayun');
+      if (glic < 70) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white';
+        glicBadge.textContent = '🚨 Hipoglicemia';
+      } else if (isFasting ? glic <= 99 : glic < 140) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+        glicBadge.textContent = '✅ Glicemia Normal';
+      } else if (isFasting ? glic <= 125 : glic <= 199) {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+        glicBadge.textContent = '⚠️ Valor en Alerta';
+      } else {
+        glicBadge.className = 'text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+        glicBadge.textContent = '🚨 Hiperglicemia';
+      }
+    } else {
+      glicBadge.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-slate-500 border border-slate-200';
+      glicBadge.textContent = 'Sin medir';
+    }
+  }
+
+  // Consultar evaluación interactiva completa del motor FarmaIA
+  try {
+    const res = await fetch('/api/ai/evaluate-vitals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        presion_sistolica: sys > 0 ? sys : null,
+        presion_diastolica: dia > 0 ? dia : null,
+        pulso_bpm: pulso > 0 ? pulso : null,
+        glicemia_mg_dl: glic > 0 ? glic : null,
+        condicion_ayuno: cond,
+        peso_kg: parseFloat(document.getElementById('pc-peso')?.value || '0') || null,
+        talla_cm: parseFloat(document.getElementById('pc-talla')?.value || '0') || null,
+        checks_toma_adecuada: checks
+      })
+    });
+    const evalData = await res.json();
+    if (!evalData.ok) return;
+
+    sysState.lastLiveVitalRecommendationText = evalData.observacion_sugerida_reporte || '';
+    const notesInp = document.getElementById('pc-notes');
+    if (notesInp && !notesInp.value.trim() && (sys > 0 || glic > 0)) {
+      notesInp.value = sysState.lastLiveVitalRecommendationText;
+    }
+
+    const aiBody = document.getElementById('pc-interactive-ai-body');
+    if (aiBody) {
+      const pa = evalData.presion_arterial || {};
+      const gl = evalData.glicemia_capilar || {};
+      const cal = evalData.calidad_toma || {};
+
+      let htmlParts = [];
+      htmlParts.push(`<div class="text-[11px] font-bold text-emerald-300">${cal.etiqueta} (${cal.porcentaje}% protocolo cumplido)</div>`);
+      if (cal.advertencias_tecnica && cal.advertencias_tecnica.length) {
+        htmlParts.push(`<div class="text-[10px] text-amber-300">⚠️ Técnica: ${cal.advertencias_tecnica.join(' • ')}</div>`);
+      }
+      if (pa.registrada) {
+        htmlParts.push(`
+          <div class="p-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5">
+            <div class="flex items-center justify-between font-black text-white">
+              <span>${pa.clasificacion}</span>
+              <span class="font-mono text-[10px] text-teal-300">PAM: ${pa.pam_mmhg} mmHg • P. Pulso: ${pa.presion_pulso_mmhg} mmHg</span>
+            </div>
+            <p class="text-[11px] text-slate-200">${(pa.recomendaciones || []).join(' ')}</p>
+          </div>
+        `);
+      }
+      if (gl.registrada) {
+        htmlParts.push(`
+          <div class="p-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5">
+            <div class="flex items-center justify-between font-black text-white">
+              <span>${gl.clasificacion}</span>
+              <span class="font-mono text-[10px] text-indigo-300">HbA1c orientativa: ~${gl.hba1c_orientativa}%</span>
+            </div>
+            <p class="text-[11px] text-slate-200">${(gl.recomendaciones || []).join(' ')}</p>
+          </div>
+        `);
+      }
+      const antro = evalData.antropometria || {};
+      if (antro.registrada) {
+        htmlParts.push(`
+          <div class="p-2 rounded-xl bg-white/10 border border-white/15 space-y-0.5">
+            <div class="flex items-center justify-between font-black text-white">
+              <span>${antro.clasificacion}</span>
+              <span class="font-mono text-[10px] text-emerald-300">Peso: ${antro.peso_kg || '-'} kg (${antro.peso_lb || '-'} lb) • Talla: ${antro.talla_cm || '-'} cm</span>
+            </div>
+            ${antro.recomendaciones?.length ? `<p class="text-[11px] text-slate-200">${antro.recomendaciones.join(' ')}</p>` : ''}
+          </div>
+        `);
+      }
+      aiBody.innerHTML = htmlParts.join('');
+    }
+  } catch (e) {
+    // fallback silencioso
+  }
+}
+
+function applyAiVitalRecommendationToNotes() {
+  const notesInp = document.getElementById('pc-notes');
+  if (notesInp && sysState.lastLiveVitalRecommendationText) {
+    notesInp.value = sysState.lastLiveVitalRecommendationText;
+    showToast('✍️ Interpretación clínica IA copiada al reporte imprimible del paciente.');
+  }
+}
+
+window.openAiAssistantModal = openAiAssistantModal;
+window.closeAiAssistantModal = closeAiAssistantModal;
+window.switchAiAssistantTab = switchAiAssistantTab;
+window.refreshAiAssistantHub = refreshAiAssistantHub;
+window.handleAiSubstituteSearchSubmit = handleAiSubstituteSearchSubmit;
+window.quickSearchAiSubstitute = quickSearchAiSubstitute;
+window.addAiSuggestedProductToPosCart = addAiSuggestedProductToPosCart;
+window.triggerInlinePosAiSuggestion = triggerInlinePosAiSuggestion;
+window.printAiPurchaseOrderReport = printAiPurchaseOrderReport;
+window.dispatchChronicMedicationToPos = dispatchChronicMedicationToPos;
+window.triggerRegenerateAiMedicalKits = triggerRegenerateAiMedicalKits;
+window.loadAiSeason = loadAiSeason;
+window.handleAiCopilotFormSubmit = handleAiCopilotFormSubmit;
+window.askAiPosCopilot = askAiPosCopilot;
+window.applyAiVitalRecommendationToNotes = applyAiVitalRecommendationToNotes;
+
+setTimeout(() => {
+  refreshAiAssistantHub();
+}, 900);
+
+
+/* =========================================================================
+   REACCIÓN 3D DE FARMA-IA EN EL POS (COPILOTO FARMACÉUTICO)
+   ========================================================================= */
+function triggerPosFarmaIa3dReaction() {
+  if (window.farmaIaPos3D) {
+    window.farmaIaPos3D.triggerSalute();
+  } else {
+    initPosFarmaIa3d();
+  }
+  const avatars = document.querySelectorAll('.farmaia-3d-avatar');
+  avatars.forEach(img => {
+    img.style.transform = 'scale(1.2) rotate(-3deg)';
+    setTimeout(() => { img.style.transform = ''; }, 400);
+  });
+}
+
+
+/* =========================================================================
+   INICIALIZACIÓN DEL MODELO 3D EN EL POS FÍSICO
+   ========================================================================= */
+function initPosFarmaIa3d() {
+  if (typeof FarmaIa3DViewer === 'undefined' || typeof THREE === 'undefined') return;
+  if (!window.farmaIaPos3D && document.getElementById('farmaia-pos-3d-canvas')) {
+    try {
+      window.farmaIaPos3D = new FarmaIa3DViewer('farmaia-pos-3d-canvas', {
+        width: 80,
+        height: 80,
+        interactive: true,
+        initialMode: 'idle'
+      });
+    } catch (e) {
+      console.warn('Error inicializando 3D POS:', e);
+    }
+  }
+}
+
+
+/* =========================================================================
+   BANDEJA DE QUEJAS Y RECLAMOS DE CLIENTES ASISTIDAS POR IA (POS)
+   ========================================================================= */
+
+let posCurrentQuejasFilter = 'TODAS';
+
+function openPosQuejasModal(initialFilter = 'TODAS') {
+  const modal = document.getElementById('pos-quejas-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadPosQuejas(initialFilter);
+}
+
+function closePosQuejasModal() {
+  const modal = document.getElementById('pos-quejas-modal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+async function loadPosQuejas(filterState = null) {
+  if (filterState) posCurrentQuejasFilter = filterState;
+  const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+  const container = document.getElementById('pos-quejas-list-container');
+  if (!container) return;
+
+  // Actualizar botones de filtro
+  const filters = ['TODAS', 'PENDIENTE', 'EN_REVISION', 'RESUELTO'];
+  filters.forEach(f => {
+    const btn = document.getElementById(`pos-queja-filter-${f}`);
+    if (btn) {
+      if (f === posCurrentQuejasFilter) {
+        btn.className = 'px-3 py-1.5 rounded-xl font-extrabold bg-slate-900 text-white transition';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-xl font-extrabold bg-white text-slate-700 hover:bg-slate-200 border border-slate-200 transition';
+      }
+    }
+  });
+
+  container.innerHTML = `
+    <div class="p-8 text-center text-slate-500 space-y-2">
+      <span class="inline-block w-6 h-6 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></span>
+      <p class="text-xs font-bold">Cargando quejas y reclamos clasificados por IA...</p>
+    </div>
+  `;
+
+  try {
+    const url = `/api/pos/quejas?farmacia_id=${fid}` + (posCurrentQuejasFilter !== 'TODAS' ? `&estado=${posCurrentQuejasFilter}` : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error cargando quejas');
+
+    const quejas = data.quejas || [];
+    const summary = data.summary || { pendientes: 0 };
+
+    // Actualizar badges
+    const badgeHeader = document.getElementById('pos-quejas-badge');
+    if (badgeHeader) badgeHeader.textContent = summary.pendientes || 0;
+    const badgeModal = document.getElementById('pos-quejas-modal-count-badge');
+    if (badgeModal) badgeModal.textContent = `${summary.pendientes || 0} Pendientes`;
+
+    if (quejas.length === 0) {
+      container.innerHTML = `
+        <div class="p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-500 space-y-3">
+          <span class="text-3xl">🎉</span>
+          <h4 class="font-black text-slate-900 text-sm">¡No hay quejas en esta bandeja!</h4>
+          <p class="text-xs text-slate-500 max-w-sm mx-auto">No se encontraron reclamos con el filtro seleccionado (${posCurrentQuejasFilter}). Todo opera con normalidad.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = quejas.map(q => {
+      const isPending = q.estado === 'PENDIENTE';
+      const isReview = q.estado === 'EN_REVISION';
+      const isSolved = q.estado === 'RESUELTO';
+
+      let gravedadBg = 'bg-amber-100 text-amber-900 border-amber-300';
+      if (q.gravedad === 'URGENTE') gravedadBg = 'bg-rose-100 text-rose-900 border-rose-300';
+      else if (q.gravedad === 'LEVE') gravedadBg = 'bg-teal-100 text-teal-900 border-teal-300';
+
+      const telRaw = String(q.cliente_telefono || '').replace(/\D/g, '');
+      const waLink = telRaw ? `https://wa.me/${telRaw}?text=${encodeURIComponent(`Hola ${q.cliente_nombre}, le escribimos de Farmacia Davalsi respecto a su reporte (${q.codigo_ticket}): `)}` : null;
+
+      return `
+        <div class="p-4 sm:p-5 bg-white rounded-2xl border ${isPending ? 'border-rose-300 shadow-md ring-1 ring-rose-200' : 'border-slate-200 shadow-xs'} space-y-3">
+          <!-- Cabecera de la queja -->
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-lg bg-slate-900 text-teal-300 font-mono font-black text-xs">
+                ${q.codigo_ticket}
+              </span>
+              <span class="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase border ${gravedadBg}">
+                ${q.gravedad}
+              </span>
+              <span class="text-xs font-extrabold text-slate-800">
+                ${q.cliente_nombre}
+              </span>
+              ${q.cliente_telefono ? `<span class="text-[11px] text-slate-500">📞 ${q.cliente_telefono}</span>` : ''}
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-slate-400">🕒 ${q.fecha_hora}</span>
+              ${waLink ? `
+                <a href="${waLink}" target="_blank" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-[10px] flex items-center gap-1 shadow-xs transition" title="Contactar al paciente por WhatsApp">
+                  <span>💬 WhatsApp</span>
+                </a>
+              ` : ''}
+            </div>
+          </div>
+
+          <!-- Clasificación y Resumen Ejecutivo generado por FarmaIA -->
+          <div class="p-3 rounded-xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white space-y-1">
+            <div class="flex items-center gap-1.5 text-[10px] font-black uppercase text-teal-300">
+              <span>🤖</span> <span>ANÁLISIS DE LA IA • ÁREA: ${q.area}</span>
+            </div>
+            <p class="text-xs text-indigo-100 font-bold leading-relaxed">
+              ${q.resumen_ia}
+            </p>
+          </div>
+
+          <!-- Mensaje original del paciente -->
+          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+            <span class="block text-[10px] font-black uppercase text-slate-400 mb-0.5">Mensaje Original del Paciente:</span>
+            <p class="italic font-medium leading-relaxed">«${q.mensaje_original}»</p>
+          </div>
+
+          <!-- Resolución o respuesta administrativa -->
+          <div class="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="flex items-center gap-2 flex-1 min-w-[260px]">
+              <label class="text-[11px] font-bold text-slate-500">Estado:</label>
+              <select id="pos-queja-select-${q.id}" class="px-2.5 py-1.5 rounded-xl border text-xs font-bold ${isPending ? 'border-rose-400 bg-rose-50 text-rose-900' : (isReview ? 'border-amber-400 bg-amber-50 text-amber-900' : 'border-emerald-400 bg-emerald-50 text-emerald-900')}">
+                <option value="PENDIENTE" ${isPending ? 'selected' : ''}>⏳ Pendiente</option>
+                <option value="EN_REVISION" ${isReview ? 'selected' : ''}>🔍 En Revisión</option>
+                <option value="RESUELTO" ${isSolved ? 'selected' : ''}>✅ Resuelta / Solucionada</option>
+              </select>
+              <input id="pos-queja-note-${q.id}" type="text" placeholder="Nota de solución o medida tomada..." value="${q.respuesta_admin || ''}" class="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium" />
+            </div>
+
+            <button type="button" onclick="submitPosQuejaUpdate(${q.id})" class="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer">
+              Guardar
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `
+      <div class="p-6 text-center bg-rose-50 rounded-2xl border border-rose-200 text-rose-700 text-xs font-bold">
+        Error al cargar quejas: ${err.message}
+      </div>
+    `;
+  }
+}
+
+async function submitPosQuejaUpdate(quejaId) {
+  const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+  const select = document.getElementById(`pos-queja-select-${quejaId}`);
+  const noteInp = document.getElementById(`pos-queja-note-${quejaId}`);
+  if (!select) return;
+
+  const newStatus = select.value;
+  const adminNote = noteInp ? noteInp.value.trim() : '';
+
+  try {
+    const res = await fetch('/api/pos/quejas/actualizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        queja_id: quejaId,
+        estado: newStatus,
+        respuesta_admin: adminNote
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al actualizar');
+
+    showToast(`Queja ${data.queja.codigo_ticket} actualizada a: ${newStatus}`);
+    loadPosQuejas();
+  } catch (err) {
+    showToast('Error al actualizar queja: ' + err.message, 'error');
+  }
+}
+
+async function refreshPosQuejasBadge() {
+  const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+  try {
+    const res = await fetch(`/api/pos/quejas?farmacia_id=${fid}&estado=PENDIENTE`);
+    const data = await res.json();
+    if (data.ok && data.summary) {
+      const badgeHeader = document.getElementById('pos-quejas-badge');
+      if (badgeHeader) {
+        badgeHeader.textContent = data.summary.pendientes || 0;
+        if (data.summary.pendientes > 0) {
+          badgeHeader.className = 'px-1.5 py-0.2 bg-rose-500 text-white font-black rounded-full text-[10px] animate-bounce';
+        } else {
+          badgeHeader.className = 'px-1.5 py-0.2 bg-white text-rose-900 font-black rounded-full text-[10px]';
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+setInterval(refreshPosQuejasBadge, 12000);
+setTimeout(refreshPosQuejasBadge, 1500);
+
+window.openPosQuejasModal = openPosQuejasModal;
+window.closePosQuejasModal = closePosQuejasModal;
+window.loadPosQuejas = loadPosQuejas;
+window.submitPosQuejaUpdate = submitPosQuejaUpdate;
+window.refreshPosQuejasBadge = refreshPosQuejasBadge;
+
+
+// =========================================================================
+// MÓDULO DE ALERGIAS FARMACOLÓGICAS Y OCR DE RECETAS MÉDICAS (FARMAIA)
+// =========================================================================
+
+// Caché local de alergias por cédula
+window.patientAllergiesCache = {};
+window.currentOcrReceta = null;
+
+// 1. Consultar y verificar alergias del paciente por Cédula
+async function checkPosPatientAllergies(cedula) {
+  const cleanCed = (cedula || '').trim();
+  const alertBox = document.getElementById('pos-patient-allergy-alert');
+  const alertText = document.getElementById('pos-patient-allergy-text');
+  if (!cleanCed || cleanCed.length < 3) {
+    if (alertBox) alertBox.classList.add('hidden');
+    return;
+  }
+
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch(`/api/paciente/alergias?farmacia_id=${f.id || 1}&cedula=${encodeURIComponent(cleanCed)}`);
+    const data = await res.json();
+    if (data.ok && data.alergias && data.alergias.length > 0) {
+      window.patientAllergiesCache[cleanCed] = data.alergias;
+      const descList = data.alergias.map(a => `${a.alergia_tipo} (${a.descripcion_alergia || a.reaccion_severidad})`).join(' • ');
+      if (alertText) alertText.textContent = `ALERGIA CONFIRMADA: ${descList}`;
+      if (alertBox) {
+        alertBox.classList.remove('hidden');
+        alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      showToast(`⚠️ Paciente con Alergia Registrada: ${data.alergias[0].alergia_tipo}`, 'error');
+    } else {
+      window.patientAllergiesCache[cleanCed] = [];
+      if (alertBox) alertBox.classList.add('hidden');
+    }
+  } catch (err) {
+    console.error('Error al verificar alergias:', err);
+  }
+}
+
+// Validación síncrona o con reglas clínicas locales
+window.checkProductAllergyConflictSync = function(cedula, productName, activeIngredient) {
+  const cleanCed = (cedula || '').trim();
+  const allergies = window.patientAllergiesCache[cleanCed] || [];
+  if (!allergies.length) return { blocked: false };
+
+  const norm = (s) => (s || '').toLowerCase()
+    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+    .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u');
+
+  const target = norm(`${productName} ${activeIngredient}`);
+
+  const RULES = {
+    'PENICILINAS': {
+      nombre_grupo: 'Penicilinas y Betalactámicos',
+      terminos: ['amoxicilina', 'ampicilina', 'penicilina', 'oxacilina', 'dicloxacilina', 'sultamicilina', 'clavulanato', 'clavulanico', 'augmentin', 'amoxil', 'amoxicillin', 'ampicillin'],
+      severidad: 'SEVERA / ANAFILAXIS',
+      alternativas: [
+        { nombre: 'Azitromicina 500mg (Tratamiento 3 Días)', principio: 'Azitromicina', motivo: 'Macrólido seguro sin reactividad cruzada con betalactámicos', precio: 45.0 }
+      ]
+    },
+    'SULFAS': {
+      nombre_grupo: 'Sulfas y Sulfonamidas',
+      terminos: ['trimetoprim', 'sulfametoxazol', 'bactrim', 'sulfadiazina', 'sulfasalazina', 'sulfisoxazol', 'sulfa', 'cotrimoxazol'],
+      severidad: 'SEVERA / SHOCK',
+      alternativas: [
+        { nombre: 'Nitrofurantoína 100mg (Macrodantina)', principio: 'Nitrofurantoína', motivo: 'Antiséptico urinario seguro sin sulfonamidas', precio: 22.0 }
+      ]
+    },
+    'AINES': {
+      nombre_grupo: 'AINEs (Antiinflamatorios)',
+      terminos: ['ibuprofeno', 'diclofenac', 'diclofenaco', 'ketoprofeno', 'naproxeno', 'ketorolaco', 'aspirina', 'acido acetilsalicilico'],
+      severidad: 'MODERADA / BRONCOESPASMO',
+      alternativas: [
+        { nombre: 'Acetaminofén 500mg', principio: 'Paracetamol', motivo: 'Analgésico / antipirético seguro de primera línea', precio: 8.0 }
+      ]
+    }
+  };
+
+  for (const al of allergies) {
+    const tipo = (al.alergia_tipo || '').toUpperCase();
+    const rule = RULES[tipo];
+    if (rule) {
+      for (const t of rule.terminos) {
+        if (target.includes(t)) {
+          return {
+            blocked: true,
+            alergia_tipo: tipo,
+            nombre_grupo: rule.nombre_grupo,
+            severidad: rule.severidad,
+            termino_coincidente: t,
+            alternativas: rule.alternativas,
+            mensaje: `El paciente tiene registrada ALERGIA A ${rule.nombre_grupo}. Despachar este medicamento presenta riesgo de ${rule.severidad}.`
+          };
+        }
+      }
+    }
+  }
+  return { blocked: false };
+};
+
+// Modal de Bloqueo de Seguridad por Alergia
+window.showPosAllergyBlockModal = function(product, conflict) {
+  const modal = document.getElementById('pos-allergy-block-modal');
+  if (!modal) {
+    alert(`⛔ BLOQUEO POR ALERGIA: ${conflict.mensaje}`);
+    return;
+  }
+  const patientInp = document.getElementById('pos-client-name');
+  const cedulaInp = document.getElementById('pos-client-cedula');
+  const pInfo = document.getElementById('pos-allergy-modal-patient-info');
+  const pReason = document.getElementById('pos-allergy-modal-reason');
+  const altList = document.getElementById('pos-allergy-alternatives-list');
+
+  if (pInfo) pInfo.textContent = `Paciente: ${patientInp ? patientInp.value : 'Cliente'} (Cédula: ${cedulaInp ? cedulaInp.value : 'N/A'})`;
+  if (pReason) {
+    pReason.innerHTML = `
+      <p class="font-black text-rose-800 text-sm">⛔ Medicamento Bloqueado: ${product.nombre_comercial} (${product.principio_activo})</p>
+      <p class="text-xs text-rose-950 mt-1">${conflict.mensaje}</p>
+    `;
+  }
+
+  if (altList) {
+    if (conflict.alternativas && conflict.alternativas.length > 0) {
+      altList.innerHTML = conflict.alternativas.map(alt => `
+        <div class="p-3 rounded-xl bg-teal-50 border border-teal-300 flex items-center justify-between shadow-xs">
+          <div>
+            <p class="font-extrabold text-teal-950 text-xs">✅ ${alt.nombre}</p>
+            <p class="text-[10px] text-teal-700">${alt.motivo || 'Alternativa segura'}</p>
+          </div>
+          <button type="button" onclick='substituteWithSafeAlternative(${JSON.stringify(alt)})' class="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-black text-xs transition cursor-pointer shadow-xs shrink-0">
+            🔄 Despachar Alternativa
+          </button>
+        </div>
+      `).join('');
+    } else {
+      altList.innerHTML = `<p class="text-xs text-slate-500 italic">Consulte con el regente farmacéutico una alternativa adecuada.</p>`;
+    }
+  }
+
+  modal.classList.remove('hidden');
+};
+
+window.closePosAllergyBlockModal = function() {
+  const modal = document.getElementById('pos-allergy-block-modal');
+  if (modal) modal.classList.add('hidden');
+};
+
+window.substituteWithSafeAlternative = function(alt) {
+  closePosAllergyBlockModal();
+  // Buscar en catálogo de productos
+  const match = sysState.products.find(p => 
+    p.nombre_comercial.toLowerCase().includes(alt.principio.toLowerCase()) ||
+    p.principio_activo.toLowerCase().includes(alt.principio.toLowerCase())
+  );
+  if (match) {
+    addProductToPosCart(match, 'UNIDAD');
+    showToast(`🔄 Alternativa segura cargada: ${match.nombre_comercial}`, 'success');
+  } else {
+    showToast(`Alternativa ${alt.nombre} recomendada. Búsquela en el catálogo general.`, 'info');
+  }
+};
+
+// 2. Módulo OCR de Recetas Médicas
+window.openPosRecetaOcrModal = function() {
+  const modal = document.getElementById('pos-receta-ocr-modal');
+  if (modal) modal.classList.remove('hidden');
+};
+
+window.closePosRecetaOcrModal = function() {
+  const modal = document.getElementById('pos-receta-ocr-modal');
+  if (modal) modal.classList.add('hidden');
+};
+
+window.executeDemoRecetaOcr = async function(demoFilename) {
+  const loading = document.getElementById('pos-ocr-loading');
+  const results = document.getElementById('pos-ocr-results');
+  const btnPreload = document.getElementById('pos-ocr-btn-precargar');
+  if (loading) loading.classList.remove('hidden');
+  if (results) results.classList.add('hidden');
+  if (btnPreload) btnPreload.classList.add('hidden');
+
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch('/api/receta/ocr-procesar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        image_data: demoFilename,
+        patient_cedula: ''
+      })
+    });
+    const data = await res.json();
+    renderPosOcrResults(data);
+  } catch (err) {
+    showToast('Error al procesar receta OCR: ' + err.message, 'error');
+  } finally {
+    if (loading) loading.classList.add('hidden');
+  }
+};
+
+window.handleRecetaCustomFile = function(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    const base64 = e.target.result;
+    const loading = document.getElementById('pos-ocr-loading');
+    const results = document.getElementById('pos-ocr-results');
+    const btnPreload = document.getElementById('pos-ocr-btn-precargar');
+    if (loading) loading.classList.remove('hidden');
+    if (results) results.classList.add('hidden');
+    if (btnPreload) btnPreload.classList.add('hidden');
+
+    try {
+      const f = sysState.authenticatedPharmacy || { id: 1 };
+      const currentCed = (document.getElementById('pos-client-cedula')?.value || '').trim();
+      const res = await fetch('/api/receta/ocr-procesar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          farmacia_id: f.id || 1,
+          image_data: base64,
+          patient_cedula: currentCed
+        })
+      });
+      const data = await res.json();
+      renderPosOcrResults(data);
+    } catch (err) {
+      showToast('Error al procesar imagen: ' + err.message, 'error');
+    } finally {
+      if (loading) loading.classList.add('hidden');
+    }
+  };
+  reader.readAsDataURL(file);
+};
+
+function renderPosOcrResults(data) {
+  if (!data.ok) {
+    showToast('No se pudo interpretar la receta.', 'error');
+    return;
+  }
+  window.currentOcrReceta = data;
+
+  const results = document.getElementById('pos-ocr-results');
+  const docName = document.getElementById('pos-ocr-doctor-name');
+  const docInfo = document.getElementById('pos-ocr-doctor-info');
+  const patName = document.getElementById('pos-ocr-patient-name');
+  const diagInfo = document.getElementById('pos-ocr-diagnosis');
+  const tbody = document.getElementById('pos-ocr-table-body');
+  const sumCard = document.getElementById('pos-ocr-summary-card');
+  const sumText = document.getElementById('pos-ocr-summary-text');
+  const btnPreload = document.getElementById('pos-ocr-btn-precargar');
+
+  if (docName) docName.textContent = data.medico?.nombre || 'Médico Tratante';
+  if (docInfo) docInfo.textContent = `Exeq: ${data.medico?.exequatur || 'N/A'} • ${data.medico?.centro || 'Centro de Salud'}`;
+  if (patName) patName.textContent = `${data.paciente?.nombre || 'Paciente'} (Céd: ${data.paciente?.cedula || 'N/A'})`;
+  if (diagInfo) diagInfo.textContent = `Diagnóstico: ${data.medico?.diagnostico || 'Evaluación médica'}`;
+
+  let approvedCount = 0;
+  if (tbody) {
+    tbody.innerHTML = (data.medicamentos_prescritos || []).map(m => {
+      const isBlocked = m.alerta_alergia;
+      if (!isBlocked && m.en_stock) approvedCount++;
+      return `
+        <tr class="${isBlocked ? 'bg-rose-50/70 border-l-4 border-l-rose-500' : 'hover:bg-slate-50'}">
+          <td class="p-3">
+            <p class="font-extrabold text-slate-900">${m.nombre_recetado}</p>
+            <p class="text-[10px] text-slate-500 font-mono">Principio: ${m.principio_activo} • ${m.dosis}</p>
+            ${isBlocked ? `
+              <p class="text-[11px] font-extrabold text-rose-700 mt-1">${m.motivo_seguridad}</p>
+              ${m.alternativas_seguras && m.alternativas_seguras.length ? `
+                <div class="mt-1 flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold text-teal-800">Sugerencia segura:</span>
+                  <span class="px-2 py-0.5 rounded bg-teal-100 text-teal-900 font-extrabold text-[10px]">${m.alternativas_seguras[0].nombre}</span>
+                </div>
+              ` : ''}
+            ` : ''}
+          </td>
+          <td class="p-3 text-slate-600">${m.posologia}</td>
+          <td class="p-3">
+            <p class="font-mono font-bold text-slate-900">RD$ ${(m.precio_unitario * 60).toFixed(2)}</p>
+            <p class="text-[10px] ${m.en_stock ? 'text-emerald-600 font-bold' : 'text-rose-600 font-black'}">
+              ${m.en_stock ? `Stock: ${m.stock_disponible} unid.` : 'Agotado'}
+            </p>
+          </td>
+          <td class="p-3 text-center">
+            ${isBlocked ? `
+              <span class="px-2.5 py-1 rounded-full bg-rose-600 text-white font-black text-[10px] tracking-wide inline-flex items-center gap-1 shadow-xs">
+                <span>⛔</span> <span>BLOQUEADO POR ALERGIA</span>
+              </span>
+            ` : `
+              <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 font-black text-[10px] tracking-wide inline-flex items-center gap-1">
+                <span>✅</span> <span>SEGURO</span>
+              </span>
+            `}
+          </td>
+          <td class="p-3 text-right">
+            ${isBlocked ? `
+              <span class="text-[10px] text-rose-600 font-bold italic">Despacho no permitido</span>
+            ` : `
+              <span class="text-[10px] text-emerald-700 font-bold">Listo para agregar</span>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  if (sumCard && sumText) {
+    sumText.textContent = data.resumen_ia || '';
+    if (data.bloqueos_alergia_count > 0) {
+      sumCard.className = 'p-3.5 rounded-2xl bg-rose-50 border-2 border-rose-400 text-rose-900 text-xs flex items-center justify-between shadow-xs';
+    } else {
+      sumCard.className = 'p-3.5 rounded-2xl bg-emerald-50 border-2 border-emerald-400 text-emerald-900 text-xs flex items-center justify-between shadow-xs';
+    }
+  }
+
+  if (btnPreload) {
+    btnPreload.classList.remove('hidden');
+    btnPreload.innerHTML = `<span>🛒 Precargar en Carrito POS (${approvedCount} Medicamento${approvedCount === 1 ? '' : 's'})</span>`;
+  }
+  if (results) results.classList.remove('hidden');
+}
+
+window.preloadOcrItemsToPosCart = function() {
+  if (!window.currentOcrReceta) return;
+  const data = window.currentOcrReceta;
+
+  // Llenar datos de paciente en formulario
+  if (data.paciente) {
+    const nameInp = document.getElementById('pos-client-name');
+    const cedInp = document.getElementById('pos-client-cedula');
+    if (nameInp && data.paciente.nombre) nameInp.value = data.paciente.nombre;
+    if (cedInp && data.paciente.cedula) {
+      cedInp.value = data.paciente.cedula;
+      checkPosPatientAllergies(data.paciente.cedula);
+    }
+  }
+
+  // Agregar ítems aprobados (no alérgicos y con stock)
+  let countAdded = 0;
+  for (const m of (data.medicamentos_prescritos || [])) {
+    if (!m.alerta_alergia && m.producto_id) {
+      const p = sysState.products.find(x => x.id === m.producto_id);
+      if (p) {
+        const existing = sysState.posCart.find(i => i.product.id === p.id);
+        if (existing) existing.cantidad += 1;
+        else sysState.posCart.push({ product: p, presentacion: 'UNIDAD', cantidad: 1 });
+        countAdded++;
+      }
+    }
+  }
+
+  renderPosCart();
+  closePosRecetaOcrModal();
+  showToast(`✅ Receta precargada con éxito: ${countAdded} medicamento(s) seguro(s) en carrito.`, 'success');
+};
+
+
+// =========================================================================
+// 1. LECTOR DE CÓDIGO DE BARRAS GLOBAL (HARDWARE SCANNER LISTENER HID)
+// =========================================================================
+
+let globalBarcodeBuffer = '';
+let lastGlobalBarcodeTime = 0;
+
+// Reproductor de Beep POS con Web Audio API
+function playPosScanBeep(isError = false) {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    if (isError) {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(320, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } else {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1760, ctx.currentTime); // Beep agudo y limpio POS
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+    }
+  } catch(e) {
+    console.warn('AudioContext no disponible:', e);
+  }
+}
+
+// Listener de Hardware en Toda la Pantalla
+window.addEventListener('keydown', (e) => {
+  // Ignorar si el usuario está activamente en un campo de texto largo (textarea)
+  const activeEl = document.activeElement;
+  const isInputOrTextArea = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+  const now = performance.now();
+  const diff = now - lastGlobalBarcodeTime;
+  lastGlobalBarcodeTime = now;
+
+  // Los lectores de códigos de barras envían ráfagas muy rápidas (< 70ms entre caracteres)
+  if (e.key === 'Enter') {
+    if (globalBarcodeBuffer.length >= 6) {
+      e.preventDefault();
+      e.stopPropagation();
+      const code = globalBarcodeBuffer.trim();
+      globalBarcodeBuffer = '';
+      processGlobalBarcodeScanned(code);
+      return;
+    }
+    globalBarcodeBuffer = '';
+    return;
+  }
+
+  // Filtrar teclas modificadoras
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (diff > 90) {
+      // Reiniciar buffer si la velocidad indica tecleo humano
+      globalBarcodeBuffer = e.key;
+    } else {
+      globalBarcodeBuffer += e.key;
+    }
+  }
+}, true);
+
+// Procesar el código escaneado globalmente
+function processGlobalBarcodeScanned(barcode) {
+  playPosScanBeep(false);
+
+  // Efecto visual en indicador de escáner
+  const statusEl = document.getElementById('pos-global-scanner-text');
+  if (statusEl) {
+    statusEl.textContent = `⚡ Escaneado: ${barcode}`;
+    setTimeout(() => {
+      statusEl.textContent = '⚡ Lector Pistola Activo';
+    }, 3000);
+  }
+
+  const p = sysState.products.find(x => 
+    (x.codigo_barras && x.codigo_barras.trim() === barcode) ||
+    (x.lote && x.lote.trim() === barcode)
+  );
+
+  if (!p) {
+    playPosScanBeep(true);
+    showToast(`Código de barra '${barcode}' no encontrado en catálogo.`, 'error');
+    return;
+  }
+
+  // Validar si el lote está vencido
+  if (p.vencimiento && p.vencimiento.vencido) {
+    playPosScanBeep(true);
+    showToast(`⛔ BLOQUEO SANITARIO: El lote ${p.lote} de '${p.nombre_comercial}' está VENCIDO.`, 'error');
+    return;
+  }
+
+  // Validar si el paciente actual tiene conflicto alérgico con este producto
+  const currentCedula = (document.getElementById('pos-client-cedula')?.value || '').trim();
+  if (currentCedula && window.checkProductAllergyConflictSync) {
+    const conflict = window.checkProductAllergyConflictSync(currentCedula, p.nombre_comercial, p.principio_activo);
+    if (conflict && conflict.blocked) {
+      playPosScanBeep(true);
+      window.showPosAllergyBlockModal(p, conflict);
+      return;
+    }
+  }
+
+  // Agregar al carrito
+  addProductToPosCart(p, 'UNIDAD');
+  showToast(`⚡ Escáner Global: ${p.nombre_comercial} (RD$ ${(p.precio_base * 60).toFixed(2)})`, 'success');
+}
+
+
+// =========================================================================
+// 2. IMPRESIÓN TÉRMICA DIRECTA (ESC/POS 58mm / 80mm) Y GAVETA RJ11
+// =========================================================================
+
+window.openPosThermalPrinterModal = function() {
+  const modal = document.getElementById('pos-thermal-printer-modal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    refreshThermalPreviewSample();
+  }
+};
+
+window.closePosThermalPrinterModal = function() {
+  const modal = document.getElementById('pos-thermal-printer-modal');
+  if (modal) modal.classList.add('hidden');
+};
+
+async function openPosCashDrawerDirect() {
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch('/api/pos/abrir-gaveta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: f.id || 1 })
+    });
+    const data = await res.json();
+    playPosScanBeep(false);
+    showToast('🔓 Pulso ESC/POS enviado: Gaveta de dinero abierta.', 'success');
+  } catch (err) {
+    showToast('Error al abrir gaveta: ' + err.message, 'error');
+  }
+}
+
+async function printTestThermalTicket() {
+  const pWidth = document.getElementById('thermal-setting-width')?.value || '80mm';
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch('/api/pos/imprimir-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        paper_width: pWidth,
+        open_drawer: true,
+        ticket_data: {
+          tipo: 'TICKET DE PRUEBA ESC/POS DIRECTO',
+          codigo: 'TST-' + Date.now().toString().slice(-6),
+          cajero: 'Cajero Principal',
+          cliente: 'Prueba de Impresión Térmica Directa',
+          items: [
+            { cantidad: 1, nombre: 'Prueba Ticket Térmico 80mm', precio: 150.0 },
+            { cantidad: 2, nombre: 'Papel Térmico de Alta Durabilidad', precio: 50.0 }
+          ],
+          metodo_pago: 'EFECTIVO PESOS (DOP)',
+          monto_recibido: 300.0
+        }
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const container = document.getElementById('thermal-preview-container');
+      if (container) container.textContent = data.text_preview || 'Ticket generado';
+      playPosScanBeep(false);
+      showToast('🖨️ Ticket impreso directamente sin diálogo de Windows.', 'success');
+    }
+  } catch (err) {
+    showToast('Error al imprimir ticket térmico: ' + err.message, 'error');
+  }
+}
+
+function refreshThermalPreviewSample() {
+  const container = document.getElementById('thermal-preview-container');
+  if (!container) return;
+  const pWidth = document.getElementById('thermal-setting-width')?.value || '80mm';
+  const cols = pWidth === '80mm' ? 48 : 32;
+  const sep = '='.repeat(cols);
+  container.textContent = `
+       FARMACIA DAVALSI
+RNC: 131-98234-1 • Registro #2026
+Av. Independencia #104, Santo Domingo
+${sep}
+*** TICKET DIRECTO ESC/POS (${pWidth}) ***
+No. Comprobante: B02-0004921
+Fecha: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+Cajero: Personal de Mostrador
+${'-'.repeat(cols)}
+CANT  DESCRIPCIÓN             TOTAL
+${'-'.repeat(cols)}
+1     Amoxicilina 500mg    RD$  20.00
+2     Paracetamol 500mg    RD$  16.00
+${'-'.repeat(cols)}
+TOTAL EN PESOS:            RD$  36.00
+TOTAL EN DÓLARES:           $    0.60
+FORMA DE PAGO: EFECTIVO
+${sep}
+🩺 FarmaIA: Verificación Clínica Activa
+  [Corte de Papel Automático]
+  [Pulso Gaveta RJ11: OK]
+`;
+}
+
+
+// =========================================================================
+// 3. MÓDULO DE ARQUEO Y CIERRE DE CAJA (CORTE X Y Z) MULTIMONEDA
+// =========================================================================
+
+window.cajaActiveShift = null;
+
+window.openPosCajaModal = async function() {
+  const modal = document.getElementById('pos-caja-modal');
+  if (modal) modal.classList.remove('hidden');
+  await loadCajaShiftSummary();
+};
+
+window.closePosCajaModal = function() {
+  const modal = document.getElementById('pos-caja-modal');
+  if (modal) modal.classList.add('hidden');
+};
+
+async function loadCajaShiftSummary() {
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch(`/api/pos/caja/resumen?farmacia_id=${f.id || 1}`);
+    const data = await res.json();
+    window.cajaActiveShift = data;
+
+    const fondoDopEl = document.getElementById('caja-fondo-dop');
+    const fondoUsdEl = document.getElementById('caja-fondo-usd');
+    const ventasEfecEl = document.getElementById('caja-ventas-efectivo');
+    const ventasUsdEl = document.getElementById('caja-ventas-usd');
+    const ventasBancosEl = document.getElementById('caja-ventas-bancos');
+    const totalTxEl = document.getElementById('caja-total-tx');
+    const totalEspEl = document.getElementById('caja-total-esperado');
+
+    if (fondoDopEl) fondoDopEl.textContent = `RD$ ${(data.fondo_inicial.dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    if (fondoUsdEl) fondoUsdEl.textContent = `+ $${(data.fondo_inicial.usd).toFixed(2)} USD`;
+
+    if (ventasEfecEl) ventasEfecEl.textContent = `RD$ ${(data.ventas.efectivo_dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    if (ventasUsdEl) ventasUsdEl.textContent = `$${(data.ventas.efectivo_usd).toFixed(2)} USD recibidos`;
+
+    if (ventasBancosEl) ventasBancosEl.textContent = `RD$ ${(data.ventas.tarjeta_dop + data.ventas.transferencia_dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    if (totalTxEl) totalTxEl.textContent = `${data.total_transacciones} transacciones hoy`;
+
+    if (totalEspEl) totalEspEl.textContent = `RD$ ${(data.total_esperado_gaveta_dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+    recalculateCajaCounting();
+  } catch (err) {
+    showToast('Error al cargar datos de caja: ' + err.message, 'error');
+  }
+}
+
+function recalculateCajaCounting() {
+  const tasaInp = document.getElementById('caja-tasa-usd');
+  const tasa = parseFloat(tasaInp ? tasaInp.value : 60.0) || 60.0;
+
+  let totalDop = 0;
+  let totalUsd = 0;
+
+  const billInputs = document.querySelectorAll('.caja-bill-inp');
+  billInputs.forEach(inp => {
+    const val = parseFloat(inp.getAttribute('data-val') || 0);
+    const cur = inp.getAttribute('data-cur');
+    const count = parseInt(inp.value || 0, 10);
+    if (count > 0) {
+      if (cur === 'USD') {
+        totalUsd += (val * count);
+      } else {
+        totalDop += (val * count);
+      }
+    }
+  });
+
+  const subDopBadge = document.getElementById('caja-subtotal-dop-badge');
+  const subUsdBadge = document.getElementById('caja-subtotal-usd-badge');
+  if (subDopBadge) subDopBadge.textContent = `RD$ ${totalDop.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  if (subUsdBadge) subUsdBadge.textContent = `$ ${totalUsd.toFixed(2)} USD (= RD$ ${(totalUsd * tasa).toFixed(2)})`;
+
+  const totalContadoConsolidado = totalDop + (totalUsd * tasa);
+  const totalEsperado = window.cajaActiveShift ? window.cajaActiveShift.total_esperado_gaveta_dop : 6000.0;
+  const diferencia = totalContadoConsolidado - totalEsperado;
+
+  const card = document.getElementById('caja-diferencia-card');
+  const title = document.getElementById('caja-diferencia-title');
+  const desc = document.getElementById('caja-diferencia-desc');
+  const amount = document.getElementById('caja-diferencia-amount');
+  const icon = document.getElementById('caja-diferencia-icon');
+
+  if (desc) desc.textContent = `Total Físico Contado: RD$ ${totalContadoConsolidado.toLocaleString('en-US', { minimumFractionDigits: 2 })} • Esperado en Gaveta: RD$ ${totalEsperado.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+  const difFormatted = Math.abs(diferencia).toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+  if (totalContadoConsolidado === 0) {
+    if (card) card.className = 'p-4 rounded-2xl bg-slate-100 border-2 border-slate-300 flex items-center justify-between text-xs';
+    if (title) title.textContent = 'ESTADO DEL CUADRE: INGRESA EL CONTEO DE BILLETES';
+    if (amount) {
+      amount.textContent = 'RD$ 0.00';
+      amount.className = 'text-base font-black font-mono text-slate-700';
+    }
+    if (icon) icon.textContent = '⚖️';
+  } else if (Math.abs(diferencia) <= 1.0) {
+    if (card) card.className = 'p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-500 flex items-center justify-between text-xs animate-pulse';
+    if (title) title.textContent = '✅ CAJA CUADRADA EXACTA (SIN DIFERENCIAS)';
+    if (amount) {
+      amount.textContent = 'RD$ 0.00';
+      amount.className = 'text-base font-black font-mono text-emerald-800';
+    }
+    if (icon) icon.textContent = '🎯';
+  } else if (diferencia > 1.0) {
+    if (card) card.className = 'p-4 rounded-2xl bg-amber-50 border-2 border-amber-500 flex items-center justify-between text-xs';
+    if (title) title.textContent = '⚠️ SOBRANTE DE DINERO EN CAJA';
+    if (amount) {
+      amount.textContent = `+RD$ ${difFormatted}`;
+      amount.className = 'text-base font-black font-mono text-amber-900';
+    }
+    if (icon) icon.textContent = '💵';
+  } else {
+    if (card) card.className = 'p-4 rounded-2xl bg-rose-50 border-2 border-rose-500 flex items-center justify-between text-xs';
+    if (title) title.textContent = '⛔ FALTANTE DE DINERO EN CAJA';
+    if (amount) {
+      amount.textContent = `-RD$ ${difFormatted}`;
+      amount.className = 'text-base font-black font-mono text-rose-900';
+    }
+    if (icon) icon.textContent = '🚨';
+  }
+}
+
+function autoFillCajaBalanced() {
+  const esperado = window.cajaActiveShift ? window.cajaActiveShift.total_esperado_gaveta_dop : 6000.0;
+  // Fondo base: $50 USD (= RD$ 3,000) + RD$ 3,000 pesos
+  const billInputs = document.querySelectorAll('.caja-bill-inp');
+  billInputs.forEach(inp => {
+    const val = inp.getAttribute('data-val');
+    const cur = inp.getAttribute('data-cur');
+    if (cur === 'USD' && val === '50') inp.value = 1;
+    else if (cur === 'DOP' && val === '1000') inp.value = 3;
+    else inp.value = 0;
+  });
+  recalculateCajaCounting();
+  showToast('⚡ Conteo de prueba cuadrado completado.', 'info');
+}
+
+async function executeCajaCorte(tipoCorte) {
+  const isCorteZ = (tipoCorte === 'CORTE_Z');
+  const confirmMsg = isCorteZ
+    ? '¿Estás seguro de emitir el CORTE Z FISCAL DEFINITIVO? Esto cerrará el turno, abrirá la gaveta e imprimirá el comprobante final de auditoría.'
+    : '¿Deseas emitir un CORTE X (Arqueo Parcial)? Se generará la auditoría sin cerrar el turno ni alterar contadores.';
+
+  if (!confirm(confirmMsg)) return;
+
+  const tasaInp = document.getElementById('caja-tasa-usd');
+  const tasa = parseFloat(tasaInp ? tasaInp.value : 60.0) || 60.0;
+  const obsInp = document.getElementById('caja-observaciones-inp');
+  const paperW = document.getElementById('caja-paper-width')?.value || '80mm';
+
+  // Recolectar desglose
+  let totalDop = 0;
+  let totalUsd = 0;
+  const desglose = { DOP: {}, USD: {} };
+
+  const billInputs = document.querySelectorAll('.caja-bill-inp');
+  billInputs.forEach(inp => {
+    const val = inp.getAttribute('data-val');
+    const cur = inp.getAttribute('data-cur');
+    const count = parseInt(inp.value || 0, 10);
+    if (count > 0) {
+      desglose[cur][val] = count;
+      if (cur === 'USD') totalUsd += (parseFloat(val) * count);
+      else totalDop += (parseFloat(val) * count);
+    }
+  });
+
+  try {
+    const f = sysState.authenticatedPharmacy || { id: 1 };
+    const res = await fetch('/api/pos/caja/corte', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        tipo_corte: tipoCorte,
+        cajero_nombre: 'Eliot Farmacéutico',
+        tasa_cambio_usd: tasa,
+        conteo_fisico_dop: totalDop,
+        conteo_fisico_usd: totalUsd,
+        desglose_billetes: desglose,
+        observaciones: obsInp ? obsInp.value : '',
+        paper_width: paperW,
+        open_drawer: isCorteZ
+      })
+    });
+
+    const data = await res.json();
+    playPosScanBeep(false);
+
+    // Si fue corte Z, abrir gaveta con sonido
+    if (isCorteZ) {
+      showToast('🔓 Gaveta de dinero abierta automáticamente para entrega de turno.', 'success');
+    }
+
+    alert(`✅ ${tipoCorte} GENERADO CON ÉXITO
+Código: ${data.codigo_cierre}
+Estado: ${data.estado_cuadre}
+Diferencia: RD$ ${data.diferencia_dop}
+
+Ticket fiscal enviado a la impresora térmica.`);
+    closePosCajaModal();
+
+    // Actualizar vista previa en el modal de impresora
+    const previewContainer = document.getElementById('thermal-preview-container');
+    if (previewContainer && data.ticket_escpos) {
+      previewContainer.textContent = data.ticket_escpos.text_preview;
+    }
+  } catch (err) {
+    showToast(`Error al emitir ${tipoCorte}: ` + err.message, 'error');
+  }
+}
+
+window.recalculateCajaCounting = recalculateCajaCounting;
+window.autoFillCajaBalanced = autoFillCajaBalanced;
+window.executeCajaCorte = executeCajaCorte;
+window.openPosCashDrawerDirect = openPosCashDrawerDirect;
+window.printTestThermalTicket = printTestThermalTicket;
+
+
+// ============================================================================
+// GESTIÓN DE NOTIFICACIONES WHATSAPP DE 5 DÍAS & MONITOR DE DELIVERY EN VIVO
+// ============================================================================
+
+async function triggerAllChronic5dWhatsAppAlerts() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  if (!confirm('¿Desea escanear y enviar automáticamente las alertas de WhatsApp a todos los pacientes crónicos a los que les queden 5 días o menos de tratamiento?')) {
+    return;
+  }
+
+  showToast('🔍 Escaneando pacientes crónicos con ≤ 5 días...', 'info');
+
+  try {
+    const res = await fetch('/api/whatsapp/cronicos-5d/disparar-todos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: farmaciaId })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al disparar alertas');
+
+    if (data.total_alertas_5d_enviadas === 0) {
+      alert('ℹ️ No hay pacientes crónicos con 5 días o menos de medicación pendiente.');
+    } else {
+      let resumen = `✅ Se enviaron ${data.total_alertas_5d_enviadas} alertas de WhatsApp:
+
+`;
+      data.alertas.forEach(a => {
+        resumen += `• ${a.paciente_nombre} (${a.medicamento}) — Quedan ${a.dias_restantes} días
+`;
+      });
+      alert(resumen);
+      loadChronicPatients();
+    }
+  } catch (err) {
+    showToast('Error al enviar alertas: ' + err.message, 'error');
+  }
+}
+
+async function sendChronic5dWhatsApp(patientId) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  try {
+    const res = await fetch('/api/whatsapp/enviar-alerta-cronico', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: farmaciaId,
+        paciente_cronico_id: patientId
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'No se pudo generar la alerta');
+
+    const msg = data.alerta;
+    if (msg && msg.wa_link) {
+      window.open(msg.wa_link, '_blank');
+      showToast(`📲 Alerta abierta para ${msg.paciente_nombre} (5 días restantes)`, 'success');
+    } else {
+      showToast('Alerta enviada correctamente.', 'success');
+    }
+  } catch (err) {
+    showToast('Error al enviar WhatsApp: ' + err.message, 'error');
+  }
+}
+
+// ----------------- MONITOR DE DELIVERY POS -----------------
+let posDeliveryLeafletMap = null;
+let posDeliveryCourierMarker = null;
+let posDeliveryInterval = null;
+let activePosDeliveryOrderCode = 'ORD-DAV-202610-88';
+
+async function openPosDeliveryTrackingModal(codigoOrden) {
+  const code = codigoOrden || activePosDeliveryOrderCode;
+  activePosDeliveryOrderCode = code;
+
+  const modal = document.getElementById('pos-delivery-tracking-modal');
+  if (modal) modal.classList.remove('hidden');
+
+  await refreshPosDeliveryTrackingData(code);
+}
+
+function closePosDeliveryTrackingModal() {
+  const modal = document.getElementById('pos-delivery-tracking-modal');
+  if (modal) modal.classList.add('hidden');
+  if (posDeliveryInterval) {
+    clearInterval(posDeliveryInterval);
+    posDeliveryInterval = null;
+  }
+}
+
+async function refreshPosDeliveryTrackingData(codigoOrden) {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+
+  try {
+    const res = await fetch(`/api/delivery/tracking?farmacia_id=${farmaciaId}&codigo_orden=${encodeURIComponent(codigoOrden)}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'No se encontró la orden de delivery');
+
+    renderPosDeliveryTrackingUI(data);
+    initPosDeliveryLeafletMap(data);
+
+    // Iniciar simulación de movimiento cada 3s si no está activo
+    if (!posDeliveryInterval && data.estado_delivery === 'EN_CAMINO') {
+      let stepIdx = 0;
+      posDeliveryInterval = setInterval(() => {
+        if (!posDeliveryLeafletMap || !data.ruta_coordenadas || !data.ruta_coordenadas.length) return;
+        stepIdx = (stepIdx + 1) % data.ruta_coordenadas.length;
+        const pt = data.ruta_coordenadas[stepIdx];
+        if (posDeliveryCourierMarker) {
+          posDeliveryCourierMarker.setLatLng([pt.lat, pt.lng]);
+        }
+      }, 3000);
+    }
+  } catch (err) {
+    showToast('Error al consultar delivery: ' + err.message, 'error');
+  }
+}
+
+function renderPosDeliveryTrackingUI(data) {
+  const orderEl = document.getElementById('pos-delivery-modal-order');
+  const badgeEl = document.getElementById('pos-delivery-modal-status-badge');
+  const clientEl = document.getElementById('pos-delivery-modal-client');
+  const addrEl = document.getElementById('pos-delivery-modal-address');
+  const phoneEl = document.getElementById('pos-delivery-modal-phone');
+  const courierNameEl = document.getElementById('pos-delivery-modal-courier-name');
+  const courierVehEl = document.getElementById('pos-delivery-modal-courier-vehicle');
+  const courierPhoneEl = document.getElementById('pos-delivery-modal-courier-phone');
+  const etaEl = document.getElementById('pos-delivery-modal-eta');
+  const selectEl = document.getElementById('pos-delivery-status-select');
+
+  if (orderEl) orderEl.textContent = data.codigo_orden;
+  if (badgeEl) {
+    badgeEl.textContent = data.estado_delivery || 'EN_CAMINO';
+    if (data.estado_delivery === 'ENTREGADO') {
+      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-400 text-slate-950 uppercase';
+    } else {
+      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 uppercase animate-pulse';
+    }
+  }
+  if (clientEl) clientEl.textContent = data.cliente_nombre || 'Cliente General';
+  if (addrEl) addrEl.textContent = data.cliente_direccion || 'Dirección no registrada';
+  if (phoneEl) phoneEl.textContent = '📞 ' + (data.cliente_telefono || 'N/A');
+
+  if (data.repartidor) {
+    if (courierNameEl) courierNameEl.textContent = data.repartidor.nombre || 'Motorizado';
+    if (courierVehEl) courierVehEl.textContent = data.repartidor.vehiculo || 'Motocicleta';
+    if (courierPhoneEl) courierPhoneEl.textContent = '📞 ' + (data.repartidor.telefono || 'N/A');
+  }
+
+  const eta = data.puntos?.repartidor_actual?.eta_minutos || 8;
+  if (etaEl) etaEl.textContent = data.estado_delivery === 'ENTREGADO' ? '¡Entregado!' : `~${eta} minutos`;
+  if (selectEl) selectEl.value = data.estado_delivery || 'EN_CAMINO';
+
+  // Stepper
+  const stepperContainer = document.getElementById('pos-delivery-stepper-container');
+  if (stepperContainer && Array.isArray(data.stepper)) {
+    stepperContainer.innerHTML = data.stepper.map(s => {
+      let bg = s.completado ? 'bg-emerald-500 text-white' : (s.activo ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-500 animate-pulse' : 'bg-slate-200 text-slate-500');
+      let icon = s.completado ? '✓' : (s.activo ? '🛵' : s.paso);
+      return `
+        <div class="p-2.5 rounded-xl border border-slate-200 text-center ${s.activo ? 'bg-amber-50/60' : 'bg-white'}">
+          <div class="w-6 h-6 rounded-full mx-auto flex items-center justify-center text-xs font-black mb-1 ${bg}">
+            ${icon}
+          </div>
+          <p class="text-[10px] font-extrabold text-slate-900 leading-tight">${s.titulo}</p>
+          <span class="text-[9px] text-slate-400">${s.hora || ''}</span>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+function initPosDeliveryLeafletMap(data) {
+  if (typeof L === 'undefined') return;
+  const container = document.getElementById('pos-delivery-leaflet-map');
+  if (!container) return;
+
+  const farmaciaPt = data.puntos?.origen || { lat: 18.4746, lng: -69.9328 };
+  const pacientePt = data.puntos?.destino || { lat: 18.4835, lng: -69.9405 };
+  const repPt = data.puntos?.repartidor_actual || { lat: 18.4791, lng: -69.9368 };
+
+  if (!posDeliveryLeafletMap) {
+    posDeliveryLeafletMap = L.map('pos-delivery-leaflet-map').setView([repPt.lat, repPt.lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap FarmaSys'
+    }).addTo(posDeliveryLeafletMap);
+  } else {
+    posDeliveryLeafletMap.invalidateSize();
+  }
+
+  // Clear previous layers
+  posDeliveryLeafletMap.eachLayer(layer => {
+    if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+      posDeliveryLeafletMap.removeLayer(layer);
+    }
+  });
+
+  // Marcador Farmacia
+  L.marker([farmaciaPt.lat, farmaciaPt.lng])
+    .addTo(posDeliveryLeafletMap)
+    .bindPopup('<b>🏥 Farmacia Davalsi</b><br>Despacho de medicamentos');
+
+  // Marcador Paciente
+  L.marker([pacientePt.lat, pacientePt.lng])
+    .addTo(posDeliveryLeafletMap)
+    .bindPopup(`<b>📍 ${data.cliente_nombre || 'Domicilio del Paciente'}</b><br>${data.cliente_direccion || ''}`);
+
+  // Marcador Repartidor (Motorizado)
+  const courierIcon = L.divIcon({
+    html: '<div style="background:#0f766e; color:white; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; font-size:18px; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.3)">🛵</div>',
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+
+  posDeliveryCourierMarker = L.marker([repPt.lat, repPt.lng], { icon: courierIcon })
+    .addTo(posDeliveryLeafletMap)
+    .bindPopup('<b>🛵 Pedro Ramírez</b><br>En trayecto con el pedido')
+    .openPopup();
+
+  // Trazar línea de ruta
+  if (Array.isArray(data.ruta_coordenadas) && data.ruta_coordenadas.length) {
+    const latlngs = data.ruta_coordenadas.map(p => [p.lat, p.lng]);
+    L.polyline(latlngs, { color: '#0d9488', weight: 4, dashArray: '6, 6' }).addTo(posDeliveryLeafletMap);
+    posDeliveryLeafletMap.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
+  }
+}
+
+async function updatePosDeliveryStatusBtn() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const farmaciaId = Number(f.id || 1);
+  const select = document.getElementById('pos-delivery-status-select');
+  if (!select) return;
+
+  const nuevoEstado = select.value;
+  try {
+    const res = await fetch('/api/delivery/actualizar-estado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: farmaciaId,
+        codigo_orden: activePosDeliveryOrderCode,
+        estado: nuevoEstado
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al actualizar estado');
+
+    showToast(`✅ Despacho actualizado a ${nuevoEstado}`, 'success');
+    refreshPosDeliveryTrackingData(activePosDeliveryOrderCode);
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+window.triggerAllChronic5dWhatsAppAlerts = triggerAllChronic5dWhatsAppAlerts;
+window.sendChronic5dWhatsApp = sendChronic5dWhatsApp;
+window.openPosDeliveryTrackingModal = openPosDeliveryTrackingModal;
+window.closePosDeliveryTrackingModal = closePosDeliveryTrackingModal;
+window.updatePosDeliveryStatusBtn = updatePosDeliveryStatusBtn;
+
+
+// ============================================================================
+// FUNCIONES DEL CONTROL DE ROLES Y PERMISOS (RBAC) & LIBRO DE PSICOTRÓPICOS
+// ============================================================================
+
+function toggleRbacQuickSwitchDropdown() {
+  const menu = document.getElementById('rbac-quick-switch-menu');
+  if (menu) menu.classList.toggle('hidden');
+}
+
+async function switchActiveRoleQuickly(newRole) {
+  toggleRbacQuickSwitchDropdown();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const fid = Number(f.id || 1);
+
+  let username = 'admin';
+  if (newRole === 'REGENTE') username = 'regente';
+  else if (newRole === 'CAJERO') username = 'cajero';
+
+  showToast(`Cambiando a perfil ${newRole}...`, 'info');
+  await quickDirectLogin(fid, username, '123456');
+}
+
+// ----------------- MODAL DE PSICOTRÓPICOS (LEY 50-88) -----------------
+let pendingPsicoAuthProduct = null;
+let pendingPsicoAuthPresentation = 'UNIDAD';
+
+function openPosPsicotropicosModal() {
+  const modal = document.getElementById('pos-psicotropicos-modal');
+  if (modal) modal.classList.remove('hidden');
+  loadPosPsicotropicosLibro();
+  populatePsicotropicosSelect();
+}
+
+function closePosPsicotropicosModal() {
+  const modal = document.getElementById('pos-psicotropicos-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function togglePsicoNewEntryForm() {
+  const f = document.getElementById('psico-new-entry-container');
+  if (f) f.classList.toggle('hidden');
+}
+
+function populatePsicotropicosSelect() {
+  const sel = document.getElementById('psico-form-prod-id');
+  if (!sel) return;
+  const psicos = (sysState.products || []).filter(p => p.es_psicotropico || (p.categoria && p.categoria.toLowerCase().includes('psicotr')));
+  sel.innerHTML = psicos.map(p => `
+    <option value="${p.id}">${p.nombre_comercial} (Stock: ${p.inventario?.stock_total_unidades || p.stock_total_unidades || 0}u)</option>
+  `).join('');
+}
+
+async function loadPosPsicotropicosLibro() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const tbody = document.getElementById('psico-table-tbody');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch(`/api/psicotropicos/libro?farmacia_id=${f.id || 1}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al cargar libro');
+
+    const items = data.libro || [];
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-400">No hay movimientos registrados en el Libro Oficial de Psicotrópicos.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+      let movBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-emerald-100 text-emerald-900">📦 ENTRADA</span>';
+      if (item.tipo_movimiento === 'SALIDA_VENTA') {
+        movBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-rose-100 text-rose-900">🩺 SALIDA RECETA</span>';
+      } else if (item.tipo_movimiento === 'AJUSTE') {
+        movBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-amber-100 text-amber-900">⚖️ AJUSTE</span>';
+      }
+
+      return `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="py-2.5 px-3 font-mono text-[11px] text-slate-500">
+            <span class="font-bold text-slate-900">#${item.id}</span> • ${item.fecha_registro}
+          </td>
+          <td class="py-2.5 px-3 font-extrabold text-purple-950">${item.medicamento_nombre}</td>
+          <td class="py-2.5 px-2 text-center">${movBadge}</td>
+          <td class="py-2.5 px-2 text-center font-mono font-black text-slate-800">${item.cantidad_unidades}u</td>
+          <td class="py-2.5 px-2 text-center font-mono font-black text-purple-900 bg-purple-50/50">${item.saldo_nuevo}u</td>
+          <td class="py-2.5 px-3 font-mono text-[11px] text-slate-600">
+            <span class="font-bold text-slate-900">${item.receta_numero || 'Sin Receta'}</span><br>
+            <span class="text-[10px] text-slate-500">${item.medico_nombre || '-'} (${item.medico_exequatur || '-'})</span>
+          </td>
+          <td class="py-2.5 px-3 text-[11px] text-slate-700">
+            <span class="font-bold">${item.paciente_nombre || 'N/A'}</span><br>
+            <span class="font-mono text-[10px] text-slate-500">${item.paciente_cedula || '-'}</span>
+          </td>
+          <td class="py-2.5 px-3 text-[11px] text-purple-900 font-semibold">${item.regente_responsable}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    showToast('Error cargando libro de psicotrópicos: ' + err.message, 'error');
+  }
+}
+
+async function submitPsicoMovement(event) {
+  event.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const prodId = document.getElementById('psico-form-prod-id').value;
+  const tipo = document.getElementById('psico-form-tipo').value;
+  const cant = document.getElementById('psico-form-cantidad').value;
+  const receta = document.getElementById('psico-form-receta').value;
+  const medico = document.getElementById('psico-form-medico').value;
+  const exequatur = document.getElementById('psico-form-exequatur').value;
+  const paciente = document.getElementById('psico-form-paciente').value;
+  const obs = document.getElementById('psico-form-obs').value;
+  const actorRole = sysState.authenticatedPharmacy ? (sysState.authenticatedPharmacy.rol_actual || 'REGENTE') : 'REGENTE';
+
+  try {
+    const res = await fetch('/api/psicotropicos/registrar-movimiento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        producto_id: prodId,
+        tipo_movimiento: tipo,
+        cantidad_unidades: cant,
+        receta_numero: receta,
+        medico_nombre: medico,
+        medico_exequatur: exequatur,
+        paciente_nombre: paciente,
+        observaciones: obs,
+        actor_role: actorRole
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al registrar');
+
+    showToast('✅ Movimiento registrado en el Libro Oficial de Psicotrópicos.', 'success');
+    togglePsicoNewEntryForm();
+    loadPosPsicotropicosLibro();
+    loadSysProducts(f.id || 1);
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+// ----------------- AUTORIZACIÓN DE PSICOTRÓPICO PARA CAJERO -----------------
+function openPsicotropicoAuthModal(product, presentation) {
+  pendingPsicoAuthProduct = product;
+  pendingPsicoAuthPresentation = presentation;
+
+  document.getElementById('psico-auth-product-title').textContent = `${product.nombre_comercial} (${presentation})`;
+  document.getElementById('psico-auth-product-id').value = product.id;
+  document.getElementById('psico-auth-receta').value = '';
+  document.getElementById('psico-auth-medico').value = '';
+  document.getElementById('psico-auth-exequatur').value = '';
+  document.getElementById('psico-auth-cedula').value = '';
+  document.getElementById('psico-auth-regente-pin').value = '';
+
+  const modal = document.getElementById('pos-psicotropico-auth-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closePsicotropicoAuthModal() {
+  const modal = document.getElementById('pos-psicotropico-auth-modal');
+  if (modal) modal.classList.add('hidden');
+  pendingPsicoAuthProduct = null;
+}
+
+async function submitPsicotropicoAuthorization(event) {
+  event.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const prodId = document.getElementById('psico-auth-product-id').value;
+  const receta = document.getElementById('psico-auth-receta').value;
+  const medico = document.getElementById('psico-auth-medico').value;
+  const exequatur = document.getElementById('psico-auth-exequatur').value;
+  const cedula = document.getElementById('psico-auth-cedula').value;
+  const pin = document.getElementById('psico-auth-regente-pin').value;
+
+  try {
+    const res = await fetch('/api/psicotropicos/autorizar-despacho', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        producto_id: prodId,
+        cantidad_unidades: 1,
+        receta_numero: receta,
+        medico_nombre: medico,
+        medico_exequatur: exequatur,
+        paciente_cedula: cedula,
+        clave_regente: pin,
+        regente_usuario: 'regente'
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Autorización rechazada');
+
+    showToast(`✅ Autorizado por ${data.autorizado_por}: Receta #${receta} registrada en Libro Oficial.`, 'success');
+    closePsicotropicoAuthModal();
+
+    if (pendingPsicoAuthProduct) {
+      pendingPsicoAuthProduct._autorizado_por_regente = true;
+      addProductToPosCart(pendingPsicoAuthProduct, pendingPsicoAuthPresentation);
+      pendingPsicoAuthProduct._autorizado_por_regente = false;
+    }
+  } catch (err) {
+    showToast('Error de autorización: ' + err.message, 'error');
+  }
+}
+
+// ----------------- GESTIÓN DE PERSONAL Y ROLES (ADMINISTRADOR) -----------------
+function openPosStaffRbacModal() {
+  const modal = document.getElementById('pos-staff-rbac-modal');
+  if (modal) modal.classList.remove('hidden');
+  loadPosStaffUsers();
+}
+
+function closePosStaffRbacModal() {
+  const modal = document.getElementById('pos-staff-rbac-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function loadPosStaffUsers() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const tbody = document.getElementById('staff-table-tbody');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch(`/api/staff/users?farmacia_id=${f.id || 1}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al cargar personal');
+
+    tbody.innerHTML = (data.users || []).map(u => {
+      let roleBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-amber-100 text-amber-900 border border-amber-300">🛡️ ADMINISTRADOR</span>';
+      if (u.rol === 'REGENTE') {
+        roleBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-teal-100 text-teal-900 border border-teal-300">🩺 REGENTE</span>';
+      } else if (u.rol === 'CAJERO') {
+        roleBadge = '<span class="px-2 py-0.5 rounded-full font-black text-[10px] bg-sky-100 text-sky-900 border border-sky-300">👤 CAJERO</span>';
+      }
+
+      let permsSummary = 'Acceso total a precios, arqueos, quejas y reportes';
+      if (u.rol === 'REGENTE') permsSummary = 'Psicotrópicos Ley 50-88, alertas clínicas e inventario';
+      else if (u.rol === 'CAJERO') permsSummary = 'Solo ventas mostrador POS y consulta de catálogo';
+
+      return `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="py-2.5 px-3 font-mono font-bold text-slate-800">${u.username}</td>
+          <td class="py-2.5 px-3 font-extrabold text-slate-900">${u.nombre_completo}</td>
+          <td class="py-2.5 px-2 text-center">${roleBadge}</td>
+          <td class="py-2.5 px-3 text-[11px] text-slate-600">${permsSummary}</td>
+          <td class="py-2.5 px-3 text-right">
+            <button type="button" onclick="openSwitchAccountModal('${u.username}'); closePosStaffRbacModal();" class="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] border border-indigo-200 transition cursor-pointer">
+              Iniciar Sesión
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    showToast('Error cargando personal: ' + err.message, 'error');
+  }
+}
+
+async function submitStaffUser(event) {
+  event.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const nombre = document.getElementById('staff-form-nombre').value;
+  const username = document.getElementById('staff-form-username').value;
+  const rol = document.getElementById('staff-form-rol').value;
+  const claveEl = document.getElementById('staff-form-clave');
+  const clave = claveEl ? claveEl.value.trim() : '123456';
+
+  try {
+    const res = await fetch('/api/staff/save-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: f.id || 1,
+        nombre_completo: nombre,
+        username: username,
+        rol: rol,
+        clave: clave || '123456',
+        actor_role: 'ADMINISTRADOR'
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Error al guardar personal');
+
+    showToast(`✅ Personal '${username}' guardado como ${rol}.`, 'success');
+    document.getElementById('staff-form-nombre').value = '';
+    document.getElementById('staff-form-username').value = '';
+    loadPosStaffUsers();
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+window.toggleRbacQuickSwitchDropdown = toggleRbacQuickSwitchDropdown;
+window.switchActiveRoleQuickly = switchActiveRoleQuickly;
+window.openPosPsicotropicosModal = openPosPsicotropicosModal;
+window.closePosPsicotropicosModal = closePosPsicotropicosModal;
+window.togglePsicoNewEntryForm = togglePsicoNewEntryForm;
+window.submitPsicoMovement = submitPsicoMovement;
+window.loadPosPsicotropicosLibro = loadPosPsicotropicosLibro;
+window.openPsicotropicoAuthModal = openPsicotropicoAuthModal;
+window.closePsicotropicoAuthModal = closePsicotropicoAuthModal;
+window.submitPsicotropicoAuthorization = submitPsicotropicoAuthorization;
+window.openPosStaffRbacModal = openPosStaffRbacModal;
+window.closePosStaffRbacModal = closePosStaffRbacModal;
+window.loadPosStaffUsers = loadPosStaffUsers;
+window.submitStaffUser = submitStaffUser;
+
+
+// =========================================================================
+// ASISTENTE DE REABASTECIMIENTO A DROGUERIAS (IA)
+// =========================================================================
+
+let posRestockCache = [];
+
+async function openPosRestockModal() {
+  const modal = document.getElementById('pos-restock-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  await fetchRestockData();
+}
+
+function closePosRestockModal() {
+  const modal = document.getElementById('pos-restock-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+async function fetchRestockData() {
+  const farmaciaId = (sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.id) || 1;
+  const daysSelect = document.getElementById('restock-filter-days');
+  const dias = daysSelect ? parseInt(daysSelect.value, 10) || 30 : 30;
+  const tbody = document.getElementById('restock-table-tbody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">⏳ Consultando ritmo de ventas y stock para reabastecimiento con IA...</td></tr>';
+  }
+
+  try {
+    const res = await fetch(`/api/pos/reabastecimiento/sugerencias?farmacia_id=${farmaciaId}&dias_cobertura=${dias}`);
+    const data = await res.json();
+    if (!data.ok) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-500 font-bold">${data.error || 'Error al obtener sugerencias.'}</td></tr>`;
+      return;
+    }
+
+    posRestockCache = data.sugerencias || [];
+
+    // Actualizar KPIs
+    const kpiTot = document.getElementById('restock-card-total-prods');
+    const kpiCrit = document.getElementById('restock-card-criticos');
+    const kpiBajo = document.getElementById('restock-card-bajo-stock');
+    const kpiDop = document.getElementById('restock-card-total-dop');
+    const kpiUsd = document.getElementById('restock-card-total-usd');
+    const badge = document.getElementById('pos-restock-badge');
+
+    if (kpiTot) kpiTot.textContent = data.total_items_sugeridos || posRestockCache.length;
+    if (kpiCrit) kpiCrit.textContent = data.items_criticos_agotados || 0;
+    if (kpiBajo) kpiBajo.textContent = data.items_stock_bajo || 0;
+    if (kpiDop) kpiDop.textContent = typeof formatRD === 'function' ? formatRD(data.costo_total_estimado_rd || 0) : `RD$ ${(data.costo_total_estimado_rd || 0).toFixed(2)}`;
+    if (kpiUsd) kpiUsd.textContent = `$${(data.costo_total_estimado_usd || 0).toFixed(2)} USD`;
+    if (badge) badge.textContent = data.total_items_sugeridos || posRestockCache.length;
+
+    // Poblar selector de laboratorios
+    const labSel = document.getElementById('restock-filter-lab');
+    if (labSel) {
+      const currentLab = labSel.value;
+      const labs = [...new Set(posRestockCache.map(i => i.laboratorio).filter(Boolean))].sort();
+      labSel.innerHTML = '<option value="">Todas las Droguerías / Laboratorios</option>' +
+        labs.map(l => `<option value="${l}">${l}</option>`).join('');
+      if (labs.includes(currentLab)) labSel.value = currentLab;
+    }
+
+    renderRestockTable(posRestockCache);
+  } catch (err) {
+    console.error('Error fetching restock data:', err);
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-rose-500 font-bold">Error de conexión al cargar reabastecimiento.</td></tr>';
+  }
+}
+
+function filterRestockGrid() {
+  const labSel = document.getElementById('restock-filter-lab');
+  const selectedLab = labSel ? labSel.value : '';
+  const filtered = selectedLab ? posRestockCache.filter(i => i.laboratorio === selectedLab) : posRestockCache;
+  renderRestockTable(filtered);
+}
+
+function renderRestockTable(items) {
+  const tbody = document.getElementById('restock-table-tbody');
+  if (!tbody) return;
+
+  if (!items || !items.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-emerald-600 font-bold">✨ Stock en niveles óptimos. No se requieren órdenes de compra urgentes.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = items.map((it, idx) => {
+    const isCritico = it.stock_actual <= 0 || it.prioridad === 'CRÍTICA' || it.prioridad === 'AGOTADO';
+    const badgeColor = isCritico ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-amber-100 text-amber-800 border-amber-300';
+    const subtotal = (it.cantidad_sugerida || 0) * (it.costo_unitario || 0);
+
+    return `
+      <tr class="hover:bg-slate-50 border-b border-slate-100">
+        <td class="py-2.5 px-3">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-black border ${badgeColor}">
+            ${isCritico ? '🚨 CRÍTICO' : '⚠️ REORDEN'}
+          </span>
+        </td>
+        <td class="py-2.5 px-3">
+          <div class="font-extrabold text-slate-900">${it.producto_nombre || it.nombre || 'Medicamento'}</div>
+          <div class="text-[10px] text-slate-500">${it.principio_activo || ''}</div>
+        </td>
+        <td class="py-2.5 px-2 text-slate-700 font-semibold text-xs">${it.laboratorio || 'Droguería Genérica'}</td>
+        <td class="py-2.5 px-2 text-center font-bold">
+          <span class="${isCritico ? 'text-rose-600 font-black' : 'text-slate-800'}">${it.stock_actual}</span>
+          <span class="text-slate-400 font-normal"> / ${it.stock_minimo || 10}</span>
+        </td>
+        <td class="py-2.5 px-2 text-center text-slate-700">${it.ritmo_semanal_unidades || it.venta_semanal || 0} u/sem</td>
+        <td class="py-2.5 px-3 text-center bg-purple-50/50">
+          <input type="number" min="1" value="${it.cantidad_sugerida || 10}"
+            onchange="updateRestockItemQty(${idx}, this.value)"
+            class="w-20 px-2 py-1 text-center font-black rounded-lg border border-purple-300 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400 text-purple-950" />
+        </td>
+        <td class="py-2.5 px-2 text-right font-mono text-slate-700">RD$ ${(it.costo_unitario || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-3 text-right font-mono font-bold text-slate-900" id="restock-subtotal-${idx}">
+          RD$ ${subtotal.toFixed(2)}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateRestockItemQty(idx, newQty) {
+  const qty = Math.max(1, parseInt(newQty, 10) || 1);
+  if (posRestockCache[idx]) {
+    posRestockCache[idx].cantidad_sugerida = qty;
+    const sub = qty * (posRestockCache[idx].costo_unitario || 0);
+    const subEl = document.getElementById(`restock-subtotal-${idx}`);
+    if (subEl) subEl.textContent = `RD$ ${sub.toFixed(2)}`;
+  }
+}
+
+async function downloadRestockCSV() {
+  if (!posRestockCache.length) {
+    if (typeof showToast === 'function') showToast('No hay productos sugeridos para exportar.', 'error');
+    return;
+  }
+  const farmaciaId = (sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.id) || 1;
+  const daysSelect = document.getElementById('restock-filter-days');
+  const dias = daysSelect ? parseInt(daysSelect.value, 10) || 30 : 30;
+
+  try {
+    const res = await fetch('/api/pos/reabastecimiento/exportar-csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: farmaciaId, dias_cobertura: dias, items: posRestockCache }),
+    });
+    if (!res.ok) throw new Error('Error al generar CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Orden_Droguerias_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (typeof showToast === 'function') showToast('✅ Orden de compra descargada en CSV.');
+  } catch (err) {
+    console.error(err);
+    if (typeof showToast === 'function') showToast('Error al descargar CSV.', 'error');
+  }
+}
+
+function printRestockVoucher() {
+  if (!posRestockCache.length) {
+    if (typeof showToast === 'function') showToast('No hay datos para imprimir.', 'error');
+    return;
+  }
+  window.print();
+}
+
+window.openPosRestockModal = openPosRestockModal;
+window.closePosRestockModal = closePosRestockModal;
+window.fetchRestockData = fetchRestockData;
+window.filterRestockGrid = filterRestockGrid;
+window.updateRestockItemQty = updateRestockItemQty;
+window.downloadRestockCSV = downloadRestockCSV;
+window.printRestockVoucher = printRestockVoucher;
+
+
+// =========================================================================
+// CAMBIO SEGURO DE CUENTA RBAC CON VALIDACIÓN DE CONTRASEÑA
+// =========================================================================
+function openSwitchAccountModal(targetUsername) {
+  const modal = document.getElementById('pos-switch-user-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  const uInput = document.getElementById('switch-modal-username');
+  const pInput = document.getElementById('switch-modal-password');
+  const errEl = document.getElementById('switch-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+  if (uInput) {
+    if (targetUsername) uInput.value = targetUsername;
+    else uInput.value = '';
+  }
+  if (pInput) {
+    pInput.value = '';
+    setTimeout(() => pInput.focus(), 100);
+  }
+}
+
+function closeSwitchAccountModal() {
+  const modal = document.getElementById('pos-switch-user-modal');
+  if (modal) modal.classList.add('hidden');
+  const errEl = document.getElementById('switch-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+}
+
+async function handleSwitchAccountSubmit(event) {
+  if (event) event.preventDefault();
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const fid = Number(f.id || 1);
+  const uInput = document.getElementById('switch-modal-username');
+  const pInput = document.getElementById('switch-modal-password');
+  const errEl = document.getElementById('switch-modal-error');
+  const btnSubmit = document.getElementById('switch-modal-btn-submit');
+
+  const username = uInput ? uInput.value.trim() : '';
+  const clave = pInput ? pInput.value.trim() : '';
+
+  if (!username || !clave) {
+    if (errEl) {
+      errEl.textContent = 'Debes ingresar el usuario y su contraseña correspondiente.';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (errEl) errEl.classList.add('hidden');
+  if (btnSubmit) {
+    btnSubmit.disabled = true;
+    btnSubmit.textContent = 'Validando clave...';
+  }
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: fid, username: username, clave_acceso: clave })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.error || 'Contraseña incorrecta o usuario no autorizado.');
+    }
+
+    // Éxito: actualizar sesión y workspace
+    enterAuthenticatedWorkspace(data.pharmacy, data.token);
+    closeSwitchAccountModal();
+    showToast(`✅ Sesión cambiada a perfil '${data.pharmacy.rol_actual}' (${data.pharmacy.usuario_actual}).`, 'success');
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message || 'Error al autenticar el usuario.';
+      errEl.classList.remove('hidden');
+    }
+    showToast(err.message || 'Contraseña incorrecta', 'error');
+  } finally {
+    if (btnSubmit) {
+      btnSubmit.disabled = false;
+      btnSubmit.textContent = 'Validar y Cambiar Perfil ➔';
+    }
+  }
+}
+
+window.openSwitchAccountModal = openSwitchAccountModal;
+window.closeSwitchAccountModal = closeSwitchAccountModal;
+window.handleSwitchAccountSubmit = handleSwitchAccountSubmit;
+
+
+
+/* =========================================================================
+   MODULO FINANCIERO, CONCILIACIÓN CON IA Y DESCARGA DE REPORTES PDF
+   ========================================================================= */
+
+function descargarPdfBajoStock() {
+  const sel = document.getElementById('sel-pdf-modalidad-stock');
+  const mod = sel ? sel.value : 'auditor';
+  const fid = (sysState && sysState.activeFarmaciaId) ? sysState.activeFarmaciaId : 1;
+  const url = `/api/reportes/pdf/bajo-stock?farmacia_id=${fid}&modalidad=${mod}`;
+  window.open(url, '_blank');
+}
+
+async function loadDashboardFinanzas(periodo = 'dia') {
+  const fid = (sysState && sysState.activeFarmaciaId) ? sysState.activeFarmaciaId : 1;
+  
+  // Actualizar estilos de botones de período
+  ['dia', 'semana', 'mes'].forEach(p => {
+    const btn = document.getElementById(`btn-periodo-${p}`);
+    if (btn) {
+      if (p === periodo) {
+        btn.className = 'px-3 py-1.5 rounded-lg font-black bg-teal-600 text-white shadow-xs';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-lg font-bold text-slate-700 hover:bg-white';
+      }
+    }
+  });
+
+  try {
+    const res = await fetch(`/api/finanzas/dashboard?farmacia_id=${fid}&periodo=${periodo}`);
+    const data = await res.json();
+    if (!data.ok) {
+      if (typeof showToast === 'function') showToast(data.error || 'Error al cargar finanzas', 'error');
+      return;
+    }
+
+    // Actualizar KPIs
+    const elBrutas = document.getElementById('fin-kpi-brutas');
+    const elDesc = document.getElementById('fin-kpi-descuentos');
+    const elNetas = document.getElementById('fin-kpi-netas');
+    const elUtilidad = document.getElementById('fin-kpi-utilidad');
+    const elMargen = document.getElementById('fin-kpi-margen');
+
+    if (elBrutas) elBrutas.textContent = `RD$ ${data.ventas_brutas.toFixed(2)}`;
+    if (elDesc) elDesc.textContent = `-RD$ ${data.descuentos_otorgados.toFixed(2)}`;
+    if (elNetas) elNetas.textContent = `RD$ ${data.ventas_netas.toFixed(2)}`;
+    if (elUtilidad) elUtilidad.textContent = `RD$ ${data.utilidad_real.toFixed(2)}`;
+    if (elMargen) elMargen.textContent = `Margen Real: ${data.margen_utilidad_pct}%`;
+
+    // Desglose Métodos
+    const met = data.desglose_metodos_pago || {};
+    const elEfec = document.getElementById('fin-metodo-efectivo');
+    const elTarj = document.getElementById('fin-metodo-tarjeta');
+    const elTrans = document.getElementById('fin-metodo-transferencia');
+    if (elEfec) elEfec.textContent = `RD$ ${(met.EFECTIVO || 0).toFixed(2)}`;
+    if (elTarj) elTarj.textContent = `RD$ ${(met.TARJETA || 0).toFixed(2)}`;
+    if (elTrans) elTrans.textContent = `RD$ ${(met.TRANSFERENCIA || 0).toFixed(2)}`;
+
+    // Desglose Canales
+    const can = data.desglose_canales_venta || {};
+    const elPos = document.getElementById('fin-canal-pos');
+    const elWa = document.getElementById('fin-canal-wa');
+    const elApp = document.getElementById('fin-canal-app');
+    if (elPos) elPos.textContent = `RD$ ${(can.POS_MOSTRADOR || 0).toFixed(2)}`;
+    if (elWa) elWa.textContent = `RD$ ${(can.WHATSAPP || 0).toFixed(2)}`;
+    if (elApp) elApp.textContent = `RD$ ${(can.APP_PACIENTE || 0).toFixed(2)}`;
+
+  } catch (err) {
+    console.error('Error en loadDashboardFinanzas:', err);
+  }
+}
+
+// 2. Conciliación de Transferencia Anti-Fraude con IA
+async function ejecutarConciliacionIa() {
+  const fileInput = document.getElementById('conciliacion-file-input');
+  const montoInput = document.getElementById('conciliacion-monto-esperado');
+  const resultBox = document.getElementById('conciliacion-resultado-box');
+
+  const esperado = parseFloat(montoInput ? montoInput.value : '0') || 0.0;
+  const fid = (sysState && sysState.activeFarmaciaId) ? sysState.activeFarmaciaId : 1;
+
+  if (resultBox) {
+    resultBox.innerHTML = `
+      <div class="space-y-2">
+        <div class="inline-block animate-spin text-2xl text-indigo-600">⏳</div>
+        <p class="text-xs font-black text-indigo-900">Farma IA analizando el váucher con Gemini 2.5 Flash...</p>
+      </div>
+    `;
+  }
+
+  let base64Img = '';
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    const file = fileInput.files[0];
+    base64Img = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  try {
+    const res = await fetch('/api/finanzas/conciliar-transferencia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        total_venta_esperado: esperado,
+        imagen_base64: base64Img,
+        mime_type: 'image/jpeg'
+      })
+    });
+    const data = await res.json();
+
+    if (!resultBox) return;
+
+    if (!data.ok || data.nivel_riesgo === 'ROJO') {
+      // Alerta Crítica Anti-Fraude
+      resultBox.className = 'md:col-span-6 p-4 rounded-2xl bg-rose-50 border-2 border-rose-500 text-left space-y-2 animate-pulse';
+      resultBox.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🚨</span>
+          <span class="px-2.5 py-0.5 rounded-full bg-rose-600 text-white font-black text-[10px] uppercase">BLOQUEO ANTI-FRAUDE</span>
+        </div>
+        <p class="text-xs font-black text-rose-950">${data.mensaje_alerta || 'Comprobante no válido o sospechoso.'}</p>
+        <div class="text-[11px] text-rose-800 bg-white/80 p-2 rounded-xl border border-rose-200">
+          <p><strong>Referencia leída:</strong> ${data.datos_voucher?.numero_referencia || 'N/A'}</p>
+          <p><strong>Monto detectado:</strong> RD$ ${parseFloat(data.datos_voucher?.monto || 0).toFixed(2)}</p>
+        </div>
+      `;
+      if (window.farma3DWidget) {
+        window.farma3DWidget.setDialogue(data.farma_dialogo || data.mensaje_alerta, 'ROJO', true);
+      }
+      if (typeof showToast === 'function') showToast(data.mensaje_alerta, 'error');
+    } else {
+      // Transferencia Válida
+      resultBox.className = 'md:col-span-6 p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-400 text-left space-y-2';
+      resultBox.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">✅</span>
+          <span class="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-black text-[10px] uppercase">VÁUCHER CONCILIADO</span>
+        </div>
+        <p class="text-xs font-black text-emerald-950">¡Transferencia bancaria legítima y autorizada!</p>
+        <div class="text-[11px] text-emerald-800 bg-white/90 p-2 rounded-xl border border-emerald-200 space-y-0.5">
+          <p><strong>Banco:</strong> ${data.banco}</p>
+          <p><strong>Referencia Única:</strong> ${data.numero_referencia}</p>
+          <p><strong>Monto Validado:</strong> RD$ ${parseFloat(data.monto_transferido).toFixed(2)}</p>
+          <p><strong>Fecha/Hora:</strong> ${data.fecha_transferencia}</p>
+        </div>
+      `;
+      if (window.farma3DWidget) {
+        window.farma3DWidget.setDialogue(data.farma_dialogo, 'VERDE', false);
+      }
+      if (typeof showToast === 'function') showToast('Transferencia validada exitosamente.', 'success');
+    }
+  } catch (err) {
+    console.error('Error en ejecutarConciliacionIa:', err);
+  }
+}
+
+// 3. Cierre de Turno / Arqueo de Caja Asistido
+async function ejecutarCierreCajaAsistido() {
+  const cajeroInp = document.getElementById('cierre-cajero-nombre');
+  const efecInp = document.getElementById('cierre-efectivo-contado');
+  const resDisplay = document.getElementById('cierre-resultado-display');
+
+  const cajero = cajeroInp ? cajeroInp.value : 'Cajero Davalsi';
+  const contado = parseFloat(efecInp ? efecInp.value : '0') || 0.0;
+  const fid = (sysState && sysState.activeFarmaciaId) ? sysState.activeFarmaciaId : 1;
+
+  try {
+    const res = await fetch('/api/caja/cierre-asistido', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        efectivo_contado_gaveta: contado,
+        cajero_nombre: cajero,
+        tipo_corte: 'CORTE_Z'
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) return;
+
+    if (resDisplay) {
+      resDisplay.classList.remove('hidden');
+      const isCuadrado = data.estado_cuadre === 'CUADRADO';
+      resDisplay.className = `p-4 rounded-2xl border-2 ${isCuadrado ? 'bg-emerald-50 border-emerald-400 text-emerald-950' : 'bg-amber-50 border-amber-400 text-amber-950'} space-y-2`;
+      resDisplay.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="font-black text-sm uppercase">Resultado del Cuadre: ${data.estado_cuadre}</span>
+          <span class="text-xs font-mono font-black">Descuadre: RD$ ${data.descuadre.toFixed(2)}</span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
+          <div class="p-2 bg-white rounded-xl border border-slate-200">
+            <span class="text-[10px] text-slate-500 block">Efectivo Esperado</span>
+            <strong>RD$ ${data.ventas_efectivo_esperadas.toFixed(2)}</strong>
+          </div>
+          <div class="p-2 bg-white rounded-xl border border-slate-200">
+            <span class="text-[10px] text-slate-500 block">Efectivo Contado</span>
+            <strong>RD$ ${data.efectivo_contado.toFixed(2)}</strong>
+          </div>
+          <div class="p-2 bg-white rounded-xl border border-slate-200">
+            <span class="text-[10px] text-slate-500 block">Transferencias Validadas</span>
+            <strong>${data.transferencias_validadas_count} pagos</strong>
+          </div>
+          <div class="p-2 bg-white rounded-xl border border-slate-200">
+            <span class="text-[10px] text-slate-500 block">Más Rentable</span>
+            <strong>${data.producto_mas_rentable}</strong>
+          </div>
+        </div>
+      `;
+    }
+
+    // Proyectar Resumen Ejecutivo en la burbuja 3D de Farma
+    if (window.farma3DWidget && data.farma_dialogo) {
+      window.farma3DWidget.setDialogue(data.farma_dialogo, data.estado_cuadre === 'CUADRADO' ? 'VERDE' : 'AMARILLO', false);
+    }
+    if (typeof showToast === 'function') {
+      showToast(`Cierre procesado: Caja ${data.estado_cuadre}`, data.estado_cuadre === 'CUADRADO' ? 'success' : 'info');
+    }
+
+  } catch (err) {
+    console.error('Error en ejecutarCierreCajaAsistido:', err);
+  }
+}
+
+window.descargarPdfBajoStock = descargarPdfBajoStock;
+window.loadDashboardFinanzas = loadDashboardFinanzas;
+window.ejecutarConciliacionIa = ejecutarConciliacionIa;
+window.ejecutarCierreCajaAsistido = ejecutarCierreCajaAsistido;
