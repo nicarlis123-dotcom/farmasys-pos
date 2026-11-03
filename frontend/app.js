@@ -832,12 +832,19 @@ async function submitAppOrder() {
       ? `[RETIRO EN SUCURSAL] ${clienteDireccion}`
       : `[ENVÍO A DOMICILIO] ${clienteDireccion}`;
 
+  const latitudEntrega = parseFloat(document.getElementById('app-client-lat')?.value || 18.4835);
+  const longitudEntrega = parseFloat(document.getElementById('app-client-lng')?.value || -69.9405);
+
   const payload = {
     canal: 'APP_PACIENTE',
     modalidad_entrega: effectiveDeliveryMode,
     cliente_nombre: clienteNombre,
     cliente_telefono: clienteTelefono,
     cliente_direccion: finalAddress,
+    direccion_texto: clienteDireccion,
+    latitud_entrega: latitudEntrega,
+    longitud_entrega: longitudEntrega,
+    telefono_contacto: clienteTelefono,
     metodo_pago: state.appPaymentMethod,
     seguro_ars: seguroArs,
     referencia_pago: referenciaPago,
@@ -4395,3 +4402,193 @@ document.addEventListener('DOMContentLoaded', () => {
     checkPatientAdherenceReminders();
   }, 1200);
 });
+
+
+// =========================================================================
+// CAPTURA DE UBICACION GPS PRECISA PARA DELIVERY
+// =========================================================================
+window.capturarUbicacionActualGPS = function() {
+  const btn = document.getElementById('btn-app-get-geolocation');
+  const latInp = document.getElementById('app-client-lat');
+  const lngInp = document.getElementById('app-client-lng');
+  const addrInp = document.getElementById('app-client-address');
+  const icon = document.getElementById('app-gps-status-icon');
+  const feedback = document.getElementById('app-gps-feedback');
+
+  if (!navigator.geolocation) {
+    if (typeof showToast === 'function') showToast('Tu navegador no soporta geolocalización GPS.', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳</span> <span>Detectando GPS...</span>';
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      if (latInp) latInp.value = lat;
+      if (lngInp) lngInp.value = lng;
+      if (icon) icon.classList.remove('hidden');
+      if (feedback) feedback.classList.remove('hidden');
+
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>✅</span> <span>GPS Capturado</span>';
+        btn.className = 'px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-extrabold text-[11px] border border-emerald-300 shadow-2xs transition flex items-center gap-1';
+      }
+
+      // Si no ha escrito dirección, sugerirle una etiqueta referencial
+      if (addrInp && (!addrInp.value.trim() || addrInp.value.includes('GPS:'))) {
+        addrInp.value = `Mi Ubicación Actual (GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      }
+
+      if (typeof showToast === 'function') showToast('📍 Coordenadas capturadas con precisión.', 'success');
+    },
+    (err) => {
+      console.warn('Error al obtener GPS:', err);
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>📍</span> <span>Usar mi ubicación actual</span>';
+      }
+      if (typeof showToast === 'function') showToast('No se pudo acceder a tu ubicación. Por favor escribe tu dirección física.', 'warning');
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+};
+
+
+// =========================================================================
+// RASTREO EN VIVO CON LEAFLET MAP PARA EL PACIENTE (MODAL & CANAL EN TIEMPO REAL)
+// =========================================================================
+let appTrackingMap = null;
+let appTrackingInterval = null;
+let currentTrackingOrderCode = null;
+
+window.openDeliveryTrackingModal = async function(codigoOrden) {
+  const modal = document.getElementById('modal-delivery-tracking');
+  if (!modal) return;
+
+  currentTrackingOrderCode = codigoOrden || null;
+  modal.classList.remove('hidden');
+
+  await refrescarRastreoDelivery();
+
+  // Iniciar sondeo en tiempo real cada 3.5 segundos para escuchar movimientos del repartidor
+  if (appTrackingInterval) clearInterval(appTrackingInterval);
+  appTrackingInterval = setInterval(refrescarRastreoDelivery, 3500);
+};
+
+window.closeDeliveryTrackingModal = function() {
+  const modal = document.getElementById('modal-delivery-tracking');
+  if (modal) modal.classList.add('hidden');
+  if (appTrackingInterval) clearInterval(appTrackingInterval);
+  appTrackingInterval = null;
+};
+
+async function refrescarRastreoDelivery() {
+  try {
+    const url = currentTrackingOrderCode
+      ? `/api/delivery/tracking?farmacia_id=1&codigo_orden=${encodeURIComponent(currentTrackingOrderCode)}`
+      : `/api/delivery/tracking?farmacia_id=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.ok) return;
+
+    // Actualizar Textos y Badges
+    const orderTitle = document.getElementById('tracking-order-title');
+    const statusPill = document.getElementById('tracking-status-pill');
+    const etaPill = document.getElementById('tracking-eta-pill');
+    const courierName = document.getElementById('tracking-courier-name');
+    const courierPhone = document.getElementById('tracking-courier-phone');
+    const courierVeh = document.getElementById('tracking-courier-vehicle');
+    const addrDestino = document.getElementById('tracking-address-destino');
+
+    if (orderTitle) orderTitle.textContent = `#${data.codigo_orden}`;
+    if (statusPill) statusPill.textContent = data.estado_delivery === 'EN_CAMINO' ? '🛵 EN CAMINO' : (data.estado_delivery === 'ENTREGADO' ? '✅ ENTREGADO' : '📦 PREPARANDO');
+    if (etaPill) etaPill.textContent = `⏱️ ETA: ~${data.eta_minutos || 8} minutos`;
+    if (courierName && data.repartidor) courierName.textContent = data.repartidor.nombre || 'Pedro Ramírez';
+    if (courierPhone && data.repartidor) {
+      courierPhone.textContent = `Tel: ${data.repartidor.telefono || '809-555-8899'}`;
+      courierPhone.href = `tel:${(data.repartidor.telefono || '').replace(/\D/g, '')}`;
+    }
+    if (courierVeh && data.repartidor) courierVeh.textContent = data.repartidor.vehiculo || 'Motocicleta Honda C-90';
+    if (addrDestino) addrDestino.textContent = data.cliente_direccion || 'Tu Domicilio';
+
+    // Renderizar o actualizar Mapa Leaflet
+    renderizarMapaCliente(data);
+
+  } catch (err) {
+    console.warn('Error al refrescar rastreo:', err);
+  }
+}
+
+function renderizarMapaCliente(data) {
+  const mapContainer = document.getElementById('delivery-leaflet-map');
+  if (!mapContainer || typeof L === 'undefined') return;
+
+  const ptOrigen = (data.puntos && data.puntos.origen) || { lat: 18.4746, lng: -69.9328 };
+  const ptDestino = (data.puntos && data.puntos.destino) || { lat: 18.4835, lng: -69.9405 };
+  const ptMotorizado = (data.puntos && data.puntos.repartidor_actual) || { lat: 18.4791, lng: -69.9368 };
+
+  if (!appTrackingMap) {
+    appTrackingMap = L.map('delivery-leaflet-map').setView([ptMotorizado.lat, ptMotorizado.lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap Farmacia Davalsi'
+    }).addTo(appTrackingMap);
+  }
+
+  // Limpiar marcadores previos
+  appTrackingMap.eachLayer((layer) => {
+    if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+      appTrackingMap.removeLayer(layer);
+    }
+  });
+
+  // Punto A: Farmacia Davalsi (Origen)
+  const iconFarmacia = L.divIcon({
+    className: 'custom-pin-farmacia',
+    html: '<div style="background:#0f766e; color:white; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; font-size:16px; border:2px solid white; box-shadow:0 3px 8px rgba(0,0,0,0.4);">🏥</div>',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+  L.marker([ptOrigen.lat, ptOrigen.lng], { icon: iconFarmacia })
+    .addTo(appTrackingMap)
+    .bindPopup('<strong>Punto A: Farmacia Davalsi</strong><br>Salida del Despacho');
+
+  // Punto B: Domicilio del Paciente (Destino exacto capturado por GPS)
+  const iconDestino = L.divIcon({
+    className: 'custom-pin-destino',
+    html: '<div style="background:#e11d48; color:white; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; font-size:16px; border:2px solid white; box-shadow:0 3px 8px rgba(0,0,0,0.4);">📍</div>',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+  L.marker([ptDestino.lat, ptDestino.lng], { icon: iconDestino })
+    .addTo(appTrackingMap)
+    .bindPopup('<strong>Punto B: Tu Ubicación</strong><br>' + (data.cliente_direccion || 'Destino'));
+
+  // Marcador Dinámico: Moto del Mensajero en Movimiento
+  const iconMoto = L.divIcon({
+    className: 'custom-pin-moto',
+    html: '<div style="background:#f59e0b; color:white; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:20px; border:3px solid white; box-shadow:0 4px 12px rgba(245,158,11,0.6); animation:pulseLive 1.5s infinite;">🛵</div>',
+    iconSize: [38, 38],
+    iconAnchor: [19, 19]
+  });
+  L.marker([ptMotorizado.lat, ptMotorizado.lng], { icon: iconMoto })
+    .addTo(appTrackingMap)
+    .bindPopup(`<strong>${(data.repartidor && data.repartidor.nombre) || 'Repartidor en Vivo'}</strong><br>ETA: ~${data.eta_minutos || 8} min`)
+    .openPopup();
+
+  // Trazar línea de ruta
+  const latlngs = [
+    [ptOrigen.lat, ptOrigen.lng],
+    [ptMotorizado.lat, ptMotorizado.lng],
+    [ptDestino.lat, ptDestino.lng]
+  ];
+  L.polyline(latlngs, { color: '#0d9488', weight: 4, dashArray: '6, 6' }).addTo(appTrackingMap);
+  appTrackingMap.fitBounds(L.latLngBounds(latlngs), { padding: [35, 35] });
+  setTimeout(() => appTrackingMap.invalidateSize(), 200);
+}

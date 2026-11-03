@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Farmacia Davalsi - Portal del Repartidor & Delivery</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    @keyframes pulseLive {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.08); opacity: 0.75; }
+    }
+    .live-badge {
+      animation: pulseLive 1.8s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col selection:bg-teal-500 selection:text-white">
+
+  <!-- Encabezado de la Pantalla del Repartidor -->
+  <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-lg">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center border border-teal-400/40 shadow-xs">
+          <img src="/icon-192.png" alt="Farmacia Davalsi" class="w-full h-full object-contain" />
+        </div>
+        <div>
+          <h1 class="text-sm sm:text-base font-black tracking-tight text-white flex items-center gap-1.5">
+            <span>FARMACIA DAVALSI</span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">REPARTIDOR</span>
+          </h1>
+          <p id="courier-name-display" class="text-[11px] text-slate-400">Pedro Ramírez • Motorizado #3</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="cargarPedidosRepartidor()" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-400 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="Actualizar pedidos">
+          <span>🔄</span> <span class="hidden sm:inline">Actualizar</span>
+        </button>
+        <span id="gps-indicator" class="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-black flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> GPS Activo
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Contenedor Principal -->
+  <main class="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-5">
+
+    <!-- Panel de Transmisión en Vivo (si hay entrega activa) -->
+    <div id="live-delivery-banner" class="hidden p-4 rounded-2xl bg-gradient-to-r from-teal-900/40 via-emerald-900/30 to-slate-900 border-2 border-teal-500/70 shadow-xl space-y-3">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <span class="live-badge px-2.5 py-0.5 rounded-full bg-rose-500 text-white font-black text-[10px] uppercase tracking-wider">EN VIVO</span>
+          <span class="text-xs font-black text-teal-200">Transmitiendo Coordenadas GPS del Motorizado</span>
+        </div>
+        <span id="live-order-code" class="font-mono text-xs font-bold text-amber-300">ORD-DAV-2026</span>
+      </div>
+      <p class="text-xs text-slate-300">Tu GPS se está compartiendo con el cliente y el mapa central en tiempo real.</p>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="finalizarEntregaActual()" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer">
+          <span>✅</span> <span>Marcar como "Pedido Entregado con Éxito"</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Filtros de Estado -->
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <h2 class="text-base font-extrabold text-white flex items-center gap-2">
+        <span>📦</span> <span>Pedidos para Despacho a Domicilio</span>
+      </h2>
+      <div class="flex items-center gap-1 text-xs">
+        <button type="button" onclick="filtrarEstado('LISTO_PARA_ENTREGA')" id="btn-filtro-listos" class="px-3 py-1.5 rounded-xl bg-teal-600 text-white font-extrabold shadow transition cursor-pointer">
+          Listos para Entrega
+        </button>
+        <button type="button" onclick="filtrarEstado('TODOS')" id="btn-filtro-todos" class="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white font-bold transition cursor-pointer">
+          Todos los Pedidos
+        </button>
+      </div>
+    </div>
+
+    <!-- Lista Dinámica de Tarjetas de Pedidos -->
+    <div id="courier-orders-list" class="space-y-3.5">
+      <div class="p-8 text-center text-slate-500 text-xs">
+        Cargando pedidos para entrega...
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Notificaciones Toast -->
+  <div id="courier-toast" class="fixed bottom-5 right-5 z-50 transform transition-all duration-300 translate-y-20 opacity-0 pointer-events-none px-4 py-2.5 rounded-xl shadow-2xl text-xs font-black text-white bg-slate-900 border border-teal-500 flex items-center gap-2">
+    <span id="courier-toast-msg">Mensaje</span>
+  </div>
+
+  <script>
+    let activeOrders = [];
+    let currentLiveOrder = null;
+    let watchGpsId = null;
+    let currentFilter = 'LISTO_PARA_ENTREGA';
+
+    function showToast(msg, type = 'info') {
+      const toast = document.getElementById('courier-toast');
+      const text = document.getElementById('courier-toast-msg');
+      if (!toast || !text) return;
+      text.textContent = msg;
+      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-black text-white flex items-center gap-2 transition-all duration-300 translate-y-0 opacity-100 ${
+        type === 'error' ? 'bg-rose-900 border border-rose-500' : 'bg-slate-900 border border-teal-500'
+      }`;
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3500);
+    }
+
+    async function cargarPedidosRepartidor() {
+      try {
+        const res = await fetch(`/api/delivery/pedidos-pendientes?farmacia_id=1&estado=${currentFilter}`);
+        const data = await res.json();
+        if (data.ok) {
+          activeOrders = data.pedidos || [];
+          renderOrders();
+        }
+      } catch (err) {
+        console.error('Error cargando pedidos:', err);
+        showToast('Error al conectar con el servidor', 'error');
+      }
+    }
+
+    function filtrarEstado(estado) {
+      currentFilter = estado;
+      document.getElementById('btn-filtro-listos').className = estado === 'LISTO_PARA_ENTREGA'
+        ? 'px-3 py-1.5 rounded-xl bg-teal-600 text-white font-extrabold shadow transition cursor-pointer'
+        : 'px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white font-bold transition cursor-pointer';
+
+      document.getElementById('btn-filtro-todos').className = estado === 'TODOS'
+        ? 'px-3 py-1.5 rounded-xl bg-teal-600 text-white font-extrabold shadow transition cursor-pointer'
+        : 'px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white font-bold transition cursor-pointer';
+
+      cargarPedidosRepartidor();
+    }
+
+    function renderOrders() {
+      const container = document.getElementById('courier-orders-list');
+      if (!container) return;
+
+      if (!activeOrders.length) {
+        container.innerHTML = `
+          <div class="p-8 text-center bg-slate-900/60 rounded-2xl border border-slate-800 space-y-2">
+            <span class="text-3xl">🛵</span>
+            <p class="text-xs text-slate-400 font-bold">No hay pedidos pendientes de entrega en este momento.</p>
+            <p class="text-[11px] text-slate-500">Los nuevos pedidos con entrega a domicilio aparecerán automáticamente aquí.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = activeOrders.map(p => {
+        const lat = p.latitud_entrega || p.lat_destino || 18.4835;
+        const lng = p.longitud_entrega || p.lng_destino || -69.9405;
+        const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+        const wazeUrl = `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
+        const phone = (p.telefono_contacto || p.cliente_telefono || '').replace(/\D/g, '');
+        const waLink = `https://wa.me/${phone.startsWith('1') ? phone : '1' + phone}?text=${encodeURIComponent(`Hola ${p.cliente_nombre}, te escribe el repartidor de Farmacia Davalsi. Voy en camino con tu pedido ${p.codigo_orden}.`)}`;
+        const isCurrentActive = currentLiveOrder && currentLiveOrder.codigo_orden === p.codigo_orden;
+
+        return `
+          <div class="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition shadow-md space-y-3.5">
+            <!-- Encabezado de la tarjeta -->
+            <div class="flex items-start justify-between gap-2 flex-wrap">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-xs font-black text-amber-300">#${p.codigo_orden}</span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                    p.estado_delivery === 'EN_CAMINO'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : p.estado_delivery === 'ENTREGADO'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
+                  }">
+                    ${p.estado_delivery === 'EN_CAMINO' ? '🛵 EN CAMINO' : p.estado_delivery === 'ENTREGADO' ? '✅ ENTREGADO' : '📦 LISTO PARA ENTREGA'}
+                  </span>
+                </div>
+                <h3 class="text-sm sm:text-base font-extrabold text-white mt-1">${p.cliente_nombre}</h3>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-bold text-slate-400">Total a Cobrar:</span>
+                <div class="text-sm font-black text-emerald-400 font-mono">RD$ ${(p.total_rd || 0).toFixed(2)}</div>
+              </div>
+            </div>
+
+            <!-- Detalle de Medicamentos -->
+            <div class="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs text-slate-300">
+              <span class="font-bold text-slate-400 block text-[10px] uppercase tracking-wider mb-0.5">Medicamentos a Entregar:</span>
+              <p class="font-medium">${p.medicamentos_detalle || 'Medicamentos solicitados por App'}</p>
+            </div>
+
+            <!-- Dirección y Contacto -->
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <div class="flex items-start gap-1.5">
+                <span class="text-teal-400 text-sm">📍</span>
+                <div>
+                  <strong class="text-white">Dirección:</strong> ${p.direccion_texto}
+                  <span class="block text-[10px] font-mono text-slate-500">GPS: (${lat.toFixed(4)}, ${lng.toFixed(4)})</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botones de Acción Rápida -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-800">
+              <!-- Llamada Directa -->
+              <a href="tel:${phone}" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-center font-extrabold text-xs transition flex items-center justify-center gap-1.5">
+                <span>📞</span> <span>Llamar</span>
+              </a>
+              <!-- WhatsApp -->
+              <a href="${waLink}" target="_blank" rel="noopener noreferrer" class="p-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-center font-extrabold text-xs border border-emerald-500/30 transition flex items-center justify-center gap-1.5">
+                <span>💬</span> <span>WhatsApp</span>
+              </a>
+              <!-- Abrir en Waze / Google Maps -->
+              <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="p-2.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 text-center font-extrabold text-xs border border-sky-500/30 transition flex items-center justify-center gap-1.5" title="Abrir navegación en Google Maps o Waze">
+                <span>🗺️</span> <span>Google Maps</span>
+              </a>
+              <!-- Iniciar Entrega en Vivo -->
+              ${
+                isCurrentActive
+                  ? `
+                  <button type="button" onclick="finalizarEntregaActual()" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-center font-black text-xs shadow transition flex items-center justify-center gap-1.5 cursor-pointer">
+                    <span>✅</span> <span>Finalizar</span>
+                  </button>
+                `
+                  : `
+                  <button type="button" onclick="iniciarEntregaEnVivo('${p.codigo_orden}', ${lat}, ${lng})" class="p-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-slate-950 text-center font-black text-xs shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer">
+                    <span>🚀</span> <span>Iniciar Entrega</span>
+                  </button>
+                `
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================================
+    // TRANSMISION EN VIVO DEL GPS DEL REPARTIDOR HACIA LA APP DEL CLIENTE
+    // =========================================================================
+    function iniciarEntregaEnVivo(codigoOrden, latDestino, lngDestino) {
+      currentLiveOrder = {
+        codigo_orden: codigoOrden,
+        latDestino,
+        lngDestino
+      };
+
+      document.getElementById('live-delivery-banner').classList.remove('hidden');
+      document.getElementById('live-order-code').textContent = codigoOrden;
+      showToast(`🚀 Entrega en vivo iniciada para ${codigoOrden}`);
+
+      // Actualizar estado en servidor a EN_CAMINO
+      fetch('/api/delivery/iniciar-entrega', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          farmacia_id: 1,
+          codigo_orden: codigoOrden,
+          latitud: 18.4746,
+          longitud: -69.9328
+        })
+      });
+
+      // Iniciar seguimiento continuo de GPS mediante watchPosition
+      if (navigator.geolocation) {
+        if (watchGpsId) navigator.geolocation.clearWatch(watchGpsId);
+
+        watchGpsId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const cLat = pos.coords.latitude;
+            const cLng = pos.coords.longitude;
+            transmitirGpsAlServidor(codigoOrden, cLat, cLng);
+          },
+          (err) => {
+            console.warn('Error en watchPosition:', err);
+            // Simular avance fluido si el dispositivo no permite GPS real en desarrollo
+            simularTrayectoriaGPS(codigoOrden, latDestino, lngDestino);
+          },
+          { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 }
+        );
+      } else {
+        simularTrayectoriaGPS(codigoOrden, latDestino, lngDestino);
+      }
+
+      renderOrders();
+    }
+
+    let simInterval = null;
+    function simularTrayectoriaGPS(codigoOrden, latDestino, lngDestino) {
+      if (simInterval) clearInterval(simInterval);
+      let step = 0;
+      const totalSteps = 25;
+      const startLat = 18.4746;
+      const startLng = -69.9328;
+
+      simInterval = setInterval(() => {
+        if (!currentLiveOrder || currentLiveOrder.codigo_orden !== codigoOrden) {
+          clearInterval(simInterval);
+          return;
+        }
+        step++;
+        const factor = Math.min(1.0, step / totalSteps);
+        const curLat = startLat + (latDestino - startLat) * factor;
+        const curLng = startLng + (lngDestino - startLng) * factor;
+        const eta = Math.max(1, Math.round((1.0 - factor) * 15));
+
+        transmitirGpsAlServidor(codigoOrden, curLat, curLng, eta);
+
+        if (factor >= 1.0) {
+          clearInterval(simInterval);
+          showToast('🛵 Has llegado al destino del cliente.');
+        }
+      }, 4000);
+    }
+
+    async function transmitirGpsAlServidor(codigoOrden, lat, lng, eta = null) {
+      try {
+        await fetch('/api/delivery/actualizar-gps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            farmacia_id: 1,
+            codigo_orden: codigoOrden,
+            latitud: lat,
+            longitud: lng,
+            estado: 'EN_CAMINO',
+            eta_minutos: eta
+          })
+        });
+      } catch (e) {
+        console.warn('Error transmitiendo GPS:', e);
+      }
+    }
+
+    async function finalizarEntregaActual() {
+      if (!currentLiveOrder) return;
+      const cod = currentLiveOrder.codigo_orden;
+      if (watchGpsId) navigator.geolocation.clearWatch(watchGpsId);
+      if (simInterval) clearInterval(simInterval);
+
+      try {
+        await fetch('/api/delivery/actualizar-estado', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            farmacia_id: 1,
+            codigo_orden: cod,
+            estado_delivery: 'ENTREGADO',
+            progreso_pct: 100.0
+          })
+        });
+        showToast('✅ Entrega completada y registrada exitosamente.', 'success');
+      } catch (e) {
+        console.error(e);
+      }
+
+      currentLiveOrder = null;
+      document.getElementById('live-delivery-banner').classList.add('hidden');
+      cargarPedidosRepartidor();
+    }
+
+    // Inicializar al cargar
+    document.addEventListener('DOMContentLoaded', () => {
+      cargarPedidosRepartidor();
+      // Refrescar cada 15 segundos
+      setInterval(cargarPedidosRepartidor, 15000);
+    });
+  </script>
+</body>
+</html>

@@ -814,6 +814,31 @@ class DatabaseManager:
             """)
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN direccion_texto TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN latitud_entrega REAL DEFAULT 18.4835")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN longitud_entrega REAL DEFAULT -69.9405")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN telefono_contacto TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN medicamentos_detalle TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE pedidos_delivery_tracking ADD COLUMN total_rd REAL DEFAULT 0.0")
+        except Exception:
+            pass
+
 
         try:
             conn.execute("""
@@ -9110,4 +9135,241 @@ class DatabaseManager:
                     {k: (round(v, 2) if isinstance(v, float) else v) for k, v in p.items()}
                     for p in top_productos_rentables
                 ]
+            }
+
+
+    def list_delivery_orders_for_courier(self, farmacia_id: int = 1, estado: str = "LISTO_PARA_ENTREGA") -> List[Dict[str, Any]]:
+        """Lista los pedidos en estado LISTO_PARA_ENTREGA o EN_CAMINO para la pantalla de delivery."""
+        try:
+            fid = int(farmacia_id or 1)
+        except Exception:
+            fid = 1
+
+        with self._get_connection(fid) as conn:
+            if estado == "TODOS":
+                rows = conn.execute("""
+                    SELECT * FROM pedidos_delivery_tracking
+                    WHERE farmacia_id = ?
+                    ORDER BY id DESC LIMIT 50
+                """, (fid,)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT * FROM pedidos_delivery_tracking
+                    WHERE farmacia_id = ? AND (estado_delivery = ? OR estado_delivery = 'EN_CAMINO' OR estado_delivery = 'LISTO_PARA_ENTREGA')
+                    ORDER BY id DESC LIMIT 50
+                """, (fid, estado)).fetchall()
+
+            # Si no hay ninguno, crear uno inicial listo para entrega de prueba
+            if not rows:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute("""
+                    INSERT INTO pedidos_delivery_tracking (
+                        farmacia_id, codigo_orden, cliente_nombre, cliente_telefono, cliente_direccion,
+                        direccion_texto, latitud_entrega, longitud_entrega, telefono_contacto,
+                        medicamentos_detalle, total_rd,
+                        repartidor_nombre, repartidor_telefono, repartidor_vehiculo, estado_delivery,
+                        lat_origen, lng_origen, lat_destino, lng_destino,
+                        lat_repartidor, lng_repartidor, progreso_pct, eta_minutos,
+                        fecha_despacho, fecha_actualizacion
+                    ) VALUES (
+                        ?, 'PED-DAV-9041', 'Carlos Morales Gómez', '809-555-1234', 'Calle Francisco Prats Ramírez #14, Piantini',
+                        'Calle Francisco Prats Ramírez #14, Piantini, Santo Domingo', 18.4835, -69.9405, '809-555-1234',
+                        '1x Caja Paracetamol 500mg, 1x Frasco Alcohol Isopropílico', 385.0,
+                        'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'LISTO_PARA_ENTREGA',
+                        18.4746, -69.9328, 18.4835, -69.9405,
+                        18.4746, -69.9328, 0.0, 15,
+                        ?, ?
+                    )
+                """, (fid, now_str, now_str))
+                rows = conn.execute("SELECT * FROM pedidos_delivery_tracking WHERE farmacia_id = ? ORDER BY id DESC LIMIT 1", (fid,)).fetchall()
+
+            results = []
+            for r in rows:
+                d = dict(r)
+                # Formatear coordenadas de entrega
+                lat = d.get("latitud_entrega") or d.get("lat_destino") or 18.4835
+                lng = d.get("longitud_entrega") or d.get("lng_destino") or -69.9405
+                d["latitud_entrega"] = float(lat)
+                d["longitud_entrega"] = float(lng)
+                d["direccion_texto"] = d.get("direccion_texto") or d.get("cliente_direccion") or "Dirección en Santo Domingo"
+                d["telefono_contacto"] = d.get("telefono_contacto") or d.get("cliente_telefono") or "8095551234"
+                results.append(d)
+            return results
+
+    def update_courier_live_location(self, farmacia_id: int, codigo_orden: str, lat: float, lng: float, estado: str = "EN_CAMINO", eta_minutos: int = None) -> Dict[str, Any]:
+        """Actualiza la posición GPS en vivo del repartidor y recalcula el progreso."""
+        try:
+            fid = int(farmacia_id or 1)
+        except Exception:
+            fid = 1
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_connection(fid) as conn:
+            row = conn.execute("SELECT * FROM pedidos_delivery_tracking WHERE codigo_orden = ? AND farmacia_id = ?", (str(codigo_orden).strip(), fid)).fetchone()
+            if not row:
+                return {"ok": False, "error": "Pedido no encontrado"}
+
+            rec = dict(row)
+            lat_dest = float(rec.get("latitud_entrega") or rec.get("lat_destino") or 18.4835)
+            lng_dest = float(rec.get("longitud_entrega") or rec.get("lng_destino") or -69.9405)
+            lat_orig = float(rec.get("lat_origen") or 18.4746)
+            lng_orig = float(rec.get("lng_origen") or -69.9328)
+
+            # Cálculo de distancia restante vs total
+            import math
+            def dist_calc(y1, x1, y2, x2):
+                return math.sqrt((y2 - y1)**2 + (x2 - x1)**2)
+
+            total_dist = dist_calc(lat_orig, lng_orig, lat_dest, lng_dest)
+            curr_dist = dist_calc(lat, lng, lat_dest, lng_dest)
+            
+            prog = 10.0
+            if total_dist > 0.0001:
+                prog = max(5.0, min(95.0, (1.0 - (curr_dist / total_dist)) * 100.0))
+            if estado == "ENTREGADO":
+                prog = 100.0
+
+            if eta_minutos is None:
+                # Estimar aprox 1 minuto por cada 0.002 grados (~200m)
+                eta_minutos = max(1, int(curr_dist / 0.002)) if estado != "ENTREGADO" else 0
+
+            conn.execute("""
+                UPDATE pedidos_delivery_tracking
+                SET lat_repartidor = ?, lng_repartidor = ?,
+                    estado_delivery = ?, progreso_pct = ?,
+                    eta_minutos = ?, fecha_actualizacion = ?
+                WHERE codigo_orden = ? AND farmacia_id = ?
+            """, (float(lat), float(lng), estado, round(prog, 1), eta_minutos, now_str, str(codigo_orden).strip(), fid))
+
+            return {
+                "ok": True,
+                "codigo_orden": codigo_orden,
+                "estado_delivery": estado,
+                "lat_repartidor": float(lat),
+                "lng_repartidor": float(lng),
+                "progreso_pct": round(prog, 1),
+                "eta_minutos": eta_minutos,
+                "fecha_actualizacion": now_str
+            }
+
+
+    # =========================================================================
+    # 16. ALGORITMO INTELIGENTE DE REABASTECIMIENTO ROP & STOCK MAXIMO (15-21 DIAS)
+    # =========================================================================
+    def calculate_smart_rop_and_restock(self, farmacia_id: int = 1, dias_tope_maximo: int = 21, lead_time_dias: int = 3) -> Dict[str, Any]:
+        """
+        Calcula el Punto de Reorden (ROP) y Stock Máximo sin sobrestock:
+        - ROP = (Venta Promedio Diaria [30d] * Lead Time [días]) + Stock de Seguridad.
+        - Límite Máximo Anti-Estancamiento: Tope estricto de reposición de 15 a 21 días de consumo.
+        - Detección de Stock Dormido: > 30-45 días con rotación nula -> Bloquea compra y alerta:
+          'Artículo de baja rotación: no se recomienda reabastecer hasta liquidar el lote actual'.
+        """
+        try:
+            fid = int(farmacia_id or 1)
+        except Exception:
+            fid = 1
+
+        dias_tope = max(15, min(21, int(dias_tope_maximo or 21)))
+        lead_time = max(1, int(lead_time_dias or 3))
+
+        with self._get_connection(fid) as conn:
+            prods = conn.execute("""
+                SELECT p.*,
+                       COALESCE(sales.unidades_vendidas_mes, 0) AS unidades_vendidas_mes,
+                       COALESCE(sales.dias_con_ventas, 0) AS dias_con_ventas
+                FROM productos p
+                LEFT JOIN (
+                    SELECT dt.producto_id,
+                           SUM(dt.unidades_minimas_descontadas) AS unidades_vendidas_mes,
+                           COUNT(DISTINCT date(t.fecha_hora)) AS dias_con_ventas
+                    FROM detalle_transacciones dt
+                    JOIN transacciones t ON t.id = dt.transaccion_id
+                    WHERE t.farmacia_id = ? AND t.fecha_hora >= datetime('now', '-30 days')
+                    GROUP BY dt.producto_id
+                ) sales ON sales.producto_id = p.id
+                WHERE p.activo = 1 AND p.farmacia_id = ?
+                ORDER BY p.nombre_comercial ASC
+            """, (fid, fid)).fetchall()
+
+            analisis_productos = []
+            total_inversion_sugerida = 0.0
+            alertas_stock_dormido = 0
+            alertas_rop_alcanzado = 0
+
+            for pr in prods:
+                p = dict(pr)
+                p_id = p["id"]
+                nombre = p["nombre_comercial"]
+                stock_actual = int(p.get("stock_total_unidades") or 0)
+                precio_costo = float(p.get("precio_costo") or (p.get("precio_base", 10.0) * 0.7))
+                ventas_30d = float(p.get("unidades_vendidas_mes") or 0.0)
+
+                # Venta diaria promedio
+                venta_diaria_promedio = ventas_30d / 30.0
+
+                # Detección de Stock Dormido (> 30-45 días sin rotación)
+                es_stock_dormido = False
+                if ventas_30d <= 0 and stock_actual > 0:
+                    es_stock_dormido = True
+                    alertas_stock_dormido += 1
+
+                # Stock de Seguridad (calculado como 3 a 5 días de consumo o stock_minimo base)
+                stock_seguridad = max(int(p.get("stock_minimo_alerta") or 5), int(venta_diaria_promedio * 4))
+
+                # ROP = (Venta Promedio Diaria x Lead Time) + Stock de Seguridad
+                rop = int(round((venta_diaria_promedio * lead_time) + stock_seguridad))
+
+                # Límite Máximo Anti-Estancamiento (Tope de 15 a 21 días de consumo proyectado)
+                stock_maximo_permitido = int(round(venta_diaria_promedio * dias_tope)) + stock_seguridad
+                if stock_maximo_permitido < rop:
+                    stock_maximo_permitido = rop + max(5, int(venta_diaria_promedio * 7))
+
+                # Cantidad sugerida a pedir sin congelar capital
+                unidades_sugeridas = 0
+                recomendacion = "STOCK_SALUDABLE"
+                mensaje_farma = f"Stock en nivel óptimo ({stock_actual} unid.). No requiere compras."
+
+                if es_stock_dormido:
+                    recomendacion = "STOCK_DORMIDO_BLOQUEADO"
+                    unidades_sugeridas = 0
+                    mensaje_farma = "⚠️ Artículo de baja rotación: no se recomienda reabastecer hasta liquidar el lote actual."
+                elif stock_actual <= rop:
+                    alertas_rop_alcanzado += 1
+                    recomendacion = "REABASTECER_ROP"
+                    # Pedir sólo hasta el tope de 15-21 días (sin sobrestock)
+                    unidades_sugeridas = max(0, stock_maximo_permitido - stock_actual)
+                    if unidades_sugeridas > 0:
+                        inversion = unidades_sugeridas * precio_costo
+                        total_inversion_sugerida += inversion
+                        mensaje_farma = f"💡 ROP alcanzado (Stock: {stock_actual} <= ROP: {rop}). Pedir exactamente {unidades_sugeridas} unid. para cubrir {dias_tope} días de consumo sin sobrestock."
+
+                analisis_productos.append({
+                    "producto_id": p_id,
+                    "nombre_comercial": nombre,
+                    "principio_activo": p.get("principio_activo", ""),
+                    "ubicacion_anaquel": p.get("ubicacion_anaquel", "A-01"),
+                    "stock_actual": stock_actual,
+                    "ventas_ultimos_30d": int(ventas_30d),
+                    "venta_diaria_promedio": round(venta_diaria_promedio, 2),
+                    "lead_time_dias": lead_time,
+                    "stock_seguridad": stock_seguridad,
+                    "punto_reorden_rop": rop,
+                    "tope_maximo_dias": dias_tope,
+                    "stock_maximo_anti_estancamiento": stock_maximo_permitido,
+                    "unidades_sugeridas": unidades_sugeridas,
+                    "precio_costo": precio_costo,
+                    "inversion_estimada_rd": round(unidades_sugeridas * precio_costo, 2),
+                    "recomendacion": recomendacion,
+                    "mensaje_farma": mensaje_farma,
+                    "es_stock_dormido": es_stock_dormido
+                })
+
+            return {
+                "ok": True,
+                "dias_tope_cobertura": dias_tope,
+                "total_productos_analizados": len(analisis_productos),
+                "alertas_rop_alcanzado": alertas_rop_alcanzado,
+                "alertas_stock_dormido": alertas_stock_dormido,
+                "inversion_total_sugerida_rd": round(total_inversion_sugerida, 2),
+                "productos": analisis_productos
             }

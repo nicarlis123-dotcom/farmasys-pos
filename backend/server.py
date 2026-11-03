@@ -624,6 +624,44 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
 
+            if path == "/api/farma/smart-reorder-rop":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                dias_tope = int(query.get("dias_tope", ["21"])[0])
+                lead_time = int(query.get("lead_time", ["3"])[0])
+                res = db.calculate_smart_rop_and_restock(farmacia_id, dias_tope_maximo=dias_tope, lead_time_dias=lead_time)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/farma/sales-advisor":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                # Analizar cross-selling ético basado en items actuales
+                res = {
+                    "ok": True,
+                    "reglas_cross_selling": [
+                        {
+                            "condicion": "ANTIBIOTICO",
+                            "medicamentos": ["amoxicilina", "azitromicina", "ciprofloxacina", "trimetoprim", "nitrofurantoina"],
+                            "consejo_clinico": "Consejo clínico: Sugiera un probiótico o protector gastrointestinal para preservar la microbiota del paciente.",
+                            "terapias_complementarias": ["Probióticos Multi-Cepa Flora Intestinal", "Omeprazol 20mg Gastroprotector"]
+                        },
+                        {
+                            "condicion": "CRONICO_CARDIO_DIABETES",
+                            "medicamentos": ["losartan", "enalapril", "metformina", "amlodipina", "glibenclamida"],
+                            "consejo_clinico": "Consejo preventivo: Sugiera insumos esenciales de monitoreo (tiras de glucemia, tensiómetros, lancetas) para asegurar la adherencia.",
+                            "terapias_complementarias": ["Tensiómetro Digital de Brazo", "Glucómetro Digital con Lancetas"]
+                        }
+                    ]
+                }
+                self._send_json(200, res)
+                return
+
+            if path == "/api/delivery/pedidos-pendientes":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                estado = query.get("estado", ["LISTO_PARA_ENTREGA"])[0]
+                orders = db.list_delivery_orders_for_courier(farmacia_id=farmacia_id, estado=estado)
+                self._send_json(200, {"ok": True, "pedidos": orders})
+                return
+
             if path == "/api/delivery/tracking":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
                 order_code = query.get("codigo_orden", [None])[0]
@@ -796,6 +834,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path in ("/pos", "/pos/", "/sistema", "/sistema/", "/admin", "/admin/"):
                 rel_path = "sistema.html"
+            elif path in ("/delivery", "/delivery/", "/repartidor", "/repartidor/", "/delivery.html"):
+                rel_path = "delivery.html"
             elif path in ("/", "/app", "/app/", "/index.html"):
                 rel_path = "index.html"
             else:
@@ -1255,6 +1295,27 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(csv_bytes)
                 return
 
+            if path == "/api/delivery/iniciar-entrega":
+                farmacia_id = safe_farmacia_id(body, 1)
+                order_code = str(body.get("codigo_orden", "")).strip()
+                lat = float(body.get("latitud", 18.4746))
+                lng = float(body.get("longitud", -69.9328))
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado="EN_CAMINO")
+                self._send_json(200, res)
+                return
+
+            if path == "/api/delivery/actualizar-gps":
+                farmacia_id = safe_farmacia_id(body, 1)
+                order_code = str(body.get("codigo_orden", "")).strip()
+                lat = float(body.get("latitud", 18.4746))
+                lng = float(body.get("longitud", -69.9328))
+                estado = str(body.get("estado", "EN_CAMINO"))
+                eta = body.get("eta_minutos")
+                eta_val = int(eta) if eta is not None else None
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado=estado, eta_minutos=eta_val)
+                self._send_json(200, res)
+                return
+
             if path == "/api/delivery/actualizar-estado":
                 farmacia_id = safe_farmacia_id(body, 1)
                 order_code = str(body.get("codigo_orden", ""))
@@ -1382,21 +1443,39 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                     if body.get("modalidad_entrega") == "DOMICILIO" or "DOMICILIO" in str(body.get("cliente_direccion", "")):
                         with db._get_connection(order_record["farmacia_id"]) as conn:
                             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            # Extraer coordenadas GPS del cliente si fueron capturadas
+                            c_lat = float(body.get("latitud_entrega", 18.4835))
+                            c_lng = float(body.get("longitud_entrega", -69.9405))
+                            c_dir_txt = str(body.get("direccion_texto", body.get("cliente_direccion", "")))
+                            c_tel = str(body.get("telefono_contacto", body.get("cliente_telefono", "")))
+                            c_meds = ", ".join([f"{it.get('cantidad', 1)}x {it.get('presentacion', 'Unid.')} {it.get('product', {}).get('nombre_comercial', '')}" for it in body.get("items", [])]) or "Medicamentos varios"
+                            c_tot = float(order_record.get("total_neto", 0.0))
+
                             conn.execute("""
                                 INSERT OR REPLACE INTO pedidos_delivery_tracking (
                                     farmacia_id, codigo_orden, cliente_nombre, cliente_telefono, cliente_direccion,
+                                    direccion_texto, latitud_entrega, longitud_entrega, telefono_contacto,
+                                    medicamentos_detalle, total_rd,
                                     repartidor_nombre, repartidor_telefono, repartidor_vehiculo, estado_delivery,
                                     lat_origen, lng_origen, lat_destino, lng_destino,
                                     lat_repartidor, lng_repartidor, progreso_pct, eta_minutos,
                                     fecha_despacho, fecha_actualizacion
                                 ) VALUES (
                                     ?, ?, ?, ?, ?,
-                                    'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'EN_CAMINO',
-                                    18.4746, -69.9328, 18.4835, -69.9405,
-                                    18.4760, -69.9340, 25.0, 12,
+                                    ?, ?, ?, ?,
+                                    ?, ?,
+                                    'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'LISTO_PARA_ENTREGA',
+                                    18.4746, -69.9328, ?, ?,
+                                    18.4746, -69.9328, 0.0, 15,
                                     ?, ?
                                 )
-                            """, (order_record["farmacia_id"], order_record["codigo_orden"], order_record.get("cliente_nombre", "Cliente"), order_record.get("cliente_telefono", ""), order_record.get("cliente_direccion", ""), now_str, now_str))
+                            """, (
+                                order_record["farmacia_id"], order_record["codigo_orden"], order_record.get("cliente_nombre", "Cliente"), order_record.get("cliente_telefono", ""), order_record.get("cliente_direccion", ""),
+                                c_dir_txt, c_lat, c_lng, c_tel,
+                                c_meds, c_tot,
+                                c_lat, c_lng,
+                                now_str, now_str
+                            ))
                 except Exception:
                     pass
 

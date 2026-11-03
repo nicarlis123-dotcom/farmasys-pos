@@ -1,7 +1,7 @@
 {
-  "name": "FarmaSys - Sistema POS de Ventas",
-  "short_name": "FarmaSys POS",
-  "description": "Sistema de Ventas, Facturación e Inventario de Farmacia Física FarmaSys (RD$)",
+  "name": "Farmacia Davalsi POS",
+  "short_name": "Davalsi POS",
+  "description": "Sistema de Ventas, Facturación e Inventario de Farmacia Física Farmacia Davalsi (RD$)",
   "start_url": "/sistema",
   "display": "standalone",
   "background_color": "#0f172a",

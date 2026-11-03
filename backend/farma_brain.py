@@ -41,7 +41,21 @@ except ImportError:
 
 
 class FarmaBrain:
-    """Cerebro clínico y farmacológico de FarmaSys impulsado por Gemini 2.5 Flash."""
+    """
+    Cerebro clínico y comercial de Farmacia Davalsi.
+    Directriz rectora:
+    'Eres Farma, el copiloto clínico y comercial de Farmacia Davalsi. Tu tono es profesional, médico,
+    perspicaz, cálido y altamente ético. Cuidas la salud del paciente y la rentabilidad prudente del negocio.
+    Corriges errores antes de que cuesten dinero o salud, y aportas consejos con sabiduría operativa
+    sin ser intrusiva ni repetitiva.'
+    """
+    SYSTEM_PROMPT_CORE = (
+        "Eres Farma, el copiloto clínico y comercial de Farmacia Davalsi. "
+        "Tu tono es profesional, médico, perspicaz, cálido y altamente ético. "
+        "Cuidas la salud del paciente y la rentabilidad prudente del negocio. "
+        "Corriges errores antes de que cuesten dinero o salud, y aportas consejos con sabiduría operativa "
+        "sin ser intrusiva ni repetitiva."
+    )
 
     MODEL_NAME = "gemini-2.5-flash"
 
@@ -553,20 +567,109 @@ Responde únicamente con JSON:
 
     def _audit_clinical_safety(self, items_carrito: List[Dict[str, Any]], paciente: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Cruza signos vitales (TA, IMC, glucemia), alergias y enfermedades crónicas
-        contra los medicamentos presentes en el carrito.
+        Auditoría clínica estricta de Farmacia Davalsi:
+        1. Duplicidad Terapéutica (mismo principio activo o misma familia farmacológica).
+        2. Interacciones Farmacológicas de Alto Riesgo (AINEs + anticoagulantes, duplicidad antihipertensiva).
+        3. Detección de Errores de Digitación (cantidades desproporcionadas > 20 unid. o dosis atípicas).
+        4. Alergias del paciente (penicilinas, sulfas, AINEs).
         """
         alertas = []
         bloquear_cobro = False
         nivel_riesgo = "VERDE"
+        acciones_sugeridas = []
 
         alergias_paciente = str(paciente.get("alergias_medicamentosas") or paciente.get("alergias") or "").lower()
         condiciones_cronicas = str(paciente.get("condiciones_cronicas") or paciente.get("diagnostico_cronico") or "").lower()
 
-        vitales = paciente.get("vitales", {})
-        presion_sis = vitales.get("presion_sistolica") or paciente.get("presion_sistolica")
-        presion_dia = vitales.get("presion_diastolica") or paciente.get("presion_diastolica")
-        glucemia = vitales.get("glucemia_mg_dl") or paciente.get("glicemia_mg_dl")
+        # A) EVALUAR DUPLICIDAD TERAPÉUTICA EN EL CARRITO
+        principios_vistos = {}
+        familias_vistas = {}
+
+        for it in items_carrito:
+            p_id = it.get("producto_id") or it.get("id") or 0
+            nom = str(it.get("nombre_comercial") or "").strip()
+            pa = str(it.get("principio_activo") or it.get("principio_activo_dci") or "").strip().lower()
+            fam = str(it.get("familia_farmacologica") or it.get("categoria") or "").strip().lower()
+            cant = int(it.get("cantidad") or 1)
+
+            # C) DETECCION DE ERRORES DE DIGITACION (Cantidades desproporcionadas)
+            if cant >= 20:
+                alertas.append({
+                    "tipo": "ERROR_DIGITACION_CANTIDAD",
+                    "severidad": "ADVERTENCIA",
+                    "producto": nom,
+                    "mensaje": f"⚠️ Posible error de digitación: Se han ingresado {cant} unidades de {nom}. Verifique si la cantidad es intencional antes de procesar.",
+                    "bloqueante": False
+                })
+                nivel_riesgo = "AMARILLO" if nivel_riesgo == "VERDE" else nivel_riesgo
+                acciones_sugeridas.append({"label": f"Corregir cantidad de {nom}", "action": "CORREGIR_CANTIDAD", "producto_id": p_id})
+
+            # Check Duplicidad de Principio Activo
+            if pa and len(pa) > 2:
+                # Extraer primer token relevante
+                token_pa = pa.split()[0].replace('/', '').replace('+', '').strip()
+                if token_pa in principios_vistos:
+                    ant_nom = principios_vistos[token_pa]
+                    bloquear_cobro = True
+                    nivel_riesgo = "ROJO"
+                    alertas.append({
+                        "tipo": "DUPLICIDAD_TERAPEUTICA",
+                        "severidad": "CRÍTICA",
+                        "producto": nom,
+                        "mensaje": f"⚠️ DUPLICIDAD TERAPÉUTICA CRÍTICA: Se agregaron '{nom}' y '{ant_nom}' con el mismo principio activo ({token_pa.title()}). Riesgo inminente de sobredosis o toxicidad.",
+                        "bloqueante": True
+                    })
+                    acciones_sugeridas.append({"label": f"Descartar {nom}", "action": "QUITAR_PRODUCTO", "producto_id": p_id})
+                else:
+                    principios_vistos[token_pa] = nom
+
+            # Check Familia AINEs en duplicidad
+            es_aine = any(a in nom.lower() or a in pa for a in ["ibuprofeno", "diclofenac", "naproxeno", "ketorolaco", "meloxicam", "aspirina"])
+            if es_aine:
+                if "aine_existente" in familias_vistas:
+                    ant_aine = familias_vistas["aine_existente"]
+                    alertas.append({
+                        "tipo": "DUPLICIDAD_AINES",
+                        "severidad": "ALTA",
+                        "producto": nom,
+                        "mensaje": f"⚠️ Doble antiinflamatorio (AINE): Se combina '{nom}' con '{ant_aine}'. Aumenta exponencialmente el riesgo de úlcera gástrica e insuficiencia renal.",
+                        "bloqueante": False
+                    })
+                    nivel_riesgo = "ROJO"
+                else:
+                    familias_vistas["aine_existente"] = nom
+
+            # Check Duplicidad Antihipertensiva (IECA / ARA-II)
+            es_ieca_ara = any(h in pa or h in nom.lower() for h in ["losartan", "losartán", "enalapril", "candesartan", "valsartan", "captopril", "ramipril"])
+            if es_ieca_ara:
+                if "ieca_ara_existente" in familias_vistas:
+                    ant_h = familias_vistas["ieca_ara_existente"]
+                    alertas.append({
+                        "tipo": "INTERACCION_ANTIHIPERTENSIVA",
+                        "severidad": "ALTA",
+                        "producto": nom,
+                        "mensaje": f"⚠️ Doble bloqueo SRAA: Se combina '{nom}' con '{ant_h}'. Alto riesgo de hipotensión severa e hiperpotasemia.",
+                        "bloqueante": False
+                    })
+                    nivel_riesgo = "AMARILLO" if nivel_riesgo == "VERDE" else nivel_riesgo
+                else:
+                    familias_vistas["ieca_ara_existente"] = nom
+
+        # B) INTERACCIONES DE ALTO RIESGO: AINEs + Anticoagulantes / Hipertensión Severa
+        tiene_aine = "aine_existente" in familias_vistas
+        for it in items_carrito:
+            nom_c = str(it.get("nombre_comercial") or "").lower()
+            pa_c = str(it.get("principio_activo") or "").lower()
+            es_anticoag = any(ac in nom_c or ac in pa_c for ac in ["warfarina", "rivaroxaban", "apixaban", "dabigatran", "clopidogrel"])
+            if es_anticoag and tiene_aine:
+                bloquear_cobro = True
+                nivel_riesgo = "ROJO"
+                alertas.append({
+                    "tipo": "INTERACCION_MAYOR_AINE_ANTICOAGULANTE",
+                    "severidad": "CRÍTICA",
+                    "mensaje": "⚠️ CONTRAINDICACIÓN MAYOR: AINE combinado con Anticoagulante/Antiagregante. Riesgo crítico de hemorragia digestiva severa.",
+                    "bloqueante": True
+                })
 
         for item in items_carrito:
             nombre = str(item.get("nombre_comercial", "")).lower()
@@ -667,7 +770,7 @@ Responde únicamente con JSON:
         if auditoria.get("nivel_riesgo") == "AMARILLO":
             return f"He revisado el expediente del paciente y detecté precauciones clínicas moderadas con la medicación seleccionada. Verifica la posología antes de despachar."
 
-        return "Prescripción y parámetros revisados correctamente. Todo en orden para facturar con seguridad clínica."
+        return "Hola, soy Farma, el copiloto inteligente de Farmacia Davalsi. ¿En qué puedo asistirte hoy?"
 
 
 
