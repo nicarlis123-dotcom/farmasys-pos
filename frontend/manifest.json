@@ -1,12 +1,15 @@
 {
   "name": "Farmacia Davalsi — App Móvil de Pacientes",
   "short_name": "Farmacia Davalsi",
+  "id": "/app",
   "description": "Catálogo de Medicamentos y Cuidado Personal por Caja, Blíster y Unidad con Envío a Domicilio y Seguro ARS.",
   "start_url": "/app",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0d9488",
   "orientation": "portrait-primary",
+  "categories": ["medical", "health", "shopping"],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -19,6 +22,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Rastrear Delivery",
+      "short_name": "Rastreo",
+      "description": "Rastrea en tiempo real el motorizado con tu pedido",
+      "url": "/app?action=tracking",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Medicamentos Crónicos",
+      "short_name": "Crónicos",
+      "description": "Control de dosis y recordatorios de 5 días",
+      "url": "/app?action=chronic",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

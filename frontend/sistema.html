@@ -1,6 +1,32 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <script>
+    // Soporte transparente para ejecución local o file://: redirige peticiones /api al backend en localhost:8080
+    (function() {
+      const origFetch = window.fetch;
+      window.fetch = function(url, opts) {
+        if (typeof url === 'string' && url.startsWith('/')) {
+          if (window.location.protocol === 'file:' || !window.location.host) {
+            url = 'http://localhost:8080' + url;
+          }
+        }
+        return origFetch(url, opts);
+      };
+    })();
+  </script>
+
+  <script>
+    // Alias transparente para compatibilidad con código existente
+    (function() {
+      const origGet = document.getElementById.bind(document);
+      document.getElementById = function(id) {
+        if (id === 'pos-barcode-input') return origGet('txt-buscar-medicamento') || origGet('pos-barcode-input');
+        return origGet(id);
+      };
+    })();
+  </script>
+
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FarmaSys — Sistema POS & Control de Farmacia (RD$)</title>
@@ -29,6 +55,78 @@
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <meta name="theme-color" content="#0f766e" />
   <link rel="stylesheet" href="/styles.css" />
+  <!-- Leaflet.js para Mapa Interactivo de Monitoreo de Delivery GPS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    /* Estilos para el Menú Desplegable Maestro de Funciones */
+    .sys-dropdown-menu {
+      display: none;
+    }
+    .sys-dropdown-container.open .sys-dropdown-menu {
+      display: block !important;
+      animation: sysDropdownSlideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .sys-dropdown-container.open .dropdown-arrow {
+      transform: rotate(180deg);
+    }
+    @keyframes sysDropdownSlideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    /* FarmaBot RD: Botones de Acción Rápida IA */
+    #contenedor-botones-rapidos {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .btn-sugerencia-ia {
+      background: rgba(0, 210, 160, 0.15);
+      border: 1px solid #00D2A0;
+      color: #00D2A0;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-sugerencia-ia:hover {
+      background: #00D2A0;
+      color: #0b132b;
+    }
+  </style>
+
+
+  <script>
+    window.openPosQuejasModal = function(filter) {
+      const modal = document.getElementById('pos-quejas-modal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+      if (typeof loadPosQuejas === 'function') loadPosQuejas(filter);
+    };
+    window.closePosQuejasModal = function() {
+      const modal = document.getElementById('pos-quejas-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    };
+  </script>
+
 </head>
 <body class="min-h-screen flex flex-col bg-slate-100 text-slate-900">
   <!-- =====================================================================
@@ -80,9 +178,15 @@
             Ecosistema profesional <strong>FarmaSys</strong>. Cada sucursal opera con <strong>base de datos física propia e independiente</strong>, su <strong>propia clave de acceso</strong>, <strong>POS en unidades mínimas</strong>, <strong>deudores con WhatsApp</strong>, <strong>alertas de caducidad</strong> y <strong>estadísticas comparativas de venta (diaria, semanal y mensual)</strong>.
           </p>
 
-          <div class="pt-3 border-t border-slate-800 space-y-2">
-            <p class="text-[11px] font-extrabold uppercase text-teal-400">⚡ Claves de Prueba (Clic para autocompletar):</p>
-            <div id="demo-credentials-list" class="space-y-1.5 text-xs"></div>
+          <div class="pt-3 border-t border-slate-800/80 space-y-2">
+            <div class="p-3.5 rounded-2xl bg-teal-950/60 border border-teal-500/30 text-xs space-y-1">
+              <p class="font-extrabold text-teal-300 flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                <span>🔐</span> <span>Seguridad y Privacidad Estricta</span>
+              </p>
+              <p class="text-[11px] text-slate-300 leading-relaxed">
+                Ingresa con tu usuario y contraseña individual. Las cuentas del personal se configuran dentro del sistema con roles protegidos.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -116,7 +220,9 @@
             <select
               id="login-pharmacy-select"
               class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-bold bg-slate-50"
-            ></select>
+            >
+              <option value="1">Farmacia Davalsi • Sede Principal (RD$)</option>
+            </select>
           </div>
 
           <div>
@@ -124,7 +230,8 @@
             <input
               id="login-username-input"
               type="text"
-              placeholder="Ej. nicarlis123 o dejar en blanco para clave directa"
+              value=""
+              placeholder="Ej. admin o regente o cajero"
               class="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold"
             />
           </div>
@@ -135,6 +242,7 @@
               id="login-password-input"
               type="password"
               required
+              value=""
               placeholder="Ingresa la clave de acceso..."
               class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-mono font-bold"
             />
@@ -172,6 +280,48 @@
             <span id="sys-header-user-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/20 text-purple-200 border border-purple-400/40 flex items-center gap-1">
               🛡️ nicarlis123
             </span>
+            <!-- SELECTOR RÁPIDO DE ROLES RBAC -->
+            <div class="relative inline-block">
+              <button id="sys-header-switch-role-btn" type="button" onclick="toggleRbacQuickSwitchDropdown()" title="Cambiar rápidamente entre Cajero, Regente Farmacéutico o Administrador" class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-200 border border-indigo-400/50 flex items-center gap-1 transition cursor-pointer">
+                <span>🎭</span> <span id="sys-current-role-label">Cambiar Rol</span> <span>▾</span>
+              </button>
+              <div id="rbac-quick-switch-menu" class="hidden absolute left-0 mt-1.5 w-64 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 z-50 space-y-1 text-xs">
+                <p class="text-[9px] font-black uppercase tracking-wider text-slate-400 px-2 py-1">Alternar Perfil en Caliente:</p>
+                <button type="button" onclick="openSwitchAccountModal('admin')" class="w-full text-left p-2 rounded-xl hover:bg-slate-800 text-white flex items-center gap-2 cursor-pointer transition">
+                  <span class="text-base">🛡️</span>
+                  <div>
+                    <p class="font-extrabold text-amber-300 text-xs">1. Administrador</p>
+                    <p class="text-[10px] text-slate-400">Precios, Arqueos, Quejas y Reportes</p>
+                  </div>
+                </button>
+                <button type="button" onclick="openSwitchAccountModal('regente')" class="w-full text-left p-2 rounded-xl hover:bg-slate-800 text-white flex items-center gap-2 cursor-pointer transition">
+                  <span class="text-base">🩺</span>
+                  <div>
+                    <p class="font-extrabold text-teal-300 text-xs">2. Regente Farmacéutico</p>
+                    <p class="text-[10px] text-slate-400">Psicotrópicos, Alertas e Inventario</p>
+                  </div>
+                </button>
+                <button type="button" onclick="openSwitchAccountModal('cajero')" class="w-full text-left p-2 rounded-xl hover:bg-slate-800 text-white flex items-center gap-2 cursor-pointer transition">
+                  <span class="text-base">👤</span>
+                  <div>
+                    <p class="font-extrabold text-sky-300 text-xs">3. Cajero Mostrador</p>
+                    <p class="text-[10px] text-slate-400">Solo Ventas POS y Consulta</p>
+                  </div>
+                </button>
+                <div class="pt-1 border-t border-slate-800">
+                  <button type="button" onclick="openPosStaffRbacModal()" class="w-full text-left p-1.5 rounded-lg text-teal-300 hover:bg-slate-800 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer">
+                    <span>👥</span> <span>Administrar Personal & Roles</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+                        <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
+              <span>🎯</span> <span>Demo del Sistema</span>
+            </button>
+            <button type="button" id="btn-nav-training-toggle" onclick="if(window.farmaTraining) window.farmaTraining.toggle();" title="Activar simulador en memoria para practicar y aprender sin afectar la base de datos de producción" class="farma-training-switch-btn px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-teal-500/30 to-emerald-500/30 hover:from-teal-500/50 hover:to-emerald-500/50 text-teal-200 border border-teal-400/60 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
+              <span>🎓</span> <span>Modo Entrenamiento con Farma</span>
+            </button>
             <button onclick="logoutPharmacy()" title="Cambiar de sucursal o registrar nueva" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 transition cursor-pointer">
               ⇄ Cambiar Sucursal
             </button>
@@ -185,112 +335,173 @@
         ☰
       </button>
 
-      <!-- Menú Desplegable Agrupado por Tipo de Función (Visible >= 901px) -->
-      <nav id="sys-desktop-nav" class="sys-desktop-nav items-center gap-2 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700">
-        
-        <!-- 1. ACCESO DIRECTO EN PRIMERA INSTANCIA: VENTA DE MEDICAMENTOS (POS) -->
-        <button
-          type="button"
-          id="sys-nav-pos-btn"
-          onclick="switchSysTab('pos');"
-          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer"
-        >
-          <span class="text-sm">🖥️</span>
-          <span>Venta Mostrador (POS)</span>
+      <!-- Barra superior agrupada por tipo lógico (Visible >= 901px) -->
+      <nav id="sys-desktop-nav" class="sys-desktop-nav items-center flex-wrap gap-1.5 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700">
+
+        <!-- ACCESOS DIRECTOS: lo que se usa en cada venta -->
+        <button type="button" id="sys-nav-pos-btn" onclick="switchSysTab('pos');" class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 bg-teal-600 text-white shadow-md shadow-teal-700/30 cursor-pointer">
+          <span class="text-sm">🖥️</span><span>Venta Mostrador</span>
           <span class="text-[10px] text-teal-200 font-mono bg-teal-700/60 px-1.5 py-0.5 rounded">F1</span>
         </button>
-
-        <!-- 2. ACCESO DIRECTO EN PRIMERA INSTANCIA: PEDIDOS POR WHATSAPP Y APP -->
-        <button
-          type="button"
-          id="sys-nav-pedidos-btn"
-          onclick="switchSysTab('solicitudes');"
-          class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer"
-        >
-          <span class="text-sm">📱</span>
-          <span>Pedidos WhatsApp / App</span>
+        <button type="button" id="sys-nav-pedidos-btn" onclick="switchSysTab('solicitudes');" class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer">
+          <span class="text-sm">📱</span><span>Pedidos WhatsApp / App</span>
           <span id="badge-sys-pending-app" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-black rounded-full text-[10px] animate-pulse">0</span>
         </button>
 
-        <!-- 3. MENÚ DESPLEGABLE CON LAS DEMÁS FUNCIONES ADMINISTRATIVAS -->
-        <div id="sys-grp-container-master" class="sys-dropdown-container relative">
-          <button
-            type="button"
-            id="sys-grp-btn-master"
-            onclick="toggleSysDropdown('sys-grp-container-master')"
-            class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60"
-          >
-            <span>☰</span>
-            <span>Menú de Funciones</span>
-            <span id="badge-master-menu" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
-            <svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        <span class="w-px h-6 bg-slate-600 mx-0.5"></span>
+
+        <!-- GRUPO: VENTAS Y CAJA -->
+        <div id="sys-grp-container-ventas" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-ventas" onclick="toggleSysDropdown('sys-grp-container-ventas')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>🛒</span><span>Ventas y Caja</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
           </button>
-          
-          <div class="sys-dropdown-menu absolute right-0 top-full pt-1.5 w-[620px] max-w-[90vw] z-50">
-            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 grid grid-cols-1 md:grid-cols-3 gap-3 divide-y md:divide-y-0 md:divide-x divide-slate-800">
-              
-              <!-- Columna 1: INVENTARIO Y STOCK -->
-              <div class="space-y-1">
-                <span class="text-[10px] font-black uppercase tracking-wider text-teal-400 px-2 block mb-1">📦 Inventario y Stock</span>
-                <button onclick="switchSysTab('inventario'); closeAllSysDropdowns();" id="sys-tab-inventario" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>📦</span> <span>Catálogo Inventario</span></span>
-                  <span id="badge-sys-low-stock" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
-                </button>
-                <button onclick="switchSysTab('vencimientos'); closeAllSysDropdowns();" id="sys-tab-vencimientos" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-orange-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>⚠️</span> <span>Vencimientos (≤7m)</span></span>
-                  <span id="badge-sys-expiry" class="hidden px-1.5 py-0.2 bg-orange-500 text-white font-extrabold rounded-full text-[10px]">0</span>
-                </button>
-                <button onclick="filterSlowMovingProducts();" id="sys-tab-sinsalida" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer" title="Productos sin rotación (≤50 unds/mes). Excluye medicamentos crónicos.">
-                  <span class="flex items-center gap-1.5"><span>📉</span> <span>Sin Salida Real</span></span>
-                </button>
-                <button onclick="filterChronicMonthlyProducts();" id="sys-tab-cronicos-inv" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer" title="Medicamentos continuos con salida mensual de pacientes crónicos.">
-                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Uso Crónico Mensual</span></span>
-                </button>
-                <button onclick="switchSysTab('kits'); closeAllSysDropdowns();" id="sys-tab-kits" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>⚡</span> <span>Kits & Ofertas Semanales</span></span>
-                  <span class="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-extrabold rounded-full text-[10px]">4 Kits</span>
-                </button>
-              </div>
-
-              <!-- Columna 2: PACIENTES Y FIDELIZACIÓN -->
-              <div class="space-y-1 md:pl-2">
-                <span class="text-[10px] font-black uppercase tracking-wider text-amber-400 px-2 block mb-1">👥 Pacientes y Clientes</span>
-                <button onclick="switchSysTab('cronicos'); closeAllSysDropdowns();" id="sys-tab-cronicos" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Crónicos & Alerta 10d</span></span>
-                  <span id="badge-sys-chronic-alerts" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-                </button>
-                <button onclick="switchSysTab('planes'); closeAllSysDropdowns();" id="sys-tab-planes" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>🎁</span> <span>Planes Frecuentes</span></span>
-                </button>
-                <button onclick="switchSysTab('deudores'); closeAllSysDropdowns();" id="sys-tab-deudores" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-emerald-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>📒</span> <span>Deudores (Cobros)</span></span>
-                  <span id="badge-sys-debtors" class="hidden px-1.5 py-0.2 bg-emerald-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-                </button>
-              </div>
-
-              <!-- Columna 3: REPORTES Y GESTIÓN -->
-              <div class="space-y-1 md:pl-2">
-                <span class="text-[10px] font-black uppercase tracking-wider text-sky-400 px-2 block mb-1">📊 Reportes y Gestión</span>
-                <button onclick="switchSysTab('reportes'); closeAllSysDropdowns();" id="sys-tab-reportes" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>📈</span> <span>Reportes de Ventas</span></span>
-                </button>
-                <button onclick="switchSysTab('recetas'); closeAllSysDropdowns();" id="sys-tab-recetas" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>🩺</span> <span>Recetas IA</span></span>
-                  <span id="badge-sys-pending-rx" class="hidden px-1.5 py-0.2 bg-sky-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
-                </button>
-                <button onclick="switchSysTab('whatsapp'); closeAllSysDropdowns();" id="sys-tab-whatsapp" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-emerald-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>💬</span> <span>Historial WhatsApp</span></span>
-                  <span id="badge-sys-wa-count" class="px-1.5 py-0.2 bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 font-bold rounded-full text-[10px]">0</span>
-                </button>
-                <button onclick="switchSysTab('config'); closeAllSysDropdowns();" id="sys-tab-config" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
-                  <span class="flex items-center gap-1.5"><span>⚙️</span> <span>Configuración Farmacia</span></span>
-                </button>
-              </div>
-
+          <div class="sys-dropdown-menu absolute left-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-teal-400 px-2 block mb-1">🛒 Ventas y Caja</span>
+              <button type="button" id="sys-nav-caja-btn" onclick="closeAllSysDropdowns(); openPosCajaModal();" title="Arqueo y cierre de caja (solo Administrador)" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>💰</span><span>Caja: Cortes X / Z</span></span>
+              </button>
+              <button type="button" id="sys-tab-deudores" onclick="closeAllSysDropdowns(); switchSysTab('deudores');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📒</span><span>Deudores (Cobros)</span></span><span id="badge-sys-debtors" class="hidden px-1.5 py-0.2 bg-emerald-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-tab-kits" onclick="closeAllSysDropdowns(); switchSysTab('kits');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>⚡</span><span>Kits y Ofertas</span></span>
+              </button>
+              <button type="button" id="sys-nav-printer-btn" onclick="closeAllSysDropdowns(); openPosThermalPrinterModal();" title="Impresora térmica 58/80mm y gaveta" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-teal-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🖨️</span><span>Ticketera / Gaveta</span></span>
+              </button>
             </div>
           </div>
         </div>
 
+        <!-- GRUPO: INVENTARIO -->
+        <div id="sys-grp-container-inventario" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-inventario" onclick="toggleSysDropdown('sys-grp-container-inventario')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>📦</span><span>Inventario</span><span id="badge-master-menu" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="sys-dropdown-menu absolute left-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-sky-400 px-2 block mb-1">📦 Inventario</span>
+              <button type="button" id="sys-tab-inventario" onclick="closeAllSysDropdowns(); switchSysTab('inventario');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📦</span><span>Catálogo Inventario</span></span><span id="badge-sys-low-stock" class="hidden px-1.5 py-0.2 bg-rose-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-tab-vencimientos" onclick="closeAllSysDropdowns(); switchSysTab('vencimientos');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>⏳</span><span>Vencimientos (≤7m)</span></span><span id="badge-sys-expiry" class="hidden px-1.5 py-0.2 bg-orange-500 text-white font-extrabold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-tab-sinsalida" onclick="closeAllSysDropdowns(); filterSlowMovingProducts();" title="Productos sin rotación (≤50 unds/mes). Excluye crónicos." class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📉</span><span>Sin Salida Real</span></span>
+              </button>
+              <button type="button" id="sys-tab-cronicos-inv" onclick="closeAllSysDropdowns(); filterChronicMonthlyProducts();" title="Medicamentos continuos con salida mensual." class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🔁</span><span>Uso Crónico Mensual</span></span>
+              </button>
+              <button type="button" id="sys-nav-restock-btn" onclick="closeAllSysDropdowns(); openPosRestockModal();" title="Órdenes de compra sugeridas por IA" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🚚</span><span>Pedido a Droguerías (IA)</span></span><span id="pos-restock-badge" class="px-1.5 py-0.2 bg-rose-500 text-white font-black rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-nav-audit-btn" onclick="closeAllSysDropdowns(); openAuditLogsModal();" title="Historial de correcciones de inventario" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-sky-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📋</span><span>Auditoría de Inventario</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRUPO: RECETAS Y CONTROL -->
+        <div id="sys-grp-container-clinico" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-clinico" onclick="toggleSysDropdown('sys-grp-container-clinico')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>🩺</span><span>Recetas y Control</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="sys-dropdown-menu absolute left-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-indigo-400 px-2 block mb-1">🩺 Recetas y Control</span>
+              <button type="button" id="sys-tab-recetas" onclick="closeAllSysDropdowns(); switchSysTab('recetas');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-indigo-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📄</span><span>Recetas Médicas</span></span><span id="badge-sys-pending-rx" class="hidden px-1.5 py-0.2 bg-sky-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-nav-ocr-btn" onclick="closeAllSysDropdowns(); openPosRecetaOcrModal();" title="Transcribir receta con visión IA y alergias" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-indigo-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📸</span><span>Escanear Receta (OCR IA)</span></span>
+              </button>
+              <button type="button" id="sys-nav-psicotropicos-btn" onclick="closeAllSysDropdowns(); openPosPsicotropicosModal();" title="Libro oficial de control (Regente / Admin)" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-indigo-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>💊</span><span>Psicotrópicos (Ley 50-88)</span></span><span id="pos-psicotropicos-badge" class="px-1.5 py-0.2 bg-purple-300 text-purple-950 font-black rounded-full text-[10px]">Regente</span>
+              </button>
+              <button type="button" id="sys-nav-pharmacare-btn" onclick="closeAllSysDropdowns(); openPharmaCareModal();" title="Toma de presión, glucosa y peso" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-indigo-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>❤️</span><span>Atención Farmacéutica</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRUPO: CLIENTES -->
+        <div id="sys-grp-container-clientes" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-clientes" onclick="toggleSysDropdown('sys-grp-container-clientes')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>👥</span><span>Clientes</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="sys-dropdown-menu absolute left-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-amber-400 px-2 block mb-1">👥 Clientes</span>
+              <button type="button" id="sys-tab-cronicos" onclick="closeAllSysDropdowns(); switchSysTab('cronicos');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🩺</span><span>Pacientes Crónicos y Alertas</span></span><span id="badge-sys-chronic-alerts" class="hidden px-1.5 py-0.2 bg-amber-400 text-slate-950 font-extrabold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-tab-planes" onclick="closeAllSysDropdowns(); switchSysTab('planes');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🎁</span><span>Planes Frecuentes</span></span>
+              </button>
+              <button type="button" id="sys-tab-whatsapp" onclick="closeAllSysDropdowns(); switchSysTab('whatsapp');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>💬</span><span>Historial WhatsApp</span></span><span id="badge-sys-wa-count" class="px-1.5 py-0.2 bg-emerald-500/30 text-emerald-300 border border-emerald-400/30 font-bold rounded-full text-[10px]">0</span>
+              </button>
+              <button type="button" id="sys-tab-delivery-monitor" onclick="closeAllSysDropdowns(); openPosDeliveryTrackingModal();" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🛵</span><span>Monitor Delivery GPS</span></span>
+              </button>
+              <button type="button" id="sys-nav-quejas-btn" onclick="closeAllSysDropdowns(); openPosQuejasModal();" title="Quejas y sugerencias de clientes (solo Administrador)" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-amber-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📢</span><span>Buzón de Quejas</span></span><span id="pos-quejas-badge" class="px-1.5 py-0.2 bg-rose-500 text-white font-black rounded-full text-[10px]">0</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRUPO: IA Y AYUDA -->
+        <div id="sys-grp-container-ia" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-ia" onclick="toggleSysDropdown('sys-grp-container-ia')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>🤖</span><span>IA y Ayuda</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="sys-dropdown-menu absolute right-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-purple-400 px-2 block mb-1">🤖 IA y Ayuda</span>
+              <button type="button" id="sys-nav-ai-btn" onclick="closeAllSysDropdowns(); openAiAssistantModal('principio_activo');" title="Sustitutos por principio activo y copiloto" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🤖</span><span>Asistente FarmaIA</span></span><span id="badge-sys-ai-alerts" class="px-1.5 py-0.2 bg-amber-300 text-slate-950 font-black rounded-full text-[10px]">IA</span>
+              </button>
+
+              <button type="button" id="sys-nav-guide-btn" onclick="closeAllSysDropdowns(); window.posGuide ? window.posGuide.openHub() : null;" title="Demo Interactiva: Explicación paso a paso de cada función" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🎯</span><span>Guía en Vivo del POS</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRUPO: GESTIÓN -->
+        <div id="sys-grp-container-gestion" class="sys-dropdown-container relative">
+          <button type="button" id="sys-grp-btn-gestion" onclick="toggleSysDropdown('sys-grp-container-gestion')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
+            <span>📊</span><span>Gestión</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="sys-dropdown-menu absolute right-0 top-full pt-1.5 w-72 z-50">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
+              <span class="text-[10px] font-black uppercase tracking-wider text-rose-400 px-2 block mb-1">📊 Gestión</span>
+              <button type="button" id="sys-tab-reportes" onclick="closeAllSysDropdowns(); switchSysTab('reportes');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>📈</span><span>Reportes de Ventas</span></span>
+              </button>
+              <button type="button" id="sys-nav-staff-btn" onclick="closeAllSysDropdowns(); openPosStaffRbacModal();" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>🔐</span><span>Personal y Roles</span></span>
+              </button>
+              <button type="button" id="sys-nav-services-btn" onclick="closeAllSysDropdowns(); toggleQuickServicesConfigModal();" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>💳</span><span>Pago / Domicilio / ARS</span></span>
+              </button>
+              <button type="button" id="sys-tab-config" onclick="closeAllSysDropdowns(); switchSysTab('config');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
+                <span class="flex items-center gap-1.5"><span>⚙️</span><span>Configuración Farmacia</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="pos-global-scanner-status" class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[10px] font-black tracking-wide uppercase">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="pos-global-scanner-text">⚡ Lector Pistola Activo</span>
+        </div>
       </nav>
 
       <div class="flex items-center gap-2 relative">
@@ -317,7 +528,10 @@
         <button id="sys-header-btn-new-pharmacy" onclick="openCreatePharmacyModal()" class="px-2.5 py-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 text-xs font-bold">
           ➕ Nueva Farmacia
         </button>
-        <button onclick="logoutPharmacy()" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold">
+                    <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
+              <span>🎯</span> <span>Demo del Sistema</span>
+            </button>
+            <button onclick="logoutPharmacy()" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold">
           🔒 Salir
         </button>
       </div>
@@ -335,74 +549,69 @@
           </div>
           <button onclick="toggleMobileNavDrawer()" class="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white font-bold">✕</button>
         </div>
-                <div class="space-y-3 text-xs font-bold">
-          
-          <!-- Sección 1: Ventas y Caja -->
+        <div class="space-y-3 text-xs font-bold">
           <div class="space-y-1">
-            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">🛒 Ventas y Caja</span>
-            <button id="mob-tab-pos" onclick="switchSysTab('pos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>🖥️ POS Mostrador</span>
-            </button>
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">⚡ Accesos Directos</span>
+            <button id="mob-tab-pos" onclick="switchSysTab('pos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🖥️ Venta Mostrador (POS)</span></button>
             <button id="mob-tab-solicitudes" onclick="switchSysTab('solicitudes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>📱 Solicitudes App</span>
+              <span>📱 Pedidos WhatsApp / App</span>
               <span id="badge-mobile-pending-app" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span>
             </button>
-            <button id="mob-tab-recetas" onclick="switchSysTab('recetas'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>📋 Recetas médicas IA</span>
-              <span id="badge-mobile-pending-rx" class="hidden px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 text-[10px]">0</span>
-            </button>
           </div>
-
-          <!-- Sección 2: Inventario y Stock -->
-          <div class="space-y-1 pt-2 border-t border-slate-800">
-            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">📦 Inventario y Stock</span>
-            <button id="mob-tab-inventario" onclick="switchSysTab('inventario'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>📦 Inventario General</span>
-              <span id="badge-mobile-low-stock" class="hidden px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px]">0</span>
-            </button>
-            <button id="mob-tab-vencimientos" onclick="switchSysTab('vencimientos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>⏳ Vencimientos ≤7m</span>
-              <span id="badge-mobile-expiry" class="hidden px-2 py-0.5 rounded-full bg-orange-500 text-white text-[10px]">0</span>
-            </button>
+          <div id="mob-grp-ventas" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">🛒 Ventas y Caja</span>
+            <button id="mob-nav-caja-btn" onclick="toggleMobileNavDrawer(); openPosCajaModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>💰 Caja: Cortes X / Z</span></button>
+            <button id="mob-tab-deudores" onclick="toggleMobileNavDrawer(); switchSysTab('deudores');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📒 Deudores (Cobros)</span><span id="badge-mobile-debtors" class="hidden px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px]">0</span></button>
+            <button id="mob-tab-kits" onclick="toggleMobileNavDrawer(); switchSysTab('kits');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>⚡ Kits y Ofertas</span></button>
+            <button id="mob-nav-printer-btn" onclick="toggleMobileNavDrawer(); openPosThermalPrinterModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🖨️ Ticketera / Gaveta</span></button>
           </div>
-
-          <!-- Sección 3: Pacientes y Fidelización -->
-          <div class="space-y-1 pt-2 border-t border-slate-800">
-            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">👥 Pacientes y Clientes</span>
-            <button id="mob-tab-cronicos" onclick="switchSysTab('cronicos'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>🩺 Crónicos & Alerta 10d</span>
-              <span id="badge-mobile-chronic" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span>
-            </button>
-            <button id="mob-tab-planes" onclick="switchSysTab('planes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>🎁 Planes y Bonificación</span>
-            </button>
-            <button id="mob-tab-deudores" onclick="switchSysTab('deudores'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200">
-              <span>📒 Deudores (Créditos)</span>
-              <span id="badge-mobile-debtors" class="hidden px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 text-[10px]">0</span>
-            </button>
+          <div id="mob-grp-inventario" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-sky-400 px-3">📦 Inventario</span>
+            <button id="mob-tab-inventario" onclick="toggleMobileNavDrawer(); switchSysTab('inventario');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📦 Catálogo Inventario</span><span id="badge-mobile-low-stock" class="hidden px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px]">0</span></button>
+            <button id="mob-tab-vencimientos" onclick="toggleMobileNavDrawer(); switchSysTab('vencimientos');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>⏳ Vencimientos (≤7m)</span><span id="badge-mobile-expiry" class="hidden px-2 py-0.5 rounded-full bg-orange-500 text-white text-[10px]">0</span></button>
+            <button id="mob-tab-sinsalida" onclick="toggleMobileNavDrawer(); filterSlowMovingProducts();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📉 Sin Salida Real</span></button>
+            <button id="mob-tab-cronicos-inv" onclick="toggleMobileNavDrawer(); filterChronicMonthlyProducts();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🔁 Uso Crónico Mensual</span></button>
+            <button id="mob-nav-restock-btn" onclick="toggleMobileNavDrawer(); openPosRestockModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🚚 Pedido a Droguerías (IA)</span></button>
+            <button id="mob-nav-audit-btn" onclick="toggleMobileNavDrawer(); openAuditLogsModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📋 Auditoría de Inventario</span></button>
           </div>
-
-          <!-- Sección 4: Reportes y Gestión -->
-          <div class="space-y-1 pt-2 border-t border-slate-800">
-            <span class="text-[10px] uppercase font-black tracking-wider text-teal-400 px-3">📊 Reportes y Gestión</span>
-            <button id="mob-tab-reportes" onclick="switchSysTab('reportes'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-              <span>📈 Reportes de ventas</span>
-            </button>
-            <button id="mob-tab-whatsapp" onclick="switchSysTab('whatsapp'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-              <span>💬 WhatsApp Business API</span>
-            </button>
-            <button id="mob-tab-config" onclick="switchSysTab('config'); toggleMobileNavDrawer()" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center text-slate-200">
-              <span>⚙️ Configuración y Personal</span>
-            </button>
+          <div id="mob-grp-clinico" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-indigo-400 px-3">🩺 Recetas y Control</span>
+            <button id="mob-tab-recetas" onclick="toggleMobileNavDrawer(); switchSysTab('recetas');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📄 Recetas Médicas</span><span id="badge-mobile-pending-rx" class="hidden px-2 py-0.5 rounded-full bg-sky-400 text-slate-950 text-[10px]">0</span></button>
+            <button id="mob-nav-ocr-btn" onclick="toggleMobileNavDrawer(); openPosRecetaOcrModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📸 Escanear Receta (OCR IA)</span></button>
+            <button id="mob-nav-psicotropicos-btn" onclick="toggleMobileNavDrawer(); openPosPsicotropicosModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>💊 Psicotrópicos (Ley 50-88)</span></button>
+            <button id="mob-nav-pharmacare-btn" onclick="toggleMobileNavDrawer(); openPharmaCareModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>❤️ Atención Farmacéutica</span></button>
           </div>
+          <div id="mob-grp-clientes" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-amber-400 px-3">👥 Clientes</span>
+            <button id="mob-tab-cronicos" onclick="toggleMobileNavDrawer(); switchSysTab('cronicos');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🩺 Pacientes Crónicos y Alertas</span><span id="badge-mobile-chronic" class="hidden px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px]">0</span></button>
+            <button id="mob-tab-planes" onclick="toggleMobileNavDrawer(); switchSysTab('planes');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🎁 Planes Frecuentes</span></button>
+            <button id="mob-tab-whatsapp" onclick="toggleMobileNavDrawer(); switchSysTab('whatsapp');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>💬 Historial WhatsApp</span></button>
+            <button id="mob-tab-delivery-monitor" onclick="toggleMobileNavDrawer(); openPosDeliveryTrackingModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🛵 Monitor Delivery GPS</span></button>
+            <button id="mob-nav-quejas-btn" onclick="toggleMobileNavDrawer(); openPosQuejasModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📢 Buzón de Quejas</span></button>
+          </div>
+          <div id="mob-grp-ia" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-purple-400 px-3">🤖 IA y Ayuda</span>
+            <button id="mob-nav-ai-btn" onclick="toggleMobileNavDrawer(); openAiAssistantModal('principio_activo');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🤖 Asistente FarmaIA</span></button>
 
-        </div></div>
+            <button id="mob-nav-guide-btn" onclick="toggleMobileNavDrawer(); window.posGuide ? window.posGuide.openHub() : null;" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🎯 Demo y Guía de Funciones</span></button>
+          </div>
+          <div id="mob-grp-gestion" class="space-y-1 pt-2 border-t border-slate-800">
+            <span class="text-[10px] uppercase font-black tracking-wider text-rose-400 px-3">📊 Gestión</span>
+            <button id="mob-tab-reportes" onclick="toggleMobileNavDrawer(); switchSysTab('reportes');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📈 Reportes de Ventas</span></button>
+            <button id="mob-nav-staff-btn" onclick="toggleMobileNavDrawer(); openPosStaffRbacModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🔐 Personal y Roles</span></button>
+            <button id="mob-nav-services-btn" onclick="toggleMobileNavDrawer(); toggleQuickServicesConfigModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>💳 Pago / Domicilio / ARS</span></button>
+            <button id="mob-tab-config" onclick="toggleMobileNavDrawer(); switchSysTab('config');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>⚙️ Configuración Farmacia</span></button>
+          </div>
+        </div>
       </div>
       <div class="pt-4 border-t border-slate-800 space-y-2">
         <a href="/app" target="_blank" class="w-full block text-center py-2.5 rounded-xl bg-teal-600/20 text-teal-300 font-bold text-xs border border-teal-500/30">
           📱 Abrir App Pacientes
         </a>
-        <button onclick="logoutPharmacy()" class="w-full py-2.5 rounded-xl bg-rose-600/20 text-rose-300 font-bold text-xs border border-rose-500/30">
+                    <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
+              <span>🎯</span> <span>Demo del Sistema</span>
+            </button>
+            <button onclick="logoutPharmacy()" class="w-full py-2.5 rounded-xl bg-rose-600/20 text-rose-300 font-bold text-xs border border-rose-500/30">
           🔒 Cerrar Sesión
         </button>
       </div>
@@ -665,6 +874,9 @@
               <button type="button" onclick="openPharmaCareModal()" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer">
                 <span>🩺</span> <span>Toma de Presión / Glicemia</span>
               </button>
+              <button type="button" onclick="openAiAssistantModal('principio_activo')" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer">
+                <span>🤖</span> <span>Asistente IA Vendedor</span>
+              </button>
             </div>
           </div>
 
@@ -674,8 +886,9 @@
               <span class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow">⚡</span>
               <div>
                 <div class="flex items-center gap-2">
-                  <h4 class="text-xs font-black text-slate-900 uppercase tracking-wide">Kits Alivio en 1 Clic (Con Medicamentos Existentes)</h4>
-                  <button type="button" onclick="openKitBuilderModal()" class="px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 font-extrabold text-[10px] transition cursor-pointer">+ Armar Kit</button>
+                  <h4 class="text-xs font-black text-slate-900 uppercase tracking-wide">Kits Médicos IA Multi-Dosis (>1 Dosis • Con Medicamentos Existentes)</h4>
+                  <button type="button" onclick="triggerRegenerateAiMedicalKits()" class="px-2.5 py-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[10px] transition cursor-pointer shadow-2xs">🤖 Auto-Generar Kits IA</button>
+                  <button type="button" onclick="openKitBuilderModal()" class="px-2 py-0.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 font-extrabold text-[10px] transition cursor-pointer">+ Armar Kit Manual</button>
                 </div>
                 <p class="text-[11px] text-slate-600 font-medium">Precio calculado por unidad de lo solicitado • La oferta queda a decisión del vendedor.</p>
               </div>
@@ -685,9 +898,33 @@
             </div>
           </div>
 
+          
+          <!-- PANEL FARMA 3D: RENOVACIONES DEL DÍA Y ADHERENCIA TERAPÉUTICA -->
+          <div id="pos-renovaciones-del-dia-container" class="p-3.5 bg-gradient-to-r from-teal-50 via-indigo-50 to-purple-50 rounded-2xl border-2 border-teal-300 shadow-sm space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center text-sm font-black shadow-xs">💊</span>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h4 class="text-xs font-black text-slate-900 uppercase tracking-wide">Farma 3D: Renovaciones del Día (≤ 5 Días para Agotar Tratamiento)</h4>
+                    <span id="pos-renovaciones-count-badge" class="px-2 py-0.2 rounded-full text-[9px] font-black bg-teal-600 text-white">0 Pacientes</span>
+                  </div>
+                  <p class="text-[11px] text-slate-600">Pacientes crónicos próximos a agotar su medicación mensual. Incluye auditoría de stock real, sugerencia de sustitutos y descuento de fidelización.</p>
+                </div>
+              </div>
+              <button type="button" onclick="loadPosRenovacionesDelDia()" class="px-2.5 py-1 rounded-xl bg-teal-100 hover:bg-teal-200 text-teal-900 font-extrabold text-[10px] transition cursor-pointer flex items-center gap-1">
+                <span>🔄</span> <span>Actualizar</span>
+              </button>
+            </div>
+            <!-- Lista dinámica de renovaciones -->
+            <div id="pos-renovaciones-cards-list" class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto pt-1">
+              <div class="p-3 text-center text-slate-400 text-xs col-span-2">Cargando renovaciones del día...</div>
+            </div>
+          </div>
+
           <form onsubmit="handlePosBarcodeSubmit(event)" class="relative flex flex-col sm:flex-row gap-2">
             <div class="relative flex-1">
-              <div class="relative">
+              <div id="txt-buscar-medicamento" class="relative">
                 <span class="absolute left-3.5 top-3 text-slate-400 text-sm">🔍</span>
                 <input
                   id="pos-barcode-input"
@@ -727,6 +964,11 @@
             </button>
           </form>
 
+          <!-- PANEL AUTOMÁTICO DE SUGERENCIAS IA POR PRINCIPIO ACTIVO EN EL MOSTRADOR POS -->
+          <div id="pos-inline-ai-suggestion-box" class="hidden p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-teal-50 border-2 border-indigo-300 shadow-sm space-y-2.5">
+            <!-- Renderizado dinámicamente por sistema_farmacia.js cuando el vendedor busca un medicamento o principio activo -->
+          </div>
+
           <div class="space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-1">
               <p class="text-[11px] font-bold text-slate-600">⚡ Acceso Rápido por Categorías:</p>
@@ -741,7 +983,7 @@
             <div id="pos-quick-barcodes" class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1"></div>
           </div>
 
-          <div class="border border-slate-200 rounded-xl overflow-hidden">
+          <div id="tabla-lotes-vencimiento" class="border border-slate-200 rounded-xl overflow-hidden">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="bg-slate-100 text-[11px] font-bold uppercase text-slate-600">
@@ -758,6 +1000,32 @@
           </div>
 
           
+          <!-- SUGERENCIA CLÍNICA DE VENTA CRUZADA FARMAIA -->
+          <div id="pos-cross-selling-container" class="hidden p-3.5 rounded-2xl border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 space-y-2 shadow-sm transition-all duration-300">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-lg shadow-sm font-bold">
+                  🤖
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-black text-indigo-950 uppercase tracking-wide">FarmaIA Copiloto 3D</span>
+                    <span id="pos-cross-selling-trigger-pill" class="px-2 py-0.2 rounded-full text-[9px] font-black bg-indigo-600 text-white tracking-wider">VENTA CRUZADA CLÍNICA</span>
+                  </div>
+                  <p id="pos-cross-selling-dialogue" class="text-[11px] font-semibold text-indigo-900 mt-0.5 leading-tight">
+                    Recuerda ofrecer protector gástrico o probióticos para la flora intestinal.
+                  </p>
+                </div>
+              </div>
+              <span id="pos-cross-selling-tag-badge" class="text-[10px] font-extrabold px-2 py-0.5 rounded-lg bg-indigo-100 text-indigo-800 border border-indigo-200">
+                Clínico
+              </span>
+            </div>
+            <div id="pos-cross-selling-cards" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <!-- Cards rendered dynamically -->
+            </div>
+          </div>
+
           <!-- Fidelización, Paciente Frecuente y Bonificación con Decisión Opcional -->
           <div class="p-3.5 bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 rounded-2xl border border-teal-200 space-y-2.5">
             <div class="flex items-center justify-between">
@@ -800,14 +1068,32 @@
           <!-- Datos de Cliente, Pago y Seguro Médico (ARS) -->
           <div class="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
             <div class="space-y-2.5">
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-600 uppercase">Cédula / Identificación</label>
+                  <input id="pos-client-cedula" type="text" placeholder="402-1234567-1" oninput="checkPosPatientAllergies(this.value)" class="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono font-bold bg-white text-slate-900" />
+                </div>
                 <div>
                   <label class="block text-[11px] font-bold text-slate-600 uppercase">Cliente *</label>
                   <input id="pos-client-name" type="text" value="Cliente de Mostrador" class="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium" />
                 </div>
                 <div>
-                  <label class="block text-[11px] font-bold text-slate-600 uppercase">WhatsApp Cliente (Opcional)</label>
+                  <label class="block text-[11px] font-bold text-slate-600 uppercase">WhatsApp (Opcional)</label>
                   <input id="pos-client-phone" type="tel" placeholder="809-555-1234" class="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-xs font-mono font-semibold" />
+                </div>
+              </div>
+
+              <!-- Banner Dinámico de Alergias Declaradas del Paciente -->
+              <div id="pos-patient-allergy-alert" class="hidden p-3 rounded-2xl bg-rose-50 border-2 border-rose-500 text-rose-900 text-xs flex items-center justify-between shadow-sm animate-pulse">
+                <div class="flex items-center gap-2.5">
+                  <span class="text-2xl">⚠️</span>
+                  <div>
+                    <span class="font-black uppercase tracking-wider text-rose-800 text-[10px] block">FARMACOVIGILANCIA ACTIVA • ALERGIA DECLARADA</span>
+                    <p id="pos-patient-allergy-text" class="font-black text-rose-950 text-xs mt-0.5">ALERGIA DETECTADA</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <span class="px-2 py-1 rounded-lg bg-rose-600 text-white font-black text-[10px] tracking-wide uppercase shadow-xs">Riesgo Crítico</span>
                 </div>
               </div>
               <!-- Barra de estado de servicios configurados desde la esquina superior derecha -->
@@ -920,7 +1206,7 @@
               <span class="text-xs font-bold uppercase">Total a Cobrar:</span>
                 <span id="pos-total-amount" class="text-2xl font-extrabold text-emerald-400">RD$ 0.00</span>
               </div>
-              <button onclick="submitPosSale()" class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs shadow-lg transition">
+              <button id="btn-cobrar-factura" onclick="submitPosSale()" class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs shadow-lg transition">
                 🧾 Facturar e Imprimir Recibo
               </button>
             </div>
@@ -1500,7 +1786,10 @@
           <button type="button" onclick="openPharmaCareModal()" class="px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs shadow flex items-center gap-1.5 cursor-pointer">
             <span>🩺</span> <span>Toma de Presión / Glicemia</span>
           </button>
-          <button type="button" onclick="openNewChronicPatientModal()" class="px-4 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer">
+                    <button type="button" onclick="triggerAllChronic5dWhatsAppAlerts()" class="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer" title="Envía notificación por WhatsApp a pacientes crónicos con 5 días o menos de medicación restante">
+            <span>📲</span> <span>Disparar Alertas 5 Días (WhatsApp IA)</span>
+          </button>
+<button type="button" onclick="openNewChronicPatientModal()" class="px-4 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow flex items-center gap-2 cursor-pointer">
             <span>➕</span> <span>Registrar Paciente Crónico</span>
           </button>
         </div>
@@ -1681,11 +1970,28 @@
           <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Venta diaria (cuadre de caja), consolidado mensual con tabla interactiva e impresión formal</p>
         </div>
 
+        
         <div class="flex items-center gap-2 flex-wrap">
+          <!-- Botón PDF Vencimientos 7 Meses -->
+          <a href="/api/reportes/pdf/vencimientos-7-meses?farmacia_id=1" target="_blank" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-black flex items-center gap-1.5 shadow-xs transition">
+            <span>📄</span> <span>PDF Vencimientos (≤ 7 Meses)</span>
+          </a>
+          <!-- Selector y Botón PDF Bajo Stock -->
+          <div class="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-300 gap-1 text-xs">
+            <span class="font-extrabold text-[10px] uppercase text-slate-600 pl-1">Bajo Stock:</span>
+            <select id="sel-pdf-modalidad-stock" class="px-2 py-1 rounded-lg bg-white font-bold text-xs border border-slate-200">
+              <option value="auditor">Modalidad Auditor</option>
+              <option value="ciego">Modalidad Conteo Ciego [ ___ ]</option>
+            </select>
+            <button type="button" onclick="descargarPdfBajoStock()" class="px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-black transition cursor-pointer">
+              📥 Descargar PDF
+            </button>
+          </div>
           <button type="button" onclick="printActiveSalesReport()" class="px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex items-center gap-2 shadow-xs transition cursor-pointer">
             <span>🖨️</span> <span>Imprimir Reporte Activo</span>
           </button>
         </div>
+
       </div>
 
       <!-- Sub-Pestañas de Reportes: Venta Diaria | Venta Mensual | Dashboard & Gráficos -->
@@ -1702,6 +2008,9 @@
           </button>
           <button type="button" id="rep-subtab-btn-comparativa" onclick="switchReportSubTab('comparativa')" class="px-4 py-2 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-1.5">
             <span>📈</span> <span>Comparativas (Diaria, Semanal, Mensual)</span>
+          </button>
+          <button type="button" id="rep-subtab-btn-finanzas" onclick="switchReportSubTab('finanzas')" class="px-4 py-2 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer">
+            <span>💰</span> <span>Dashboard Financiero & Conciliación IA</span>
           </button>
         </div>
 
@@ -2334,6 +2643,154 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+    
+      <!-- ========================================================= -->
+      <!-- SUB-VENTANA 5: DASHBOARD FINANCIERO Y CONCILIACIÓN CON IA -->
+      <!-- ========================================================= -->
+      <div id="rep-subpanel-finanzas" class="hidden space-y-6">
+        <!-- Selector de Período y Métricas Clave -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-teal-100 text-teal-900 border border-teal-300">EXCLUSIVO ROL_ADMIN_CAJA</span>
+              <h2 class="text-lg font-black text-slate-900 mt-1">Dashboard Financiero y Utilidad Real</h2>
+              <p class="text-xs text-slate-500">Cálculo de margen exacto de ganancia, desglose por canal de venta y método de pago.</p>
+            </div>
+            <!-- Selector Período: Día, Semana, Mes -->
+            <div class="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-300 gap-1 text-xs">
+              <button type="button" id="btn-periodo-dia" onclick="loadDashboardFinanzas('dia')" class="px-3 py-1.5 rounded-lg font-black bg-teal-600 text-white shadow-xs">Día de Hoy</button>
+              <button type="button" id="btn-periodo-semana" onclick="loadDashboardFinanzas('semana')" class="px-3 py-1.5 rounded-lg font-bold text-slate-700 hover:bg-white">Últimos 7 Días</button>
+              <button type="button" id="btn-periodo-mes" onclick="loadDashboardFinanzas('mes')" class="px-3 py-1.5 rounded-lg font-bold text-slate-700 hover:bg-white">Mes Completo (30d)</button>
+            </div>
+          </div>
+
+          <!-- Tarjetas KPI Financieras -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5 pt-2">
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <span class="text-[10px] font-black uppercase text-slate-500 block">Ventas Brutas</span>
+              <p id="fin-kpi-brutas" class="text-xl font-black text-slate-900 mt-1">RD$ 0.00</p>
+            </div>
+            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200">
+              <span class="text-[10px] font-black uppercase text-amber-800 block">Descuentos Otorgados</span>
+              <p id="fin-kpi-descuentos" class="text-xl font-black text-amber-900 mt-1">-RD$ 0.00</p>
+            </div>
+            <div class="p-4 rounded-2xl bg-teal-50 border border-teal-200">
+              <span class="text-[10px] font-black uppercase text-teal-800 block">Ventas Netas</span>
+              <p id="fin-kpi-netas" class="text-xl font-black text-teal-900 mt-1">RD$ 0.00</p>
+            </div>
+            <div class="p-4 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white shadow-md">
+              <span class="text-[10px] font-black uppercase tracking-wider block opacity-90">Utilidad / Ganancia Real</span>
+              <p id="fin-kpi-utilidad" class="text-2xl font-black mt-1">RD$ 0.00</p>
+              <span id="fin-kpi-margen" class="text-[10px] font-extrabold opacity-90 block mt-0.5">Margen: 0.0%</span>
+            </div>
+          </div>
+
+          <!-- Desglose por Método de Pago y Canal de Venta -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            <!-- Métodos de Pago -->
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+              <h4 class="text-xs font-black text-slate-900 uppercase">💳 Ingresos por Método de Pago</h4>
+              <div class="space-y-1.5 text-xs">
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">💵 Efectivo:</span>
+                  <strong id="fin-metodo-efectivo" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">💳 Tarjeta de Crédito/Débito:</span>
+                  <strong id="fin-metodo-tarjeta" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">🏦 Transferencia Bancaria:</span>
+                  <strong id="fin-metodo-transferencia" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Canales de Venta -->
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+              <h4 class="text-xs font-black text-slate-900 uppercase">🏪 Ingresos por Canal de Venta</h4>
+              <div class="space-y-1.5 text-xs">
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">🛒 Punto de Venta Físico (POS):</span>
+                  <strong id="fin-canal-pos" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">📱 WhatsApp Oficial:</span>
+                  <strong id="fin-canal-wa" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+                <div class="flex justify-between p-2 rounded-xl bg-white border border-slate-200">
+                  <span class="font-bold text-slate-700">🌐 App de Usuarios / Web:</span>
+                  <strong id="fin-canal-app" class="font-mono text-slate-900">RD$ 0.00</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONCILIACIÓN BANCARIA ANTI-FRAUDE CON IA (SUBIDA DE VÁUCHER) -->
+        <div class="bg-white rounded-3xl p-5 border-2 border-indigo-200 shadow-sm space-y-4">
+          <div class="flex items-center gap-2.5">
+            <span class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-lg shadow-sm">🛡️</span>
+            <div>
+              <h3 class="text-base font-black text-indigo-950">Conciliación Bancaria Anti-Fraude con IA (Gemini 2.5 Flash)</h3>
+              <p class="text-xs text-slate-600">Sube el comprobante de transferencia bancaria. Farma extraerá el banco, fecha, monto y referencia única evitando váuchers reutilizados o montos alterados.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div class="md:col-span-6 space-y-3">
+              <div>
+                <label class="block text-xs font-black text-slate-700 uppercase mb-1">Monto de Venta Esperado (RD$)</label>
+                <input id="conciliacion-monto-esperado" type="number" step="0.01" placeholder="Ej: 240.00" class="w-full px-3 py-2 rounded-xl border-2 border-indigo-300 font-mono font-bold text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-black text-slate-700 uppercase mb-1">Subir Imagen del Váucher / Comprobante</label>
+                <input id="conciliacion-file-input" type="file" accept="image/*" class="w-full p-2 border-2 border-dashed border-indigo-300 rounded-xl bg-indigo-50/50 text-xs font-semibold cursor-pointer" />
+              </div>
+              <button type="button" onclick="ejecutarConciliacionIa()" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow transition cursor-pointer">
+                🔍 Validar Váucher con IA Anti-Fraude
+              </button>
+            </div>
+
+            <!-- Resultado de Conciliación -->
+            <div id="conciliacion-resultado-box" class="md:col-span-6 p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-center text-center">
+              <span class="text-3xl mb-1">📄</span>
+              <p class="text-xs font-bold text-slate-500">Los datos del comprobante analizados por Farma se mostrarán aquí.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- CIERRE DE TURNO / ARQUEO DE CAJA ASISTIDO -->
+        <div class="bg-white rounded-3xl p-5 border-2 border-teal-300 shadow-sm space-y-4">
+          <div class="flex items-center gap-2.5">
+            <span class="w-10 h-10 rounded-2xl bg-teal-600 text-white flex items-center justify-center text-lg shadow-sm">⚖️</span>
+            <div>
+              <h3 class="text-base font-black text-slate-900">Cierre de Turno / Arqueo de Caja Asistido</h3>
+              <p class="text-xs text-slate-600">Ingresa el dinero físico contado en la gaveta. Farma cruzará el valor contra las ventas en efectivo registradas y proyectará el Resumen Ejecutivo en su burbuja 3D.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-black text-slate-700 uppercase mb-1">Cajero de Turno</label>
+              <input id="cierre-cajero-nombre" type="text" value="Cajero Davalsi" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs" />
+            </div>
+            <div>
+              <label class="block text-xs font-black text-slate-700 uppercase mb-1">Efectivo Físico Contado en Gaveta (RD$)</label>
+              <input id="cierre-efectivo-contado" type="number" step="0.01" placeholder="RD$ 0.00" class="w-full px-3 py-2 rounded-xl border-2 border-teal-400 font-mono font-black text-sm" />
+            </div>
+            <div class="flex items-end">
+              <button type="button" onclick="ejecutarCierreCajaAsistido()" class="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs shadow transition cursor-pointer">
+                ⚖️ Ejecutar Cierre Asistido con Farma
+              </button>
+            </div>
+          </div>
+
+          <!-- Resultado del Cierre -->
+          <div id="cierre-resultado-display" class="hidden p-4 rounded-2xl border-2 space-y-2"></div>
         </div>
       </div>
 
@@ -3439,7 +3896,6 @@
             Toda corrección de precio, costo o stock queda registrada automáticamente en la bitácora de auditoría con su usuario y fecha.
           </p>
         </div>
-        <input type="hidden" id="edit-prod-id" />
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block font-bold text-slate-700 mb-1">Nombre Comercial *</label>
@@ -3626,7 +4082,7 @@
 
   <div id="toast-container" class="fixed top-20 right-4 z-50 space-y-2 pointer-events-none"></div>
 
-  <script src="/sistema_farmacia.js"></script>
+
 
   <!-- =====================================================================
        MODAL DE BITACORA DE AUDITORIA DE INVENTARIO
@@ -4338,6 +4794,44 @@
           </div>
         </div>
 
+        <!-- 2.5 PROTOCOLO INTERACTIVO DE TOMA ADECUADA (VERIFICACIÓN CLÍNICA FARMA-IA) -->
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-teal-50 via-emerald-50 to-sky-50 border border-teal-200 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-base">✅</span>
+              <div>
+                <h4 class="font-black text-teal-950 text-xs uppercase">Protocolo Interactivo: Verificación de Toma Adecuada (FarmaIA)</h4>
+                <p class="text-[10px] text-teal-700">Marque los criterios cumplidos antes de registrar manualmente la presión arterial o el azúcar</p>
+              </div>
+            </div>
+            <span id="pc-technique-quality-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-2xs">
+              100% Toma Adecuada (5/5)
+            </span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-1 text-[11px] font-semibold text-slate-700">
+            <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50/50">
+              <input type="checkbox" id="pc-chk-reposo" checked onchange="updateLivePharmaCareClassification()" class="rounded text-teal-600 focus:ring-teal-500" />
+              <span>🪑 5 min en reposo previo</span>
+            </label>
+            <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50/50">
+              <input type="checkbox" id="pc-chk-postura" checked onchange="updateLivePharmaCareClassification()" class="rounded text-teal-600 focus:ring-teal-500" />
+              <span>🦶 Espalda y pies apoyados</span>
+            </label>
+            <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50/50">
+              <input type="checkbox" id="pc-chk-brazo" checked onchange="updateLivePharmaCareClassification()" class="rounded text-teal-600 focus:ring-teal-500" />
+              <span>💪 Brazo a altura corazón</span>
+            </label>
+            <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50/50">
+              <input type="checkbox" id="pc-chk-cafe" checked onchange="updateLivePharmaCareClassification()" class="rounded text-teal-600 focus:ring-teal-500" />
+              <span>☕ Sin café/tabaco (30m)</span>
+            </label>
+            <label class="flex items-center gap-1.5 p-2 rounded-xl bg-white border border-teal-200 cursor-pointer hover:bg-teal-50/50">
+              <input type="checkbox" id="pc-chk-manos" checked onchange="updateLivePharmaCareClassification()" class="rounded text-teal-600 focus:ring-teal-500" />
+              <span>🧼 Dedo limpio y seco</span>
+            </label>
+          </div>
+        </div>
+
         <!-- 3. Valores de Toma de Presión y Glicemia -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <!-- Bloque Presión Arterial -->
@@ -4357,7 +4851,7 @@
               </div>
               <div>
                 <label class="block text-[10px] font-bold text-slate-600 mb-0.5">Pulso (lpm)</label>
-                <input id="pc-pulso" type="number" min="30" max="250" placeholder="72" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-center" />
+                <input id="pc-pulso" type="number" min="30" max="250" placeholder="72" oninput="updateLivePharmaCareClassification()" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold text-sm text-center" />
               </div>
             </div>
             <div class="grid grid-cols-2 gap-2">
@@ -4399,16 +4893,35 @@
                 </select>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-2 pt-1">
+            <div class="grid grid-cols-3 gap-2 pt-1">
               <div>
-                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Peso (kg - Opcional)</label>
-                <input id="pc-peso" type="number" step="0.1" placeholder="70.5" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono" />
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">⚖️ Peso (kg)</label>
+                <input id="pc-peso" type="number" step="0.1" placeholder="70.5" oninput="updateLivePharmaCareClassification()" class="w-full px-2 py-1.5 rounded-lg border border-teal-300 bg-white font-mono font-bold" />
               </div>
               <div>
-                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Saturación SpO2 (%)</label>
-                <input id="pc-spo2" type="number" min="50" max="100" placeholder="98" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono" />
+                <label class="block text-[10px] font-bold text-slate-600 mb-0.5">📏 Talla (cm)</label>
+                <input id="pc-talla" type="number" step="0.1" placeholder="168" oninput="updateLivePharmaCareClassification()" class="w-full px-2 py-1.5 rounded-lg border border-teal-300 bg-white font-mono font-bold" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-0.5">🫁 SpO2 (%)</label>
+                <input id="pc-spo2" type="number" min="50" max="100" placeholder="98" class="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white font-mono" />
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 3.5 PANEL DE EVALUACIÓN CLÍNICA INTERACTIVA EN TIEMPO REAL (FARMA-IA) -->
+        <div id="pc-interactive-ai-panel" class="p-3.5 rounded-2xl bg-slate-900 text-white border border-slate-700 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-[11px] font-black uppercase tracking-wider text-teal-300 flex items-center gap-1.5">
+              <span>🤖</span> <span>Evaluación Interactiva FarmaIA (Presión Arterial y Azúcar)</span>
+            </span>
+            <button type="button" onclick="applyAiVitalRecommendationToNotes()" class="px-2.5 py-1 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-[10px] transition cursor-pointer">
+              ✍️ Copiar Recomendación IA al Reporte Imprimible
+            </button>
+          </div>
+          <div id="pc-interactive-ai-body" class="text-[11px] text-slate-300 space-y-1.5">
+            Ingrese manualmente los valores de Presión Arterial (Sistólica/Diastólica) o Glicemia Capilar (mg/dL) arriba para ver en tiempo real el semáforo clínico, la Presión Arterial Media (PAM), HbA1c orientativa y las recomendaciones para el paciente.
           </div>
         </div>
 
@@ -4496,5 +5009,1343 @@
     </div>
   </div>
 
+
+  <!-- =====================================================================
+       MODAL CENTRAL: ASISTENTE INTELIGENCIA ARTIFICIAL FARMA-IA (VENDEDORES)
+       ===================================================================== -->
+  <div id="modal-ai-assistant" class="fixed inset-0 z-[140] bg-slate-950/80 backdrop-blur-xs hidden items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div class="w-full max-w-6xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-indigo-200 my-4 flex flex-col max-h-[92vh]">
+      <!-- Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-indigo-950 via-purple-900 to-slate-900 text-white flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 flex items-center justify-center text-2xl font-black shadow-lg">
+            🤖
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">COPILOTO FARMACÉUTICO EN VIVO</span>
+              <span class="text-xs text-indigo-200 font-semibold">Sincronizado con POS y App Clientes</span>
+            </div>
+            <h3 class="font-black text-base sm:text-lg">FarmaIA — Asistente Inteligente para Vendedores y Atención Clínica</h3>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="refreshAiAssistantHub()" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1">
+            <span>🔄</span> <span>Actualizar IA</span>
+          </button>
+          <button type="button" onclick="closeAiAssistantModal()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-rose-600 text-white font-bold text-sm transition cursor-pointer flex items-center justify-center">✕</button>
+        </div>
+      </div>
+
+      <!-- Pestañas de Navegación del Asistente IA -->
+      <div class="bg-slate-100 px-3 sm:px-5 py-2.5 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto flex-shrink-0 text-xs font-extrabold">
+        <button type="button" id="ai-tab-btn-principio_activo" onclick="switchAiAssistantTab('principio_activo')" class="px-3.5 py-2 rounded-xl bg-indigo-600 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>🧬</span> <span>1. Sustitutos por Principio Activo</span>
+        </button>
+        <button type="button" id="ai-tab-btn-stock_top" onclick="switchAiAssistantTab('stock_top')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>📦</span> <span>2. Bajo Stock & Más Vendidos</span>
+          <span id="ai-badge-tab-stock" class="px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-800 text-[10px]">0</span>
+        </button>
+        <button type="button" id="ai-tab-btn-cronicos_10d" onclick="switchAiAssistantTab('cronicos_10d')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>🗓️</span> <span>3. Recordatorio Crónicos (10 Días)</span>
+          <span id="ai-badge-tab-cronicos" class="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[10px]">0</span>
+        </button>
+        <button type="button" id="ai-tab-btn-kits_temporadas" onclick="switchAiAssistantTab('kits_temporadas')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>⚡</span> <span>4. Kits Médicos Multi-Dosis & Temporadas</span>
+        </button>
+        <button type="button" id="ai-tab-btn-guia_sistema" onclick="switchAiAssistantTab('guia_sistema')" class="px-3.5 py-2 rounded-xl bg-white text-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+          <span>🧭</span> <span>5. Guía de Uso del Sistema POS</span>
+        </button>
+      </div>
+
+      <!-- Cuerpo de Pestañas -->
+      <div class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 bg-slate-50/60">
+
+        <!-- PESTAÑA 1: SUGERENCIAS POR PRINCIPIO ACTIVO -->
+        <div id="ai-tab-view-principio_activo" class="space-y-4">
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-teal-50 border border-indigo-200 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 class="font-black text-indigo-950 text-sm">🧬 ¿Qué pidió el cliente que no hay o quieres buscar por Principio Activo?</h4>
+                <p class="text-xs text-slate-600">Escribe la marca comercial (ej. Panadol, Advil, Losec, Zentel, Tabcin, Cozaar, Glucophage), el principio activo o el síntoma y la IA te dirá qué ofrecer del stock actual.</p>
+              </div>
+            </div>
+            <form onsubmit="handleAiSubstituteSearchSubmit(event)" class="flex flex-col sm:flex-row gap-2">
+              <input
+                id="ai-sub-search-input"
+                type="text"
+                placeholder="Ej: Panadol, Advil, Zentel, Losec, Paracetamol, Albendazol, Gripe, Gastritis, Parásitos..."
+                class="flex-1 px-4 py-2.5 rounded-xl border-2 border-indigo-300 bg-white font-bold text-sm text-slate-900 focus:outline-none focus:border-indigo-600"
+              />
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow cursor-pointer">
+                🔍 Consultar Principio Activo y Stock
+              </button>
+            </form>
+            <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span class="font-bold text-slate-500">Consultas rápidas en mostrador:</span>
+              <button type="button" onclick="quickSearchAiSubstitute('Panadol')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">💊 Panadol / Tylenol</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Advil')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🔥 Advil / Motrin</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Zentel')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🪱 Zentel / Parásitos</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Losec')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🛡️ Losec / Gastritis</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Tabcin')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🤧 Tabcin / Gripe</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Cozaar')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">❤️ Cozaar / Presión</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Glucophage')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">🩸 Glucophage / Azúcar</button>
+              <button type="button" onclick="quickSearchAiSubstitute('Pedialyte')" class="px-2.5 py-1 rounded-lg bg-white hover:bg-indigo-100 text-indigo-900 font-bold border border-indigo-200 cursor-pointer">💧 Pedialyte / Suero</button>
+            </div>
+          </div>
+
+          <div id="ai-sub-results-container" class="space-y-3">
+            <!-- Resultados dinámicos -->
+          </div>
+        </div>
+
+        <!-- PESTAÑA 2: RECORDATORIOS BAJO STOCK & MÁS VENDIDOS -->
+        <div id="ai-tab-view-stock_top" class="hidden space-y-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-2xl border border-slate-200">
+            <div>
+              <h4 class="font-black text-slate-900 text-sm">📦 Inteligencia de Abastecimiento: Bajo Stock y Medicamentos Más Vendidos</h4>
+              <p class="text-xs text-slate-500">La IA cruza tu stock actual, la velocidad de venta de los últimos 30 días y los retiros próximos de pacientes crónicos.</p>
+            </div>
+            <button type="button" onclick="printAiPurchaseOrderReport()" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-black text-xs flex items-center gap-1.5 shadow cursor-pointer">
+              <span>🖨️</span> <span>Imprimir Orden de Compra Sugerida por IA</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Columna Izquierda: Recordatorios de Bajo Stock -->
+            <div class="bg-white rounded-2xl border border-rose-200 p-4 space-y-3 shadow-2xs">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">🚨</span>
+                  <div>
+                    <h5 class="font-black text-rose-900 text-xs uppercase">Recordatorios de Compra (Bajo Stock / Críticos)</h5>
+                    <p class="text-[11px] text-slate-500">Medicamentos en punto de reorden o comprometidos por crónicos</p>
+                  </div>
+                </div>
+              </div>
+              <div id="ai-low-stock-list" class="space-y-2.5 max-h-96 overflow-y-auto pr-1"></div>
+            </div>
+
+            <!-- Columna Derecha: Recomendaciones de los Más Vendidos para Comprar Más -->
+            <div class="bg-white rounded-2xl border border-emerald-200 p-4 space-y-3 shadow-2xs">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">🔥</span>
+                  <div>
+                    <h5 class="font-black text-emerald-900 text-xs uppercase">Medicamentos que Más se Venden (Comprar Más)</h5>
+                    <p class="text-[11px] text-slate-500">Alta rotación y esenciales que no deben agotarse en mostrador</p>
+                  </div>
+                </div>
+              </div>
+              <div id="ai-top-sellers-list" class="space-y-2.5 max-h-96 overflow-y-auto pr-1"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PESTAÑA 3: RECORDATORIO DE VENTAS DE MEDICAMENTOS CRÓNICOS (10 DÍAS DE ANTICIPACIÓN) -->
+        <div id="ai-tab-view-cronicos_10d" class="hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-amber-50 border border-amber-300 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">🗓️</span>
+              <div>
+                <h4 class="font-black text-amber-950 text-sm">Recordatorio de Ventas de Medicamentos Crónicos (10 Días de Anticipación)</h4>
+                <p class="text-xs text-amber-800">Pacientes cuya medicación continua se agota en 10 días o menos. La IA verifica automáticamente si hay stock suficiente para despacharles.</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="closeAiAssistantModal(); switchSysTab('cronicos');" class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs cursor-pointer shadow">
+                ➕ Registrar / Ver Todos los Crónicos
+              </button>
+            </div>
+          </div>
+          <div id="ai-chronic-10d-list" class="space-y-3"></div>
+        </div>
+
+        <!-- PESTAÑA 4: KITS MÉDICOS AUTOMÁTICOS MULTI-DOSIS & TEMPORADAS -->
+        <div id="ai-tab-view-kits_temporadas" class="hidden space-y-5">
+          <!-- Bloque Kits Médicos Multi-Dosis -->
+          <div class="bg-white rounded-2xl border border-indigo-200 p-4 space-y-3 shadow-2xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 uppercase">ARMADO AUTOMÁTICO BASADO EN LA MEDICINA</span>
+                <h4 class="font-black text-slate-900 text-sm mt-0.5">⚡ Kits Médicos Multi-Dosis (>1 Dosis: Gripe, Cuadro Parasitario, Gástrico, Fiebre y Cardio)</h4>
+                <p class="text-xs text-slate-500">Cada kit contiene múltiples dosis para el esquema terapéutico completo con tus medicamentos en inventario. El precio es la suma por unidad y la oferta la decide el vendedor.</p>
+              </div>
+              <button type="button" onclick="triggerRegenerateAiMedicalKits()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs shadow cursor-pointer flex items-center gap-1.5">
+                <span>🤖</span> <span>Re-Generar Kits Médicos con IA Ahora</span>
+              </button>
+            </div>
+            <div id="ai-kits-multidose-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+          </div>
+
+          <!-- Bloque Sugerencias de Medicamentos por Temporadas -->
+          <div class="bg-white rounded-2xl border border-teal-200 p-4 space-y-3 shadow-2xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-teal-100 text-teal-900 uppercase">INTELIGENCIA EPIDEMIOLÓGICA ESTACIONAL</span>
+                <h4 class="font-black text-slate-900 text-sm mt-0.5">🌤️ Sugerencias de Medicamentos por Temporada</h4>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <button type="button" onclick="loadAiSeason('LLUVIAS_DENGUE')" class="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-900 font-extrabold border border-sky-200 cursor-pointer">🌧️ Lluvias y Dengue</button>
+                <button type="button" onclick="loadAiSeason('FRENTE_FRIO_GRIPE')" class="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-extrabold border border-indigo-200 cursor-pointer">🌬️ Frente Frío y Gripe</button>
+                <button type="button" onclick="loadAiSeason('CALOR_PARASITOS_GASTRICO')" class="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold border border-amber-200 cursor-pointer">☀️ Calor, Parásitos y Gástrico</button>
+                <button type="button" onclick="loadAiSeason('CRONICOS_PREVENTIVO')" class="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-900 font-extrabold border border-rose-200 cursor-pointer">❤️ Control Crónico</button>
+              </div>
+            </div>
+            <div id="ai-seasonal-container" class="space-y-3"></div>
+          </div>
+        </div>
+
+        <!-- PESTAÑA 5: ASISTENCIA EN EL USO DEL SISTEMA DE VENTA (COPILOTO POS) -->
+        <div id="ai-tab-view-guia_sistema" class="hidden space-y-4">
+          
+            <!-- Panel de Lanzamiento Rápido de Guía Interactiva en Vivo con Marco Verde y Robot -->
+            <div id="live-guide-launchpad" class="p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 border-2 border-emerald-400/50 text-white space-y-2.5 shadow-lg">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span class="text-xs font-black uppercase text-emerald-300 tracking-wider">🎯 COPILOTO VISUAL ACTIVO (MARCO VERDE & ROBOT 3D)</span>
+                </div>
+                <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-400/40 font-extrabold">Canal Local WebSocket :8085</span>
+              </div>
+              <p class="text-xs text-slate-200">
+                Selecciona cualquier flujo para que el <strong>Robot FarmaIA</strong> te guíe en vivo directamente en la pantalla, moviendo el <strong>marco verde</strong> a cada control y explicando el paso a seguir:
+              </p>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('venta_rapida');" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
+                  <span class="text-base">🛒</span>
+                  <span>1. Venta Rápida</span>
+                </button>
+                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('toma_presion_azucar');" class="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
+                  <span class="text-base">❤️</span>
+                  <span>2. Presión y Azúcar</span>
+                </button>
+                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('despachar_kit');" class="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
+                  <span class="text-base">⚡</span>
+                  <span>3. Despachar Kit</span>
+                </button>
+                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('bajo_stock_compras');" class="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
+                  <span class="text-base">📦</span>
+                  <span>4. Bajo Stock</span>
+                </button>
+              </div>
+            </div>
+<div class="p-4 rounded-2xl bg-slate-900 text-white space-y-3">
+            <h4 class="font-black text-sm text-teal-300">🧭 Copiloto Interactivo de Asistencia en el Uso del Sistema de Venta</h4>
+            <p class="text-xs text-slate-300">Selecciona una tarea frecuente o escribe tu pregunta para recibir los pasos exactos y un botón directo a la función:</p>
+            <div class="flex flex-wrap gap-1.5 pt-1 text-[11px]">
+              <button type="button" onclick="askAiPosCopilot('¿Cómo realizar una venta rápida por unidad, blíster o caja?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🛒 ¿Cómo vender en el POS?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo registrar e imprimir la toma de presión arterial y glicemia?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🩺 ¿Cómo registrar Presión/Azúcar e Imprimir?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo despachar un Kit Médico y aplicar oferta del vendedor?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">⚡ ¿Cómo despachar Kits Médicos?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo gestionar pacientes crónicos y la alerta de 10 días?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🗓️ ¿Cómo usar Crónicos 10 Días?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo subir medicamentos nuevos o reabastecer bajo stock?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">📦 ¿Cómo subir stock y lotes?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo vender a crédito o registrar abono de deudor?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">💳 ¿Cómo vender a Crédito / Fiado?</button>
+              <button type="button" onclick="askAiPosCopilot('¿Cómo facturar con Seguro Médico ARS o pedidos por WhatsApp?')" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-teal-500 hover:text-slate-950 font-bold transition cursor-pointer">🛡️ ¿Cómo aplicar Seguro ARS y WhatsApp?</button>
+            </div>
+            <form onsubmit="handleAiCopilotFormSubmit(event)" class="flex gap-2 pt-2">
+              <input id="ai-copilot-question-input" type="text" placeholder="Escribe tu duda del sistema o de un medicamento (ej: ¿Cómo imprimo la toma de presión? o ¿Qué doy si piden Panadol?)..." class="flex-1 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-xs font-semibold focus:outline-none focus:border-teal-400" />
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs cursor-pointer">Preguntar a FarmaIA</button>
+            </form>
+          </div>
+          <div id="ai-copilot-answer-box" class="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 text-xs">
+            <!-- Respuesta interactiva del Copiloto -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
+  
+  <!-- ========================================================================= -->
+  <!-- MODAL POS: BANDEJA DE QUEJAS Y RECLAMOS DE CLIENTES CON IA -->
+  <!-- ========================================================================= -->
+  <div id="pos-quejas-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-slate-900 via-rose-950 to-slate-900 text-white p-4 sm:p-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-rose-600/30 border border-rose-400/50 flex items-center justify-center text-xl shrink-0">
+            📢
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-black uppercase tracking-wider border border-rose-400/40">
+                AUDITORÍA Y MEJORA CONTINUA CON IA
+              </span>
+              <span id="pos-quejas-modal-count-badge" class="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold">0 Pendientes</span>
+            </div>
+            <h3 class="text-lg sm:text-xl font-black tracking-tight text-white mt-1">Bandeja de Quejas y Sugerencias de Clientes (IA)</h3>
+            <p class="text-xs text-rose-200 font-medium">Revisión de reclamos formulados desde la App móvil y categorizados por FarmaIA</p>
+          </div>
+        </div>
+        <button type="button" onclick="closePosQuejasModal()" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-base font-bold cursor-pointer transition">✕</button>
+      </div>
+
+      <!-- Filtros de Estado -->
+      <div class="bg-slate-50 px-4 sm:px-6 py-2.5 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
+        <div class="flex items-center gap-1.5" id="pos-quejas-filter-btns">
+          <button type="button" onclick="loadPosQuejas('TODAS')" id="pos-queja-filter-TODAS" class="px-3 py-1.5 rounded-xl font-extrabold bg-slate-900 text-white transition">Todas</button>
+          <button type="button" onclick="loadPosQuejas('PENDIENTE')" id="pos-queja-filter-PENDIENTE" class="px-3 py-1.5 rounded-xl font-extrabold bg-white text-slate-700 hover:bg-slate-200 border border-slate-200 transition">Pendientes</button>
+          <button type="button" onclick="loadPosQuejas('EN_REVISION')" id="pos-queja-filter-EN_REVISION" class="px-3 py-1.5 rounded-xl font-extrabold bg-white text-slate-700 hover:bg-slate-200 border border-slate-200 transition">En Revisión</button>
+          <button type="button" onclick="loadPosQuejas('RESUELTO')" id="pos-queja-filter-RESUELTO" class="px-3 py-1.5 rounded-xl font-extrabold bg-white text-slate-700 hover:bg-slate-200 border border-slate-200 transition">Resueltas</button>
+        </div>
+        <button type="button" onclick="loadPosQuejas()" class="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold transition flex items-center gap-1 cursor-pointer">
+          <span>🔄</span> <span>Actualizar</span>
+        </button>
+      </div>
+
+      <!-- Lista de Quejas -->
+      <div id="pos-quejas-list-container" class="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 bg-slate-100/60">
+        <!-- Renderizado dinámicamente por sistema_farmacia.js -->
+      </div>
+    </div>
+  </div>
+
+
+<!-- ========================================================================= -->
+  <!-- =========================================================================
+       MODAL 1: OCR DE RECETAS MÉDICAS CON VISIÓN IA (FARMAIA)
+       ========================================================================= -->
+  <div id="pos-receta-ocr-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-indigo-900">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-2xl shadow-lg border border-blue-400/40">
+            📸
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-black uppercase text-blue-300 tracking-wider">FARMAIA VISION OCR</span>
+              <span class="text-[10px] bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-full border border-blue-400/40 font-extrabold">Transcripción Médica</span>
+            </div>
+            <h2 class="text-lg font-black text-white">Escanear Receta Médica y Validar Alergias</h2>
+          </div>
+        </div>
+        <button type="button" onclick="closePosRecetaOcrModal()" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-5 overflow-y-auto space-y-4 text-xs">
+        <!-- Subir imagen o Recetas de Demostración Clínicas -->
+        <div class="p-4 rounded-2xl bg-slate-50 border-2 border-dashed border-indigo-300 text-center space-y-3">
+          <p class="font-extrabold text-slate-800 text-sm">Arrastra la foto de la receta médica manuscrita o selecciona una prueba clínica:</p>
+          
+          <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_amoxicilina.jpg')" class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+              <span>🩺 Receta 1: Amoxicilina</span>
+              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">Carlos Morales (Alérgico a Penicilina)</span>
+            </button>
+            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_sulfas.jpg')" class="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+              <span>🩺 Receta 2: Trimetoprim/Sulfa</span>
+              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">María Fernández (Alérgica a Sulfas)</span>
+            </button>
+            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_segura.jpg')" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+              <span>🩺 Receta 3: Azitromicina</span>
+              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">Juan Gómez (Segura / Sin Alergias)</span>
+            </button>
+          </div>
+
+          <div class="pt-2 flex items-center justify-center gap-2">
+            <label class="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-extrabold cursor-pointer flex items-center gap-2">
+              <span>📁 Cargar Imagen Personalizada (JPG, PNG)</span>
+              <input type="file" id="pos-receta-file-input" accept="image/*" class="hidden" onchange="handleRecetaCustomFile(this)" />
+            </label>
+          </div>
+        </div>
+
+        <!-- Indicador de Carga / Escaneo -->
+        <div id="pos-ocr-loading" class="hidden p-6 rounded-2xl bg-indigo-950 text-white text-center space-y-2">
+          <div class="inline-block animate-spin text-3xl">⚙️</div>
+          <p class="font-black text-sm">FarmaIA Vision está leyendo y transcribiendo la prescripción médica...</p>
+          <p class="text-xs text-indigo-300">Extrayendo principios activos, dosis, posología y cruzando con el catálogo de alergias.</p>
+        </div>
+
+        <!-- Resultados de la Transcripción -->
+        <div id="pos-ocr-results" class="hidden space-y-4">
+          <!-- Tarjeta de Datos del Médico y Paciente -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-indigo-50 border border-indigo-200">
+            <div>
+              <span class="text-[10px] uppercase font-black text-indigo-700 tracking-wider">MÉDICO PRESCRIPTOR:</span>
+              <p id="pos-ocr-doctor-name" class="font-extrabold text-slate-900 text-sm mt-0.5">Dr. Médico</p>
+              <p id="pos-ocr-doctor-info" class="text-slate-600 text-xs">Exeq: 0000 • Centro Médico</p>
+            </div>
+            <div>
+              <span class="text-[10px] uppercase font-black text-indigo-700 tracking-wider">PACIENTE & DIAGNÓSTICO:</span>
+              <p id="pos-ocr-patient-name" class="font-extrabold text-slate-900 text-sm mt-0.5">Paciente</p>
+              <p id="pos-ocr-diagnosis" class="text-slate-600 text-xs">Diagnóstico clínico</p>
+            </div>
+          </div>
+
+          <!-- Tabla de Medicamentos -->
+          <div class="rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-100 text-slate-700 font-black border-b border-slate-200">
+                <tr>
+                  <th class="p-3">Medicamento Prescrito</th>
+                  <th class="p-3">Posología</th>
+                  <th class="p-3">Precio y Stock</th>
+                  <th class="p-3 text-center">Estado Farmacológico</th>
+                  <th class="p-3 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="pos-ocr-table-body" class="divide-y divide-slate-100">
+                <!-- Inyectado por JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Resumen de Alerta de FarmaIA -->
+          <div id="pos-ocr-summary-card" class="p-3.5 rounded-2xl border text-xs flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span id="pos-ocr-summary-icon" class="text-2xl">⚠️</span>
+              <p id="pos-ocr-summary-text" class="font-bold">Resumen de evaluación IA</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+        <button type="button" onclick="closePosRecetaOcrModal()" class="px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer">
+          Cerrar
+        </button>
+        <button type="button" id="pos-ocr-btn-precargar" onclick="preloadOcrItemsToPosCart()" class="hidden px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-lg transition flex items-center gap-2 cursor-pointer">
+          <span>🛒 Precargar en Carrito POS</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL 2: INTERCEPTOR DE BLOQUEO DE ALERGIA POR FARMAIA
+       ========================================================================= -->
+  <div id="pos-allergy-block-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border-4 border-rose-500 space-y-4 text-center">
+      <div class="w-20 h-20 mx-auto rounded-3xl bg-rose-100 border-2 border-rose-400 flex items-center justify-center text-4xl shadow-md">
+        <img src="assets/robot_atencion.png" alt="FarmaIA Alerta" class="w-16 h-16 object-contain animate-bounce" onerror="this.src='/farmaia_model.jpg'" />
+      </div>
+
+      <div class="space-y-1">
+        <span class="px-3 py-1 rounded-full bg-rose-600 text-white text-[11px] font-black uppercase tracking-wider inline-block">
+          ⛔ BLOQUEO DE SEGURIDAD POR ALERGIA
+        </span>
+        <h3 class="text-xl font-black text-slate-900 mt-2">Contraindicación Farmacológica Crítica</h3>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-left text-xs space-y-2">
+        <p class="font-extrabold text-rose-950" id="pos-allergy-modal-patient-info">Paciente: Carlos Morales</p>
+        <p class="text-slate-700" id="pos-allergy-modal-reason">
+          El medicamento que intentas agregar contiene un principio activo incompatible con la alergia registrada del paciente.
+        </p>
+      </div>
+
+      <!-- Alternativas Sugeridas -->
+      <div id="pos-allergy-alternatives-container" class="text-left space-y-2">
+        <span class="text-[11px] font-black uppercase text-teal-800 tracking-wider block">Alternativas Terapéuticas Seguras Disponibles:</span>
+        <div id="pos-allergy-alternatives-list" class="space-y-1.5">
+          <!-- Inyectado por JS -->
+        </div>
+      </div>
+
+      <div class="pt-2 flex items-center justify-center gap-3">
+        <button type="button" onclick="closePosAllergyBlockModal()" class="px-5 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer">
+          Cancelar y Proteger Paciente
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- =========================================================================
+       MODAL: ARQUEO Y CIERRE DE CAJA MULTIMONEDA (CORTE X Y Z)
+       ========================================================================= -->
+  <div id="pos-caja-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-5 bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-white flex items-center justify-between border-b border-amber-900/60">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-500 flex items-center justify-center text-2xl shadow-lg border border-yellow-300/40">
+            💰
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-black uppercase text-amber-300 tracking-wider">GESTIÓN FISCAL DE CAJA</span>
+              <span class="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-400/40 font-extrabold">Multimoneda DOP / USD</span>
+            </div>
+            <h2 class="text-lg font-black text-white">Arqueo y Cierre de Caja (Corte X / Corte Z)</h2>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="openPosCashDrawerDirect()" title="Enviar pulso ESC/POS para abrir gaveta física" class="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 font-black text-xs flex items-center gap-1.5 transition cursor-pointer">
+            <span>🔓 Abrir Gaveta</span>
+          </button>
+          <button type="button" onclick="closePosCajaModal()" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm transition cursor-pointer">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="p-5 overflow-y-auto space-y-4 text-xs">
+        <!-- Tarjetas de Resumen de Caja del Turno -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-800">
+          <div class="p-3.5 rounded-2xl bg-amber-50 border border-amber-200">
+            <span class="text-[10px] uppercase font-bold text-amber-800 block">Fondo Inicial Caja</span>
+            <p id="caja-fondo-dop" class="text-base font-black text-amber-950 mt-1">RD$ 3,000.00</p>
+            <p id="caja-fondo-usd" class="text-[10px] font-bold text-amber-700">+ $50.00 USD</p>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200">
+            <span class="text-[10px] uppercase font-bold text-emerald-800 block">Ventas Efectivo Hoy</span>
+            <p id="caja-ventas-efectivo" class="text-base font-black text-emerald-950 mt-1">RD$ 0.00</p>
+            <p id="caja-ventas-usd" class="text-[10px] font-bold text-emerald-700">$0.00 USD recibidos</p>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-blue-50 border border-blue-200">
+            <span class="text-[10px] uppercase font-bold text-blue-800 block">Ventas Tarjeta / Transf.</span>
+            <p id="caja-ventas-bancos" class="text-base font-black text-blue-950 mt-1">RD$ 0.00</p>
+            <p id="caja-total-tx" class="text-[10px] font-bold text-blue-700">0 transacciones</p>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-purple-50 border-2 border-purple-300">
+            <span class="text-[10px] uppercase font-black text-purple-800 block">Esperado en Gaveta</span>
+            <p id="caja-total-esperado" class="text-base font-black text-purple-950 mt-1">RD$ 6,000.00</p>
+            <p class="text-[10px] text-purple-700 font-bold">Efectivo + Fondo</p>
+          </div>
+        </div>
+
+        <!-- Tasa de Cambio y Configuración -->
+        <div class="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200">
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-slate-700">💵 Tasa Oficial de Cambio:</span>
+            <span class="font-mono text-xs">1 USD =</span>
+            <input type="number" id="caja-tasa-usd" value="60.00" step="0.25" class="w-20 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-xs text-center" oninput="recalculateCajaCounting()" />
+            <span class="text-slate-500 text-[10px]">DOP</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-slate-700">Ancho Ticket:</span>
+            <select id="caja-paper-width" class="px-2 py-1 rounded-lg border border-slate-300 text-xs font-bold">
+              <option value="80mm" selected>80 mm (Estándar)</option>
+              <option value="58mm">58 mm (Compacto)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Calculadora de Conteo de Efectivo Multimoneda (Billetes y Monedas) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Columna 1: Pesos Dominicanos (DOP) -->
+          <div class="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span class="font-black text-slate-900 text-sm flex items-center gap-1.5">
+                <span>🇩🇴</span> <span>Conteo Pesos (DOP)</span>
+              </span>
+              <span id="caja-subtotal-dop-badge" class="font-mono font-black text-emerald-800 text-xs bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">RD$ 0.00</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 2,000 x</span>
+                <input type="number" min="0" value="0" data-val="2000" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 1,000 x</span>
+                <input type="number" min="0" value="0" data-val="1000" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 500 x</span>
+                <input type="number" min="0" value="0" data-val="500" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 200 x</span>
+                <input type="number" min="0" value="0" data-val="200" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 100 x</span>
+                <input type="number" min="0" value="0" data-val="100" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 50 x</span>
+                <input type="number" min="0" value="0" data-val="50" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">RD$ 25 x</span>
+                <input type="number" min="0" value="0" data-val="25" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">Monedas (10,5,1) x</span>
+                <input type="number" min="0" value="0" data-val="10" data-cur="DOP" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Columna 2: Dólares Americanos (USD) -->
+          <div class="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span class="font-black text-slate-900 text-sm flex items-center gap-1.5">
+                <span>🇺🇸</span> <span>Conteo Dólares (USD)</span>
+              </span>
+              <span id="caja-subtotal-usd-badge" class="font-mono font-black text-blue-800 text-xs bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">$ 0.00 USD</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 100 USD x</span>
+                <input type="number" min="0" value="0" data-val="100" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 50 USD x</span>
+                <input type="number" min="0" value="0" data-val="50" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 20 USD x</span>
+                <input type="number" min="0" value="0" data-val="20" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 10 USD x</span>
+                <input type="number" min="0" value="0" data-val="10" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 5 USD x</span>
+                <input type="number" min="0" value="0" data-val="5" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                <span class="font-bold text-slate-700">$ 1 USD x</span>
+                <input type="number" min="0" value="0" data-val="1" data-cur="USD" class="w-16 px-2 py-1 rounded-lg border border-slate-300 font-mono font-bold text-right caja-bill-inp" oninput="recalculateCajaCounting()" />
+              </div>
+            </div>
+            
+            <button type="button" onclick="autoFillCajaBalanced()" class="w-full py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition cursor-pointer">
+              ⚡ Autocompletar Conteo Cuadrado (Prueba Rápida)
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner de Cuadre Dinámico y Diferencia -->
+        <div id="caja-diferencia-card" class="p-4 rounded-2xl bg-slate-100 border-2 border-slate-300 flex items-center justify-between text-xs transition">
+          <div class="flex items-center gap-3">
+            <span id="caja-diferencia-icon" class="text-3xl">⚖️</span>
+            <div>
+              <span id="caja-diferencia-title" class="text-xs font-black uppercase tracking-wider text-slate-800">ESTADO DEL CUADRE: INGRESA EL CONTEO</span>
+              <p id="caja-diferencia-desc" class="text-[11px] text-slate-600">Total Contado: RD$ 0.00 • Esperado: RD$ 6,000.00</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] text-slate-500 font-bold block">Diferencia Neta:</span>
+            <span id="caja-diferencia-amount" class="text-base font-black font-mono text-slate-900">RD$ 0.00</span>
+          </div>
+        </div>
+
+        <!-- Observaciones -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Notas u Observaciones del Cajero:</label>
+          <input type="text" id="caja-observaciones-inp" placeholder="Ej: Turno entregado a satisfacción, sin novedades en gaveta..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium" />
+        </div>
+      </div>
+
+      <!-- Footer con botones de Corte X y Corte Z -->
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onclick="closePosCajaModal()" class="px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer text-xs">
+          Cerrar
+        </button>
+
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="executeCajaCorte('CORTE_X')" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer">
+            <span>📊 Generar Corte X (Parcial)</span>
+          </button>
+          <button type="button" onclick="executeCajaCorte('CORTE_Z')" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs shadow-lg transition flex items-center gap-1.5 cursor-pointer">
+            <span>🔒 Generar Corte Z (Cierre Final & Gaveta)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: CONFIGURACIÓN E IMPRESIÓN DIRECTA DE TICKETERA TÉRMICA ESC/POS
+       ========================================================================= -->
+  <div id="pos-thermal-printer-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-5 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between border-b border-slate-700">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center text-2xl shadow-lg border border-slate-500">
+            🖨️
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-black uppercase text-slate-300 tracking-wider">HARDWARE POS DIRECTO</span>
+              <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-400/40 font-extrabold">ESC/POS Nativo</span>
+            </div>
+            <h2 class="text-lg font-black text-white">Ticketera Térmica (58mm / 80mm) y Gaveta RJ11</h2>
+          </div>
+        </div>
+        <button type="button" onclick="closePosThermalPrinterModal()" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-5 overflow-y-auto space-y-4 text-xs">
+        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+          <span class="text-xs font-black text-slate-800 uppercase block">Configuración de Salida Física:</span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Ancho de Papel Térmico:</label>
+              <select id="thermal-setting-width" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                <option value="80mm" selected>80 mm (48 columnas)</option>
+                <option value="58mm">58 mm (32 columnas)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Modo de Comunicación:</label>
+              <select id="thermal-setting-mode" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                <option value="silent_socket" selected>Socket Directo / Red Local (Port 9100)</option>
+                <option value="usb_spool">Spooler Local USB / Raw</option>
+                <option value="emulator">Emulador Visual con Corte</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 pt-1">
+            <button type="button" onclick="printTestThermalTicket()" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+              <span>🖨️ Imprimir Ticket de Prueba</span>
+            </button>
+            <button type="button" onclick="openPosCashDrawerDirect()" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
+              <span>🔓 Disparar Pulso Gaveta (RJ11)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Previsualización Realista del Ticket de Papel Térmico -->
+        <div class="space-y-1.5">
+          <span class="text-[10px] uppercase font-black text-slate-500 tracking-wider block">Vista Previa de Salida ESC/POS:</span>
+          <div class="p-4 rounded-2xl bg-[#fffef7] border-2 border-slate-300 shadow-inner font-mono text-[11px] leading-tight text-slate-900 whitespace-pre overflow-x-auto max-h-60" id="thermal-preview-container">
+            <!-- Inyectado por JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+        <span class="text-[11px] text-slate-500">✅ Imprime directamente sin desplegar el diálogo de Windows (Silent Printing).</span>
+        <button type="button" onclick="closePosThermalPrinterModal()" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition cursor-pointer">
+          Aceptar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: ASISTENTE DE REABASTECIMIENTO A DROGUERÍAS (IA)
+       ========================================================================= -->
+  <div id="pos-restock-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-3xl max-w-5xl w-full max-h-[94vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-5 bg-gradient-to-r from-violet-900 via-purple-900 to-indigo-900 text-white flex items-center justify-between border-b border-purple-700/50">
+        <div class="flex items-center gap-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-violet-600 to-purple-500 flex items-center justify-center text-2xl shadow-lg border border-purple-400/40">
+            📦
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-black uppercase text-purple-300 tracking-wider">INTELIGENCIA DE COMPRAS</span>
+              <span class="text-[10px] bg-purple-500/30 text-purple-200 px-2.5 py-0.5 rounded-full border border-purple-400/40 font-extrabold">FarmaIA Copiloto</span>
+            </div>
+            <h2 class="text-lg font-black text-white">Asistente de Reabastecimiento a Droguerías</h2>
+          </div>
+        </div>
+        <button type="button" onclick="closePosRestockModal()" class="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold flex items-center justify-center text-sm transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Resumen Estadístico Cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-purple-50/60 border-b border-purple-100 text-xs">
+        <div class="p-3 rounded-2xl bg-white border border-purple-200 shadow-2xs">
+          <span class="text-[10px] uppercase font-bold text-slate-500 block">Total en Riesgo</span>
+          <div class="flex items-baseline gap-1.5 mt-0.5">
+            <span id="restock-card-total-prods" class="text-xl font-black text-purple-950">0</span>
+            <span class="text-[10px] text-slate-500 font-bold">fármacos</span>
+          </div>
+        </div>
+        <div class="p-3 rounded-2xl bg-white border border-rose-200 shadow-2xs">
+          <span class="text-[10px] uppercase font-bold text-rose-600 block">🚨 Críticos (Agotándose)</span>
+          <div class="flex items-baseline gap-1.5 mt-0.5">
+            <span id="restock-card-criticos" class="text-xl font-black text-rose-700">0</span>
+            <span class="text-[10px] text-rose-500 font-bold">urgentes</span>
+          </div>
+        </div>
+        <div class="p-3 rounded-2xl bg-white border border-amber-200 shadow-2xs">
+          <span class="text-[10px] uppercase font-bold text-amber-600 block">⚠️ Bajo Stock (Preventivo)</span>
+          <div class="flex items-baseline gap-1.5 mt-0.5">
+            <span id="restock-card-bajo-stock" class="text-xl font-black text-amber-700">0</span>
+            <span class="text-[10px] text-amber-500 font-bold">alerta</span>
+          </div>
+        </div>
+        <div class="p-3 rounded-2xl bg-white border border-emerald-200 shadow-2xs">
+          <span class="text-[10px] uppercase font-bold text-emerald-700 block">Inversión Estimada</span>
+          <div class="flex items-baseline gap-1.5 mt-0.5">
+            <span id="restock-card-total-dop" class="text-base font-black font-mono text-emerald-900">RD$ 0.00</span>
+          </div>
+          <span id="restock-card-total-usd" class="text-[10px] text-blue-700 font-bold font-mono">$0.00 USD</span>
+        </div>
+      </div>
+
+      <!-- Filtros y Controles -->
+      <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex flex-wrap items-center gap-3">
+          <div>
+            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Droguería / Laboratorio:</label>
+            <select id="restock-filter-lab" onchange="filterRestockGrid()" class="px-3 py-1.5 rounded-xl border border-slate-300 font-bold text-xs bg-white">
+              <option value="">Todas las Droguerías</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Días Cobertura:</label>
+            <select id="restock-filter-days" onchange="fetchRestockData()" class="px-3 py-1.5 rounded-xl border border-slate-300 font-bold text-xs bg-white">
+              <option value="15">15 Días (Reposición Quincenal)</option>
+              <option value="30" selected>30 Días (Stock de Seguridad Óptimo)</option>
+              <option value="45">45 Días (Temporada Alta)</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="downloadRestockCSV()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer">
+            <span>📊</span>
+            <span>Descargar Excel / CSV</span>
+          </button>
+          <button type="button" onclick="printRestockVoucher()" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer">
+            <span>🖨️</span>
+            <span>Imprimir Pedido Droguería</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabla de Fármacos Sugeridos -->
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-600 border-b border-slate-200">
+                <th class="py-2.5 px-3">Prioridad</th>
+                <th class="py-2.5 px-3">Medicamento / Principio Activo</th>
+                <th class="py-2.5 px-2">Laboratorio</th>
+                <th class="py-2.5 px-2 text-center">Stock Actual / Mín</th>
+                <th class="py-2.5 px-2 text-center">Venta Semanal</th>
+                <th class="py-2.5 px-3 text-center bg-purple-50/70 text-purple-950 font-black">Cant. Sugerida</th>
+                <th class="py-2.5 px-2 text-right">Costo Unit. Est.</th>
+                <th class="py-2.5 px-3 text-right">Subtotal Est.</th>
+              </tr>
+            </thead>
+            <tbody id="restock-table-tbody" class="divide-y divide-slate-100 font-medium">
+              <!-- Filas dinámicas -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+        <p class="text-slate-500 text-[11px]">
+          💡 Puedes ajustar directamente la <strong>cantidad a pedir</strong> en cada fila antes de exportar o imprimir.
+        </p>
+        <button type="button" onclick="closePosRestockModal()" class="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 font-bold text-slate-800 transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- MODAL: MONITOR DE DELIVERY EN TIEMPO REAL & GPS (POS FARMACIA) -->
+  <div id="pos-delivery-tracking-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 hidden animate-fade-in">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-teal-500/20 border border-teal-400/40 flex items-center justify-center text-xl">
+            🛵
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="font-extrabold text-base sm:text-lg">Monitor y Rastreo de Delivery en Tiempo Real</h3>
+              <span id="pos-delivery-modal-status-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 uppercase animate-pulse">
+                EN CAMINO
+              </span>
+            </div>
+            <p class="text-xs text-teal-300">
+              Orden: <span id="pos-delivery-modal-order" class="font-mono font-bold text-white">ORD-DAV-202610-88</span> • Repartidor con GPS simulado en vivo (Santo Domingo)
+            </p>
+          </div>
+        </div>
+        <button type="button" onclick="closePosDeliveryTrackingModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+        <!-- Mapa interactivo Leaflet -->
+        <div class="rounded-2xl overflow-hidden border border-slate-200 shadow-inner relative">
+          <div id="pos-delivery-leaflet-map" style="height: 320px; width: 100%; background: #e2e8f0; z-index: 1;"></div>
+          <!-- Badge flotante de ETA -->
+          <div class="absolute top-3 right-3 z-10 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-teal-200 shadow-md flex items-center gap-2">
+            <span class="text-lg">⏱️</span>
+            <div>
+              <p class="text-[9px] font-bold text-slate-500 uppercase leading-none">Tiempo Estimado</p>
+              <p id="pos-delivery-modal-eta" class="text-xs font-black text-teal-900 leading-tight">~8 minutos</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Info Grid: Cliente, Repartidor, Control de Estado -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <!-- Paciente / Destino -->
+          <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+            <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider block">📍 Destino del Paciente</span>
+            <p id="pos-delivery-modal-client" class="text-xs font-extrabold text-slate-900">Carlos Morales Gómez</p>
+            <p id="pos-delivery-modal-address" class="text-[11px] text-slate-600">Calle Francisco Prats Ramírez #14, Piantini</p>
+            <p id="pos-delivery-modal-phone" class="text-[11px] font-mono text-teal-700 font-bold">📞 809-555-1234</p>
+          </div>
+
+          <!-- Repartidor -->
+          <div class="p-3.5 rounded-2xl bg-teal-50/50 border border-teal-200 space-y-1">
+            <span class="text-[10px] font-black text-teal-700 uppercase tracking-wider block">🛵 Repartidor Asignado</span>
+            <p id="pos-delivery-modal-courier-name" class="text-xs font-extrabold text-slate-900">Pedro Ramírez (Motorizado #3)</p>
+            <p id="pos-delivery-modal-courier-vehicle" class="text-[11px] text-slate-600">Motocicleta Honda C-90 (Placa K-084213)</p>
+            <p id="pos-delivery-modal-courier-phone" class="text-[11px] font-mono text-teal-800 font-bold">📞 809-555-8899</p>
+          </div>
+
+          <!-- Cambio de Estado desde el POS -->
+          <div class="p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-2">
+            <span class="text-[10px] font-black text-indigo-800 uppercase tracking-wider block">🔄 Actualizar Estado de Despacho</span>
+            <select id="pos-delivery-status-select" class="w-full text-xs font-bold p-2 rounded-xl border border-indigo-300 bg-white">
+              <option value="PREPARANDO">📦 1. Preparando en Farmacia</option>
+              <option value="EN_CAMINO" selected>🛵 2. En Camino (Motorizado en Ruta)</option>
+              <option value="ENTREGADO">✅ 3. Entregado al Paciente</option>
+            </select>
+            <button type="button" onclick="updatePosDeliveryStatusBtn()" class="w-full py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs transition cursor-pointer">
+              Actualizar Despacho
+            </button>
+          </div>
+        </div>
+
+        <!-- Stepper de 4 Pasos -->
+        <div id="pos-delivery-stepper-container" class="grid grid-cols-4 gap-2 pt-1">
+          <!-- Renderizado dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+        <p class="text-[11px] text-slate-500">
+          💡 Las coordenadas del motorizado avanzan en tiempo real hacia el domicilio del paciente.
+        </p>
+        <button type="button" onclick="closePosDeliveryTrackingModal()" class="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-extrabold text-xs cursor-pointer transition">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- =====================================================================
+       MODAL 1: LIBRO OFICIAL DE CONTROL DE PSICOTRÓPICOS Y ESTUPEFACIENTES (LEY 50-88)
+       Exclusivo para Regente Farmacéutico y Administrador
+       ===================================================================== -->
+  <div id="pos-psicotropicos-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 hidden animate-fade-in">
+    <div class="bg-white rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header Oficial DIGEMAPS / Regente -->
+      <div class="p-4 sm:p-6 bg-gradient-to-r from-slate-950 via-purple-950 to-slate-950 text-white flex items-center justify-between border-b border-purple-900/50">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-2xl">
+            🩺
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-full bg-purple-400 text-slate-950 text-[10px] font-black uppercase">
+                DIGEMAPS • LEY 50-88
+              </span>
+              <span class="text-xs text-purple-300 font-semibold">Sustancias Controladas</span>
+            </div>
+            <h3 class="font-extrabold text-base sm:text-lg text-white mt-0.5">
+              Libro Oficial de Control de Psicotrópicos y Estupefacientes
+            </h3>
+            <p class="text-xs text-purple-200">
+              Custodia, validación de recetas retenidas e inventario bajo supervisión del <strong>Regente Farmacéutico</strong>.
+            </p>
+          </div>
+        </div>
+        <button type="button" onclick="closePosPsicotropicosModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Barra de Resumen y Acciones del Regente -->
+      <div class="p-4 bg-purple-50/60 border-b border-purple-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-xl bg-white border border-purple-200 shadow-2xs">
+            <span class="text-[10px] text-slate-500 font-bold uppercase block">Regente Responsable:</span>
+            <span id="psico-regente-name" class="font-extrabold text-purple-950">Dra. Elena Rosario (Exequátur #8492)</span>
+          </div>
+          <div class="p-2 rounded-xl bg-white border border-purple-200 shadow-2xs">
+            <span class="text-[10px] text-slate-500 font-bold uppercase block">Ubicación Custodia:</span>
+            <span class="font-extrabold text-slate-800">🔐 Gaveta de Seguridad / Caja Fuerte</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="loadPosPsicotropicosLibro()" class="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-purple-950 border border-purple-300 font-black shadow-2xs flex items-center gap-1.5 transition cursor-pointer">
+            <span>🔄</span> <span>Actualizar Libro</span>
+          </button>
+          <button type="button" onclick="togglePsicoNewEntryForm()" class="px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black shadow flex items-center gap-1.5 transition cursor-pointer">
+            <span>➕</span> <span>Registrar Entrada / Ajuste</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Formulario Desplegable de Nuevo Movimiento Controlado -->
+      <div id="psico-new-entry-container" class="hidden p-4 bg-slate-50 border-b border-slate-200 transition">
+        <form onsubmit="submitPsicoMovement(event)" class="space-y-3 text-xs">
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Medicamento Controlado *</label>
+              <select id="psico-form-prod-id" required class="w-full p-2 rounded-xl border border-slate-300 bg-white font-bold">
+                <!-- Opciones dinámicas de psicotrópicos -->
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Tipo Movimiento *</label>
+              <select id="psico-form-tipo" required class="w-full p-2 rounded-xl border border-slate-300 bg-white font-bold">
+                <option value="ENTRADA">📦 ENTRADA (Recepción de Droguería)</option>
+                <option value="SALIDA_VENTA">🩺 SALIDA (Venta con Receta Retenida)</option>
+                <option value="AJUSTE">⚖️ AJUSTE / MERMA (Auditoría Técnica)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Cantidad Unidades *</label>
+              <input id="psico-form-cantidad" type="number" min="1" required value="10" class="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono font-bold" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">No. Receta / Factura Droguería *</label>
+              <input id="psico-form-receta" type="text" required placeholder="Ej. REC-2026-904" class="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Médico Prescriptor</label>
+              <input id="psico-form-medico" type="text" placeholder="Dr. Juan Domínguez" class="w-full p-2 rounded-xl border border-slate-300 bg-white" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Exequátur Médico #</label>
+              <input id="psico-form-exequatur" type="text" placeholder="CMD-58291" class="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Paciente / Cédula</label>
+              <input id="psico-form-paciente" type="text" placeholder="Carlos Morales (402-1234567-1)" class="w-full p-2 rounded-xl border border-slate-300 bg-white" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Observaciones Sanitarias</label>
+              <input id="psico-form-obs" type="text" placeholder="Lote verificado y custodiado" class="w-full p-2 rounded-xl border border-slate-300 bg-white" />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" onclick="togglePsicoNewEntryForm()" class="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 font-bold text-slate-700 transition">
+              Cancelar
+            </button>
+            <button type="submit" class="px-5 py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-extrabold shadow transition">
+              💾 Asentar en Libro Oficial
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tabla del Libro Oficial -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-5">
+        <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-600 border-b border-slate-200">
+                <th class="py-2.5 px-3">Fecha & Folio</th>
+                <th class="py-2.5 px-3">Fármaco Controlado</th>
+                <th class="py-2.5 px-2 text-center">Movimiento</th>
+                <th class="py-2.5 px-2 text-center">Cant.</th>
+                <th class="py-2.5 px-2 text-center bg-purple-50/70 text-purple-950 font-black">Saldo</th>
+                <th class="py-2.5 px-3">Receta / Médico / Exequátur</th>
+                <th class="py-2.5 px-3">Paciente / Cédula</th>
+                <th class="py-2.5 px-3">Regente Responsable</th>
+              </tr>
+            </thead>
+            <tbody id="psico-table-tbody" class="divide-y divide-slate-100 font-medium">
+              <!-- Renderizado dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+        <p class="text-slate-500 text-[11px]">
+          📜 Libro digital auditado conforme a la <strong>Ley 50-88 sobre Drogas y Sustancias Controladas</strong>.
+        </p>
+        <button type="button" onclick="closePosPsicotropicosModal()" class="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-extrabold transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL 2: AUTORIZACIÓN DE DESPACHO PSICOTRÓPICO EN POS (CAJERO -> REGENTE)
+       ===================================================================== -->
+  <div id="pos-psicotropico-auth-modal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4 hidden animate-fade-in">
+    <div class="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border-2 border-purple-400 space-y-4 text-xs">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-2xl bg-purple-100 border border-purple-300 flex items-center justify-center text-2xl shrink-0">
+          🔒
+        </div>
+        <div>
+          <span class="px-2 py-0.5 rounded-full bg-purple-200 text-purple-900 text-[10px] font-black uppercase">
+            AUTORIZACIÓN TÉCNICA REQUERIDA
+          </span>
+          <h3 class="font-black text-slate-900 text-base mt-0.5">Fármaco Psicotrópico Controlado</h3>
+        </div>
+      </div>
+
+      <div class="p-3 bg-purple-50 rounded-2xl border border-purple-200 text-purple-950 space-y-1">
+        <p class="font-extrabold" id="psico-auth-product-title">Clonazepam 2mg (Rivotril)</p>
+        <p class="text-[11px] text-purple-800">
+          Conforme a la Ley 50-88, el Cajero no puede despachar este producto sin la retención física de la receta y la firma/PIN del <strong>Regente Farmacéutico</strong>.
+        </p>
+      </div>
+
+      <form onsubmit="submitPsicotropicoAuthorization(event)" class="space-y-3">
+        <input type="hidden" id="psico-auth-product-id" />
+        <input type="hidden" id="psico-auth-cantidad" value="1" />
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-0.5">No. de Receta Médica Retenida *</label>
+          <input id="psico-auth-receta" type="text" required placeholder="Ej. REC-84920" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-mono font-bold" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-bold text-slate-700 mb-0.5">Médico Prescriptor *</label>
+            <input id="psico-auth-medico" type="text" required placeholder="Dr. Juan López" class="w-full p-2 rounded-xl border border-slate-300 bg-white" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-0.5">Exequátur # *</label>
+            <input id="psico-auth-exequatur" type="text" required placeholder="14982-CMD" class="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-0.5">Cédula del Paciente / Comprador *</label>
+          <input id="psico-auth-cedula" type="text" required placeholder="402-XXXXXXX-X" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-mono" />
+        </div>
+
+        <div class="p-3 bg-amber-50 rounded-2xl border border-amber-200 space-y-1.5">
+          <label class="block font-extrabold text-amber-950">🔑 PIN o Clave de Regente / Admin *</label>
+          <input id="psico-auth-regente-pin" type="password" required placeholder="Ingresar clave para autorizar..." class="w-full p-2.5 rounded-xl border border-amber-300 bg-white font-mono font-bold text-center text-sm" />
+          <p class="text-[10px] text-amber-800">El Regente valida la receta médica antes de liberar el producto al mostrador.</p>
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+          <button type="button" onclick="closePsicotropicoAuthModal()" class="w-1/2 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold transition cursor-pointer">
+            Cancelar
+          </button>
+          <button type="submit" class="w-1/2 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-black shadow transition cursor-pointer">
+            ✓ Autorizar & Agregar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL 3: GESTIÓN DE PERSONAL Y ROLES RBAC (ADMINISTRADOR)
+       ===================================================================== -->
+  <div id="pos-staff-rbac-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 hidden animate-fade-in">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-4 sm:p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-2xl">
+            👥
+          </div>
+          <div>
+            <span class="px-2 py-0.5 rounded-full bg-indigo-400 text-slate-950 text-[10px] font-black uppercase">
+              CONTROL DE ACCESOS (RBAC)
+            </span>
+            <h3 class="font-extrabold text-base sm:text-lg text-white mt-0.5">
+              Gestión de Personal y Roles de Seguridad
+            </h3>
+            <p class="text-xs text-indigo-200">
+              Separación de perfiles: <strong>Cajero</strong> (ventas y consulta), <strong>Regente</strong> (psicotrópicos, alertas e inventario), <strong>Administrador</strong> (control total).
+            </p>
+          </div>
+        </div>
+        <button type="button" onclick="closePosStaffRbacModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Resumen de Roles y Formulario de Usuario -->
+      <div class="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+        <div class="p-3 rounded-2xl bg-white border border-slate-200 space-y-1">
+          <p class="font-extrabold text-slate-900 flex items-center gap-1"><span>🛡️</span> <span>Administrador</span></p>
+          <p class="text-[11px] text-slate-500">Precios, costos, arqueos multimoneda, quejas y reportes financieros.</p>
+        </div>
+        <div class="p-3 rounded-2xl bg-white border border-slate-200 space-y-1">
+          <p class="font-extrabold text-teal-900 flex items-center gap-1"><span>🩺</span> <span>Regente Farmacéutico</span></p>
+          <p class="text-[11px] text-slate-500">Control de psicotrópicos Ley 50-88, alertas clínicas de alergias, inventario técnico.</p>
+        </div>
+        <div class="p-3 rounded-2xl bg-white border border-slate-200 space-y-1">
+          <p class="font-extrabold text-sky-900 flex items-center gap-1"><span>👤</span> <span>Cajero Mostrador</span></p>
+          <p class="text-[11px] text-slate-500">Ventas en mostrador, facturación y consulta de catálogo (sin edición de precios).</p>
+        </div>
+      </div>
+
+      <!-- Formulario para agregar / editar usuario -->
+      <div class="p-4 border-b border-slate-200 bg-white">
+        <form onsubmit="submitStaffUser(event)" class="grid grid-cols-1 sm:grid-cols-6 gap-2.5 text-xs items-end">
+          <input type="hidden" id="staff-form-id" />
+          <div class="sm:col-span-2">
+            <label class="block font-bold text-slate-700 mb-1">Nombre Completo *</label>
+            <input id="staff-form-nombre" type="text" required placeholder="Ej. Juan Pérez" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-bold" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Usuario (Login) *</label>
+            <input id="staff-form-username" type="text" required placeholder="juan.pos" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-mono" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Rol Asignado *</label>
+            <select id="staff-form-rol" required class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-bold">
+              <option value="CAJERO">👤 Cajero (Solo Ventas)</option>
+              <option value="REGENTE">🩺 Regente Farmacéutico</option>
+              <option value="ADMINISTRADOR">🛡️ Administrador</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Contraseña *</label>
+            <input id="staff-form-clave" type="text" required placeholder="Ej. clave123" value="123456" class="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-mono font-bold" />
+          </div>
+          <div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow transition cursor-pointer">
+              ➕ Guardar Personal
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tabla de Personal -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-5">
+        <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-600 border-b border-slate-200">
+                <th class="py-2.5 px-3">Usuario</th>
+                <th class="py-2.5 px-3">Nombre Completo</th>
+                <th class="py-2.5 px-2 text-center">Rol Asignado</th>
+                <th class="py-2.5 px-3">Permisos Principales</th>
+                <th class="py-2.5 px-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="staff-table-tbody" class="divide-y divide-slate-100 font-medium">
+              <!-- Filas dinámicas -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+        <p class="text-slate-500 text-[11px]">
+          🔒 Las contraseñas de personal son gestionadas y reseteadas por el Administrador de la sucursal.
+        </p>
+        <button type="button" onclick="closePosStaffRbacModal()" class="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-extrabold transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+    
+  <!-- =========================================================================
+       MODAL: CAMBIO SEGURO DE CUENTA CON CONTRASEÑA (RBAC POS)
+       ========================================================================= -->
+  <div id="pos-switch-user-modal" class="fixed inset-0 z-[120] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 hidden animate-fade-in">
+    <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+      <!-- Header -->
+      <div class="p-5 bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-teal-500/20 border border-teal-400/40 flex items-center justify-center text-xl">
+            🔐
+          </div>
+          <div>
+            <h3 class="font-extrabold text-base text-white">Cambiar de Cuenta</h3>
+            <p class="text-xs text-teal-200">Ingresa la contraseña del usuario para cambiar de perfil</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeSwitchAccountModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Formulario -->
+      <form onsubmit="handleSwitchAccountSubmit(event)" class="p-6 space-y-4 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 uppercase mb-1">Usuario a Ingresar *</label>
+          <input
+            id="switch-modal-username"
+            type="text"
+            required
+            placeholder="Ej. admin, regente, cajero..."
+            class="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none font-bold text-sm bg-slate-50 text-slate-900"
+          />
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 uppercase mb-1">Contraseña de la Cuenta *</label>
+          <input
+            id="switch-modal-password"
+            type="password"
+            required
+            placeholder="Ingresa la contraseña..."
+            class="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none font-mono font-bold text-sm bg-white text-slate-900"
+          />
+        </div>
+
+        <div id="switch-modal-error" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onclick="closeSwitchAccountModal()"
+            class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition cursor-pointer"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            id="switch-modal-btn-submit"
+            class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold shadow-md transition cursor-pointer"
+          >
+            Validar y Cambiar Perfil ➔
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/three.min.js"></script>
+  <script src="/farmaia_3d_engine.js"></script>
+  <script src="/sistema_farmacia.js"></script>
+  <script src="/pos_guide_controller.js"></script>
+  <script src="/keep_alive_render.js"></script>
+  <script src="/farma_brain_client.js"></script>
+  <script src="/farma_unified_agent.js"></script>
 </body>
 </html>

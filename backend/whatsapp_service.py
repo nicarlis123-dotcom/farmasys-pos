@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Motor de Notificaciones Automatizadas por WhatsApp Business API (Meta Cloud API & Twilio)
 Multi-Farmacia — Cada sucursal/farmacia tiene su propio número de WhatsApp y configuración de API.
@@ -425,3 +426,102 @@ class WhatsAppBusinessService:
             "dispatch": dispatch_res,
         }
 
+    # =========================================================================
+    #
+
+    # =========================================================================
+    # NOTIFICACIONES AUTOMÁTICAS POR WHATSAPP: ALERTA DE 5 DÍAS PACIENTES CRÓNICOS
+    # =========================================================================
+    def send_chronic_5day_whatsapp_alert(
+        self, farmacia_id: int, paciente_cronico_id: int
+    ) -> Dict[str, Any]:
+        with self.db._get_connection(farmacia_id) as conn:
+            row = conn.execute(
+                "SELECT * FROM pacientes_cronicos WHERE id = ? AND farmacia_id = ?",
+                (int(paciente_cronico_id), int(farmacia_id)),
+            ).fetchone()
+            if not row:
+                raise ValueError("Paciente crónico no encontrado.")
+            paciente = dict(row)
+
+        cfg = self.get_config(farmacia_id)
+        farmacia_nombre = cfg.get("farmacia_nombre", "Farmacia Davalsi")
+
+        nombre_completo = paciente.get("paciente_nombre", "Paciente")
+        primer_nombre = nombre_completo.split()[0]
+        telefono = paciente.get("paciente_telefono", "").strip()
+        med_nombre = paciente.get("medicamento_nombre") or paciente.get("principio_activo") or "tu tratamiento habitual"
+
+        dias_restantes = 5
+        try:
+            fecha_venc = datetime.strptime(paciente.get("fecha_proximo_vencimiento_tratamiento", ""), "%Y-%m-%d")
+            delta = (fecha_venc.date() - datetime.now().date()).days
+            if delta >= 0:
+                dias_restantes = delta
+        except Exception:
+            pass
+
+        base_u = cfg.get("public_base_url", "http://localhost:8080")
+        msg = (
+            "🏥 *" + farmacia_nombre.upper() + " — RECORDATORIO DE TRATAMIENTO CRÓNICO* 💊\n\n"
+            "Hola *" + primer_nombre + "*, tu tratamiento de *" + med_nombre + "* está próximo a vencer (le restan aproximadamente *" + str(dias_restantes) + " días* de medicación).\n\n"
+            "¿Deseas que preparemos tu pedido con *delivery a domicilio*? 🛵📦\n\n"
+            "Responde *SÍ* a este mensaje para despacharlo de inmediato a tu dirección o ingresa a nuestra App:\n"
+            "📲 " + base_u + "/app\n\n"
+            "¡Cuidamos tu salud y la continuidad de tu medicación! 💚"
+        )
+
+        norm_phone = self.normalize_phone(telefono)
+        wa_link = f"https://wa.me/{norm_phone}?text={urllib.parse.quote(msg)}"
+
+        dispatch_res = self.send_api_message(
+            farmacia_id=farmacia_id,
+            recipient_role="PACIENTE_CRONICO_5D",
+            to_phone=telefono,
+            message_text=msg,
+            order_code=f"CRONICO-5D-{paciente_cronico_id}",
+        )
+
+        return {
+            "ok": True,
+            "paciente_id": paciente_cronico_id,
+            "paciente_nombre": nombre_completo,
+            "primer_nombre": primer_nombre,
+            "paciente_telefono": telefono,
+            "medicamento": med_nombre,
+            "dias_restantes": dias_restantes,
+            "mensaje": msg,
+            "wa_link": wa_link,
+            "dispatch": dispatch_res,
+        }
+
+    def scan_and_notify_all_chronic_5d(self, farmacia_id: int = 1) -> Dict[str, Any]:
+        from datetime import timedelta
+        fid = int(farmacia_id)
+        today = datetime.now().date()
+
+        dispatched = []
+        with self.db._get_connection(fid) as conn:
+            rows = conn.execute(
+                "SELECT * FROM pacientes_cronicos WHERE activo = 1 AND farmacia_id = ?",
+                (fid,),
+            ).fetchall()
+            pacientes = [dict(r) for r in rows]
+
+        for p in pacientes:
+            try:
+                f_venc = datetime.strptime(p.get("fecha_proximo_vencimiento_tratamiento", ""), "%Y-%m-%d").date()
+                diff_dias = (f_venc - today).days
+                if diff_dias <= 5:
+                    res = self.send_chronic_5day_whatsapp_alert(fid, p["id"])
+                    dispatched.append(res)
+            except Exception:
+                continue
+
+        return {
+            "ok": True,
+            "farmacia_id": fid,
+            "total_escaneados": len(pacientes),
+            "total_alertas_5d_enviadas": len(dispatched),
+            "alertas": dispatched,
+        }
