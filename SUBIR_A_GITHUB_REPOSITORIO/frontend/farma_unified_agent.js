@@ -247,7 +247,7 @@
             <button type="button" onclick="window.farmaUnifiedAgent.closeBubble()" class="text-slate-400 hover:text-white text-xs font-bold px-1.5 py-0.5 rounded transition cursor-pointer">✕</button>
           </div>
           <div id="farma-bubble-text" class="text-xs font-medium text-slate-200 leading-snug">
-            ¡Hola! Soy Farma, tu copiloto clínico e interactivo.
+            Hola, soy Farma, el copiloto inteligente de Farmacia Davalsi. ¿En qué puedo asistirte hoy?
           </div>
           <div class="farma-bubble-tail"></div>
         </div>
@@ -336,7 +336,7 @@
 
     handleAvatarClick() {
       this.setAnimation('Wave');
-      this.say('¿En qué puedo ayudarte? Puedes escribir tu consulta en el buscador o interactuar con el sistema.', 'Farma Copiloto');
+      this.say('Hola, soy Farma, el copiloto inteligente de Farmacia Davalsi. ¿En qué puedo asistirte hoy?', 'Farma Copiloto');
       setTimeout(() => {
         this.setAnimation('Idle');
       }, 3500);

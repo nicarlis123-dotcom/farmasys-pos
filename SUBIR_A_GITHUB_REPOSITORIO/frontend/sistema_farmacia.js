@@ -1885,10 +1885,11 @@ function showInvoiceReceiptModal(order) {
 
   area.innerHTML = `
     <div class="text-center space-y-1">
-      <h3 class="text-lg font-extrabold text-teal-800">${f.nombre || 'Farmacia Davalsi'}</h3>
-      <p class="text-xs text-slate-500">${f.eslogan || 'Sistema de Farmacia FarmaSys'}</p>
-      <p class="text-[11px] font-mono text-slate-500">RNC: ${f.rnc || '1-31-99887-2'} • Tel: ${f.telefono || f.telefono_whatsapp}</p>
-      <p class="text-[11px] text-slate-400">${f.direccion || ''}</p>
+      <div class="flex justify-center mb-1"><img src="/icon-192.png" class="w-11 h-11 object-contain mx-auto" /></div>
+      <h3 class="text-lg font-black text-teal-900 tracking-wider">FARMACIA DAVALSI</h3>
+      <p class="text-xs font-semibold text-teal-700">${f.eslogan || 'Salud al Instante'}</p>
+      <p class="text-[11px] font-mono font-bold text-slate-600">RNC: ${f.rnc || '1-31-99887-2'} | Tel: ${f.telefono || f.telefono_whatsapp || '(809) 555-0199'}</p>
+      <p class="text-[11px] text-slate-500">${f.direccion || 'Av. Abraham Lincoln #402, Piantini'}</p>
     </div>
     <div class="border-t-2 border-dashed border-teal-200 my-2"></div>
     <div class="text-[11px] space-y-0.5">
@@ -5102,10 +5103,11 @@ function printInvoiceReceipt(order) {
   const html = `
     <div style="max-width: 300px; margin: 0 auto; font-family: 'Courier New', Courier, monospace; font-size: 11px; line-height: 1.3;">
       <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 8px;">
-        <h2 style="margin: 0; font-size: 15px; font-weight: bold;">${f.nombre.toUpperCase()}</h2>
-        <p style="margin: 2px 0; font-size: 10px;">${f.eslogan}</p>
-        <p style="margin: 2px 0; font-size: 10px;">RNC: ${f.rnc} • Tel: ${f.telefono || f.telefono_whatsapp}</p>
-        <p style="margin: 2px 0; font-size: 9px;">${f.direccion}</p>
+        <div style="margin-bottom: 6px;"><img src="/icon-192.png" style="width: 44px; height: 44px; object-contain: contain; margin: 0 auto; display: block;" /></div>
+        <h2 style="margin: 0; font-size: 16px; font-weight: 900; letter-spacing: 0.5px;">FARMACIA DAVALSI</h2>
+        <p style="margin: 2px 0; font-size: 10px; font-weight: 600;">${f.eslogan || 'Salud al Instante • Servicio Profesional'}</p>
+        <p style="margin: 3px 0; font-size: 10px;">RNC: <strong>${f.rnc || '1-31-99887-2'}</strong> | Tel: <strong>${f.telefono || f.telefono_whatsapp || '(809) 555-0199'}</strong></p>
+        <p style="margin: 2px 0; font-size: 10px; color: #333;">${f.direccion || 'Av. Abraham Lincoln #402, Piantini, Santo Domingo'}</p>
       </div>
 
       <div style="border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px; font-size: 10px;">

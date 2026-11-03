@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Farmacia Davalsi — Sistema Omnicanal & Control de Inventario Unificado (RD$)</title>
+  <title>Farmacia Davalsi - Tu Salud y Bienestar</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -252,14 +252,12 @@
     <div class="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
       <!-- Branding Principal -->
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 flex items-center justify-center shadow-md shadow-teal-500/20">
-          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+        <div class="w-11 h-11 rounded-2xl bg-white p-1 flex items-center justify-center shadow-md shadow-teal-500/20 border border-teal-400/40 flex-shrink-0">
+          <img src="/icon-192.png" alt="Farmacia Davalsi Logo" class="w-full h-full object-contain" />
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <span class="font-extrabold text-base sm:text-lg tracking-tight text-white">FARMACIA DAVALSI</span>
+            <span class="font-black text-base sm:text-lg tracking-tight text-white">FARMACIA DAVALSI</span>
             <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-teal-500/20 text-teal-300 border border-teal-500/30">
               Omnicanal • RD$
             </span>
@@ -743,9 +741,29 @@
             <label class="block text-xs font-bold text-slate-700 mb-1">Número de WhatsApp (Para recibir confirmación de orden) *</label>
             <input id="app-client-phone" type="tel" value="" placeholder="Ej. 18095551234" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-mono font-semibold" />
           </div>
-          <div id="app-address-field-wrap">
-            <label id="app-address-label" class="block text-xs font-bold text-slate-700 mb-1">Dirección Exacta de Entrega a Domicilio *</label>
-            <input id="app-client-address" type="text" value="" placeholder="Sector, calle, número de casa o edificio..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-medium" />
+          <div id="app-address-field-wrap" class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label id="app-address-label" class="block text-xs font-bold text-slate-700">Dirección Exacta de Entrega a Domicilio *</label>
+              <button
+                type="button"
+                id="btn-app-get-geolocation"
+                onclick="capturarUbicacionActualGPS()"
+                class="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 font-extrabold text-[11px] border border-teal-300 shadow-2xs transition flex items-center gap-1 cursor-pointer"
+                title="Capturar tus coordenadas exactas por GPS para que el repartidor llegue directo a tu puerta"
+              >
+                <span>📍</span> <span>Usar mi ubicación actual</span>
+              </button>
+            </div>
+            <div class="relative">
+              <input id="app-client-address" type="text" value="" placeholder="Sector, calle, número de casa o edificio..." class="w-full pl-3 pr-8 py-2.5 rounded-xl border border-slate-300 text-xs font-medium focus:border-teal-600 focus:outline-none" />
+              <span id="app-gps-status-icon" class="hidden absolute right-2.5 top-2.5 text-xs">✅</span>
+            </div>
+            <!-- Coordenadas capturadas ocultas -->
+            <input type="hidden" id="app-client-lat" value="18.4835" />
+            <input type="hidden" id="app-client-lng" value="-69.9405" />
+            <div id="app-gps-feedback" class="hidden text-[10px] font-bold text-teal-700 bg-teal-50/80 px-2 py-1 rounded-md border border-teal-200 flex items-center gap-1">
+              <span>🎯</span> <span>Ubicación GPS capturada con éxito para navegación directa del motorizado.</span>
+            </div>
           </div>
         </div>
 
@@ -2214,5 +2232,6 @@ function dismissPwaBanner() {
   </script>
   <script src="/keep_alive_render.js"></script>
   <script src="/farma_unified_agent.js"></script>
+  <script src="/farma_cognitive_brain.js"></script>
 </body>
 </html>

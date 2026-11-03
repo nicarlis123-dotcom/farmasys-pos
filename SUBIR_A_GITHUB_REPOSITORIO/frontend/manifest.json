@@ -1,6 +1,6 @@
 {
-  "name": "Farmacia Davalsi — App Móvil de Pacientes",
-  "short_name": "Farmacia Davalsi",
+  "name": "Farmacia Davalsi",
+  "short_name": "Davalsi",
   "id": "/app",
   "description": "Catálogo de Medicamentos y Cuidado Personal por Caja, Blíster y Unidad con Envío a Domicilio y Seguro ARS.",
   "start_url": "/app",
