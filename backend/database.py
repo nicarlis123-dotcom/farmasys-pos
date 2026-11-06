@@ -25,6 +25,7 @@ Soporta:
 
 
 from __future__ import annotations
+import re
 import os
 import math
 
@@ -554,238 +555,7 @@ class DatabaseManager:
         except Exception:
             pass
 
-        # Sembrar productos antianémicos si no existen
-        try:
-            has_base = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras IN ('746100000001', '746100000013')").fetchone()[0]
-            if has_base > 0:
-                has_hierro = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000018'").fetchone()[0]
-                if has_hierro == 0:
-                    conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000018', 'Sulfato Ferroso 300mg (Hierro Elemental)', 'Sulfato Ferroso', '300mg',
-                        'Laboratorios Rowe', 'Hematología y Defensas', 'anemia,hierro,fatiga,debilidad,embarazo,deficiencia nutricional,hemoglobina',
-                        'Tableta', 8.0, 5.0, 15.0, 0, 10, 5, 250, 40, 'LOT-2026-18', '2028-09-30', 'H-01', 1
-                    )
-                    """)
-                has_folico = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000019'").fetchone()[0]
-                if has_folico == 0:
-                    conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000019', 'Ácido Fólico 5mg (Folato Esencial)', 'Ácido Fólico', '5mg',
-                        'Ethical Pharmaceutical', 'Vitaminas y Suplementos', 'anemia,acido folico,folato,embarazo,globulos rojos,nutricion,fatiga',
-                        'Tableta', 7.0, 5.0, 15.0, 0, 10, 5, 250, 40, 'LOT-2026-19', '2028-10-31', 'H-02', 1
-                    )
-                    """)
-        except Exception:
-            pass
-
-        for col, ctype in (("talla_cm", "REAL DEFAULT NULL"), ("imc", "REAL DEFAULT NULL"), ("clasificacion_imc", "TEXT DEFAULT ''")):
-            try:
-                conn.execute(f"ALTER TABLE registros_atencion_farmaceutica ADD COLUMN {col} {ctype};")
-            except Exception:
-                pass
-
-        try:
-            has_base_cat = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras IN ('746100000001', '746100000013')").fetchone()[0]
-            if has_base_cat > 0:
-                has_alb = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000016'").fetchone()[0]
-                if has_alb == 0:
-                    conn.execute(
-                        """
-                        INSERT INTO productos (
-                            farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                            laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                            descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                            unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                            stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                        ) VALUES (
-                            1, '746100000016', 'Albendazol 400mg (Antiparasitario)', 'Albendazol', '400mg',
-                            'Laboratorios Rowe', 'Antiparasitarios', 'parasitos,lombrices,ameba,dolor abdominal,diarrea',
-                            'Tableta', 25.0, 5.0, 12.0, 0, 2, 5, 180, 30, 'LOT-2026-16', '2028-05-30', 'G-04', 1
-                        )
-                        """
-                    )
-                has_met = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000017'").fetchone()[0]
-                if has_met == 0:
-                    conn.execute(
-                        """
-                        INSERT INTO productos (
-                            farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                            laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                            descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                            unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                            stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                        ) VALUES (
-                            1, '746100000017', 'Metronidazol 500mg', 'Metronidazol', '500mg',
-                            'Ethical Pharmaceutical', 'Antiparasitarios', 'ameba,parasitos,giardia,infeccion intestinal,diarrea',
-                            'Tableta', 15.0, 5.0, 12.0, 0, 10, 3, 210, 30, 'LOT-2026-17', '2028-06-30', 'G-05', 1
-                        )
-                        """
-                    )
-        except Exception:
-            pass
-
-        # 1. Tabla de Alergias Declaradas de Pacientes
-        try:
-            conn.execute("""
-            CREATE TABLE IF NOT EXISTS pacientes_alergias (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                farmacia_id INTEGER NOT NULL DEFAULT 1,
-                paciente_cedula TEXT NOT NULL,
-                paciente_nombre TEXT NOT NULL,
-                paciente_telefono TEXT DEFAULT '',
-                alergia_tipo TEXT NOT NULL,
-                descripcion_alergia TEXT DEFAULT '',
-                reaccion_severidad TEXT DEFAULT 'SEVERA / ANAFILAXIS',
-                sintomas TEXT DEFAULT 'Edema, erupción cutánea, broncoespasmo, shock',
-                fecha_registro TEXT NOT NULL,
-                activo INTEGER NOT NULL DEFAULT 1
-            );
-            """)
-        except Exception:
-            pass
-
-        # Sembrar pacientes con alergias para pruebas clínicas
-        try:
-            cnt_alergias = conn.execute("SELECT COUNT(*) FROM pacientes_alergias").fetchone()[0]
-            if cnt_alergias == 0:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                conn.executemany("""
-                    INSERT INTO pacientes_alergias (
-                        farmacia_id, paciente_cedula, paciente_nombre, paciente_telefono,
-                        alergia_tipo, descripcion_alergia, reaccion_severidad, sintomas, fecha_registro, activo
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                """, [
-                    (1, "402-1234567-1", "Carlos Morales Gómez", "809-555-1234", "PENICILINAS", "Alergia a Betalactámicos y Penicilinas (Amoxicilina, Ampicilina)", "SEVERA / ANAFILAXIS", "Urticaria aguda, broncoespasmo, edema de glotis y shock anafiláctico", now_str),
-                    (1, "001-9876543-2", "María Fernández Rivas", "829-444-5678", "SULFAS", "Alergia a Sulfas y Sulfonamidas (Trimetoprim/Sulfametoxazol, Bactrim)", "SEVERA / ERITEMA Y SHOCK", "Eritema multiforme, reacción alérgica dérmica severa y riesgo de Stevens-Johnson", now_str),
-                    (1, "031-0054321-9", "Juan Pérez Castro", "849-333-7890", "AINES", "Alergia a Antiinflamatorios no esteroideos (Ibuprofeno, Diclofenac)", "MODERADA / BRONCOESPASMO", "Broncoespasmo agudo, rinitis vasomotora y dolor epigástrico", now_str)
-                ])
-        except Exception:
-            pass
-
-        # Sembrar antibióticos y alternativas seguras si no existen
-        try:
-            has_bactrim = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000020'").fetchone()[0]
-            if has_bactrim == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000020', 'Trimetoprim / Sulfametoxazol 160/800mg (Bactrim Forte)', 'Trimetoprim + Sulfametoxazol', '160/800mg',
-                        'Laboratorios Roche', 'Antibióticos / Sulfonamidas', 'infeccion urinaria,cistitis,bactrim,sulfa,infeccion bacteriana,diarrea del viajero',
-                        'Comprimido', 30.0, 5.0, 15.0, 1, 10, 2, 140, 20, 'LOT-2026-20', '2028-11-30', 'B-02', 1
-                    )
-                """)
-            has_azi = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000021'").fetchone()[0]
-            if has_azi == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000021', 'Azitromicina 500mg (Tratamiento 3 Días)', 'Azitromicina', '500mg',
-                        'Laboratorios Feltrex', 'Antibióticos / Macrólidos', 'bronquitis,faringitis,infeccion respiratoria,alternativa penicilina,macrolido',
-                        'Tableta', 45.0, 5.0, 10.0, 1, 3, 1, 180, 25, 'LOT-2026-21', '2028-12-31', 'B-03', 1
-                    )
-                """)
-            has_nitro = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000022'").fetchone()[0]
-            if has_nitro == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000022', 'Nitrofurantoína 100mg (Macrodantina)', 'Nitrofurantoína', '100mg',
-                        'Laboratorios Rowe', 'Antisépticos Urinarios', 'infeccion urinaria,cistitis aguda,itu,antiseptico,orina',
-                        'Cápsula', 22.0, 5.0, 12.0, 1, 10, 3, 120, 20, 'LOT-2026-22', '2028-08-31', 'B-04', 1
-                    )
-                """)
-            has_diclo = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000023'").fetchone()[0]
-            if has_diclo == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000023', 'Diclofenac Sódico 50mg', 'Diclofenac', '50mg',
-                        'Ethical Pharmaceutical', 'Antiinflamatorios', 'dolor,inflamacion,golpe,articulaciones,esguince,muscular',
-                        'Tableta', 10.0, 5.0, 15.0, 0, 10, 5, 300, 40, 'LOT-2026-23', '2028-07-31', 'A-05', 1
-                    )
-                """)
-            has_prob = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000024'").fetchone()[0]
-            if has_prob == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000024', 'Probióticos Multi-Cepa Flora Intestinal (Lactobacillus & Bifidobacterium)',
-                        'Probióticos (Lactobacillus + Bifidobacterium)', '10 Mil Millones UFC',
-                        'Laboratorios Rowe', 'Gastroenterología', 'probioticos,flora intestinal,microbiota,diarrea por antibioticos,digestion,estomago',
-                        'Cápsula', 45.0, 5.0, 12.0, 0, 10, 3, 80, 25, 'LOT-2026-24', '2028-09-30', 'G-06', 1
-                    )
-                """)
-            has_jar = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000025'").fetchone()[0]
-            if has_jar == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000025', 'Jarabe Expectorante Miel y Limón 120ml', 'Guaifenesina + Miel de Abeja', '100mg/5ml',
-                        'Laboratorios FarmaDavalsi', 'Antigripales y Respiratorios', 'tos,tos con flema,jarabe,expectorante,pecho apretado,gripe,catarro',
-                        'Frasco', 180.0, 0.0, 10.0, 0, 1, 1, 6, 20, 'LOT-2026-25', '2027-12-31', 'C-02', 1
-                    )
-                """)
-            has_car = conn.execute("SELECT COUNT(*) FROM productos WHERE codigo_barras = '746100000026'").fetchone()[0]
-            if has_car == 0:
-                conn.execute("""
-                    INSERT INTO productos (
-                        farmacia_id, codigo_barras, nombre_comercial, principio_activo, concentracion,
-                        laboratorio, categoria, sintomas_tags, unidad_minima_nombre, precio_base,
-                        descuento_blister_pct, descuento_caja_pct, requiere_receta,
-                        unidades_por_blister, blisters_por_caja, stock_total_unidades,
-                        stock_minimo_alerta, lote, fecha_vencimiento, ubicacion_anaquel, activo
-                    ) VALUES (
-                        1, '746100000026', 'Caramelos Expectorantes con Mentol y Vitamina C', 'Mentol + Ácido Ascórbico', '50mg',
-                        'NutriDavalsi Health', 'Antigripales y Respiratorios', 'tos,garganta,caramelos,mentol,vitamina c,pastillas para la garganta,irritacion',
-                        'Pastilla', 10.0, 5.0, 15.0, 0, 10, 5, 120, 30, 'LOT-2026-26', '2028-06-30', 'C-03', 1
-                    )
-                """)
-
-        except Exception:
-            pass
+        pass
         # 2. Tabla de Auditoría, Arqueos y Cierres de Caja (Corte X y Z)
         try:
             conn.execute("""
@@ -3297,9 +3067,11 @@ class DatabaseManager:
         query = """
         SELECT 
             p.*,
+            COALESCE(pf.precio_costo, p.precio_base * 0.7) AS precio_costo,
             COALESCE(sales.unidades_vendidas_mes, 0) AS unidades_vendidas_mes,
             COALESCE(chronic.total_pacientes_cronicos, 0) AS total_pacientes_cronicos
         FROM productos p
+        LEFT JOIN productos_farmaceuticos pf ON pf.farmacia_id = p.farmacia_id AND pf.codigo_barras = p.codigo_barras
         LEFT JOIN (
             SELECT dt.producto_id, SUM(dt.unidades_minimas_descontadas) AS unidades_vendidas_mes
             FROM detalle_transacciones dt
@@ -9373,3 +9145,586 @@ class DatabaseManager:
                 "inversion_total_sugerida_rd": round(total_inversion_sugerida, 2),
                 "productos": analisis_productos
             }
+
+
+    # =========================================================================
+    # GESTION DE HASTA 5 PERFILES DE VOZ AUTORIZADOS EN CAJA (BIOMETRIA DE VOZ)
+    # =========================================================================
+
+    def _ensure_voice_profiles_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS voces_autorizadas_pos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                nombre_operador TEXT NOT NULL,
+                rol TEXT NOT NULL DEFAULT 'CAJERO',
+                frase_entrenamiento TEXT DEFAULT '',
+                huella_acustica_json TEXT NOT NULL,
+                fecha_registro TEXT NOT NULL,
+                activo INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+
+    def list_voice_profiles(self, farmacia_id: int = 1) -> List[Dict[str, Any]]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_voice_profiles_table(conn)
+            rows = conn.execute("""
+                SELECT id, farmacia_id, nombre_operador, rol, frase_entrenamiento,
+                       huella_acustica_json, fecha_registro, activo
+                FROM voces_autorizadas_pos
+                WHERE farmacia_id = ? AND activo = 1
+                ORDER BY id ASC
+            """, (fid,)).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["huella_acustica"] = json.loads(d.get("huella_acustica_json") or "{}")
+                except Exception:
+                    d["huella_acustica"] = {}
+                out.append(d)
+            return out
+
+    def register_voice_profile(self, data: Dict[str, Any], farmacia_id: int = 1) -> Dict[str, Any]:
+        fid = int(farmacia_id or data.get("farmacia_id") or 1)
+        nombre = str(data.get("nombre_operador") or "").strip()
+        rol = str(data.get("rol") or "CAJERO").strip().upper()
+        frase = str(data.get("frase_entrenamiento") or "").strip()
+        huella = data.get("huella_acustica") or {}
+
+        if not nombre:
+            raise ValueError("Debe indicar el nombre del operador para registrar su voz.")
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_voice_profiles_table(conn)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM voces_autorizadas_pos WHERE farmacia_id = ? AND activo = 1",
+                (fid,)
+            ).fetchone()[0]
+
+            if count >= 5:
+                raise ValueError("Límite alcanzado: Solo se permiten hasta 5 voces grabadas en el sistema de venta física. Elimine una voz existente para agregar otra.")
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            huella_str = json.dumps(huella, ensure_ascii=False)
+            cur = conn.execute("""
+                INSERT INTO voces_autorizadas_pos (
+                    farmacia_id, nombre_operador, rol, frase_entrenamiento,
+                    huella_acustica_json, fecha_registro, activo
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+            """, (fid, nombre, rol, frase, huella_str, now_str))
+            new_id = cur.lastrowid
+
+            return {
+                "id": new_id,
+                "farmacia_id": fid,
+                "nombre_operador": nombre,
+                "rol": rol,
+                "frase_entrenamiento": frase,
+                "huella_acustica": huella,
+                "fecha_registro": now_str,
+                "total_voces_activas": count + 1,
+                "max_voces": 5
+            }
+
+    def delete_voice_profile(self, voice_id: int, farmacia_id: int = 1) -> bool:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_voice_profiles_table(conn)
+            conn.execute(
+                "DELETE FROM voces_autorizadas_pos WHERE id = ? AND farmacia_id = ?",
+                (int(voice_id), fid)
+            )
+            return True
+
+
+    # =========================================================================
+    # INGRESO MASIVO DE FACTURAS DE PROVEEDORES CON AUDITORIA Y TRAZABILIDAD
+    # =========================================================================
+
+    def commit_supplier_invoice_bulk(self, data: Dict[str, Any], farmacia_id: int = 1) -> Dict[str, Any]:
+        """
+        Ejecuta el ingreso masivo de renglones verificados de una factura de proveedor:
+        - Si el producto ya existe (por codigo_barras o nombre_comercial), INCREMENTA su stock_total_unidades
+          y actualiza precio_base, lote y fecha_vencimiento, además de registrar el nuevo lote en inventario_lotes.
+        - Si el producto es nuevo, lo crea en `productos`, `productos_farmaceuticos` e `inventario_lotes`.
+        - Registra el movimiento en `movimientos_inventario` para auditoría completa.
+        """
+        fid = int(farmacia_id or data.get("farmacia_id") or 1)
+        proveedor = data.get("proveedor") or {}
+        prov_nombre = str(proveedor.get("nombre") or "Proveedor Farmacéutico").strip()
+        num_factura = str(proveedor.get("numero_factura") or "S/N").strip()
+        items = data.get("items") or []
+
+        if not items:
+            raise ValueError("No hay productos seleccionados para ingresar al inventario.")
+
+        creados = 0
+        actualizados = 0
+        total_unidades_ingresadas = 0
+        productos_procesados = []
+
+        for item in items:
+            if item.get("incluir") is False:
+                continue
+
+            nombre = str(item.get("nombre_comercial") or "").strip()
+            if not nombre:
+                raise ValueError("Uno de los renglones no tiene Nombre Comercial. Corríjalo antes de confirmar.")
+
+            cant_nueva = int(float(item.get("cantidad_unidades") or 0))
+            if cant_nueva <= 0:
+                raise ValueError(f"La cantidad a ingresar de '{nombre}' debe ser mayor a 0.")
+
+            precio_venta = float(item.get("precio_venta_sugerido") or item.get("precio_base") or 0.0)
+            costo_unit = float(item.get("costo_unitario") or 0.0)
+            if precio_venta <= 0:
+                raise ValueError(f"El precio de venta de '{nombre}' debe ser mayor a RD$ 0.")
+
+            cb = str(item.get("codigo_barras") or "").strip()
+            dci = str(item.get("principio_activo_dci") or item.get("principio_activo") or nombre).strip()
+            atc = str(item.get("codigo_atc") or "V03AX").strip()
+            conc = str(item.get("concentracion") or "Estándar").strip()
+            cat = str(item.get("categoria") or "Especialidad Farmacéutica").strip()
+            lab = str(item.get("laboratorio") or prov_nombre).strip()
+            u_min = str(item.get("unidad_minima_nombre") or "Tableta").strip()
+            u_blist = max(1, int(item.get("unidades_por_blister") or 10))
+            b_caja = max(1, int(item.get("blisters_por_caja") or 3))
+            lote = str(item.get("lote") or "LOT-2026").strip()
+            vence = str(item.get("fecha_vencimiento") or "2028-12-31").strip()
+            anaquel = str(item.get("ubicacion_anaquel") or "A-01").strip()
+            req_rec = 1 if item.get("requiere_receta") else 0
+
+            # Verificar si existe actualmente para sumar su stock en lugar de sobrescribirlo
+            stock_previo = 0
+            es_existente = False
+            with self._get_connection(farmacia_id=fid) as conn:
+                row_ex = None
+                if cb:
+                    row_ex = conn.execute(
+                        "SELECT id, codigo_barras, stock_total_unidades FROM productos WHERE farmacia_id = ? AND codigo_barras = ?",
+                        (fid, cb)
+                    ).fetchone()
+                if not row_ex:
+                    row_ex = conn.execute(
+                        "SELECT id, codigo_barras, stock_total_unidades FROM productos WHERE farmacia_id = ? AND LOWER(nombre_comercial) = LOWER(?)",
+                        (fid, nombre)
+                    ).fetchone()
+
+                if row_ex:
+                    es_existente = True
+                    stock_previo = int(row_ex["stock_total_unidades"] or 0)
+                    cb = str(row_ex["codigo_barras"])
+
+            stock_final = stock_previo + cant_nueva
+
+            prod_payload = {
+                "farmacia_id": fid,
+                "codigo_barras": cb,
+                "nombre_comercial": nombre,
+                "principio_activo": dci,
+                "principio_activo_dci": dci,
+                "codigo_atc": atc,
+                "concentracion": conc,
+                "laboratorio": lab,
+                "categoria": cat,
+                "familia_farmacologica": cat,
+                "sintomas_tags": f"{nombre.lower()},{dci.lower()},{cat.lower()}",
+                "unidad_minima_nombre": u_min,
+                "precio_costo": costo_unit,
+                "precio_base": precio_venta,
+                "descuento_blister_pct": 5.0 if u_blist > 1 else 0.0,
+                "descuento_caja_pct": 12.0,
+                "requiere_receta": req_rec,
+                "unidades_por_blister": u_blist,
+                "blisters_por_caja": b_caja,
+                "stock_total_unidades": stock_final,
+                "stock_minimo_alerta": 15,
+                "lote": lote,
+                "fecha_vencimiento": vence,
+                "ubicacion_anaquel": anaquel
+            }
+
+            saved_prod = self.create_or_update_product(prod_payload)
+
+            # Registrar movimiento de entrada de compra por factura
+            try:
+                with self._get_connection(farmacia_id=fid) as conn:
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute("""
+                        INSERT INTO movimientos_inventario (
+                            farmacia_id, producto_id, tipo_movimiento, presentacion,
+                            cantidad_presentacion, unidades_minimas_afectadas,
+                            stock_anterior, stock_nuevo, referencia, fecha_hora
+                        ) VALUES (?, ?, 'ENTRADA_FACTURA_IA', 'UNIDAD', ?, ?, ?, ?, ?, ?)
+                    """, (
+                        fid,
+                        saved_prod["id"],
+                        cant_nueva,
+                        cant_nueva,
+                        stock_previo,
+                        stock_final,
+                        f"Factura {num_factura} - {prov_nombre} (Lote: {lote})",
+                        now_str
+                    ))
+            except Exception as e:
+                print(f"[DB] Aviso registrando movimiento de factura: {e}")
+
+            if es_existente:
+                actualizados += 1
+            else:
+                creados += 1
+
+            total_unidades_ingresadas += cant_nueva
+            productos_procesados.append({
+                "id": saved_prod["id"],
+                "nombre_comercial": nombre,
+                "principio_activo_dci": dci,
+                "codigo_atc": atc,
+                "accion": "ACTUALIZADO" if es_existente else "CREADO",
+                "stock_anterior": stock_previo,
+                "cantidad_sumada": cant_nueva,
+                "stock_final": stock_final,
+                "precio_venta": precio_venta
+            })
+
+        # 4. AUTOMATIZACIÓN POST-INGRESO: Cruzar contra "Ventas Perdidas" (demandas_insatisfechas)
+        # y detectar vencimientos próximos (<= 210 días)
+        demandas_resueltas = []
+        alertas_vencimiento_factura = []
+        try:
+            with self._get_connection(farmacia_id=fid) as conn:
+                self._ensure_unmet_demand_table(conn)
+                pendientes = conn.execute(
+                    "SELECT id, termino_buscado, termino_normalizado, principio_activo_sugerido, veces_solicitado FROM demandas_insatisfechas WHERE farmacia_id = ? AND estado = 'PENDIENTE'",
+                    (fid,)
+                ).fetchall()
+
+                for pend in pendientes:
+                    t_norm = (pend["termino_normalizado"] or "").lower().strip()
+                    pa_sug = (pend["principio_activo_sugerido"] or "").lower().strip()
+                    if not t_norm:
+                        continue
+                    for pp in productos_procesados:
+                        nom_p = (pp.get("nombre_comercial") or "").lower()
+                        dci_p = (pp.get("principio_activo_dci") or "").lower()
+                        # Coincidencia por nombre o principio activo
+                        t_tokens = [tok for tok in t_norm.split() if len(tok) >= 4]
+                        matched_demand = (
+                            t_norm in nom_p or nom_p in t_norm or
+                            (pa_sug and len(pa_sug) >= 4 and (pa_sug in dci_p or pa_sug in nom_p)) or
+                            (t_tokens and all(tok in f"{nom_p} {dci_p}" for tok in t_tokens))
+                        )
+                        if matched_demand:
+                            conn.execute("DELETE FROM demandas_insatisfechas WHERE id = ? AND farmacia_id = ?", (pend["id"], fid))
+                            demandas_resueltas.append({
+                                "id": pend["id"],
+                                "termino_buscado": pend["termino_buscado"],
+                                "veces_solicitado": pend["veces_solicitado"],
+                                "cubierto_por": pp.get("nombre_comercial")
+                            })
+                            break
+        except Exception as e_dem:
+            print(f"[DB] Aviso cruzando demandas insatisfechas post-factura: {e_dem}")
+
+        for item in items:
+            if not item.get("incluir", True):
+                continue
+            v_str = str(item.get("fecha_vencimiento") or "").strip()
+            if v_str:
+                try:
+                    dt_v = datetime.strptime(v_str[:10], "%Y-%m-%d")
+                    dias_rest = (dt_v - datetime.now()).days
+                    if dias_rest <= 210:
+                        alertas_vencimiento_factura.append({
+                            "nombre_comercial": item.get("nombre_comercial"),
+                            "fecha_vencimiento": v_str[:10],
+                            "dias_restantes": dias_rest
+                        })
+                except Exception:
+                    pass
+
+        msg_partes = [
+            f"Ingreso completado: {len(productos_procesados)} productos procesados ({total_unidades_ingresadas} unidades sumadas)."
+        ]
+        if demandas_resueltas:
+            nombres_cubiertos = ", ".join([d["termino_buscado"] for d in demandas_resueltas[:3]])
+            msg_partes.append(
+                f"Con esta factura ya cubrimos {len(demandas_resueltas)} medicamento(s) que los clientes habían estado pidiendo ({nombres_cubiertos})."
+            )
+        if alertas_vencimiento_factura:
+            msg_partes.append(
+                f"Atención: {len(alertas_vencimiento_factura)} lote(s) ingresados vencen en menos de 7 meses; colócalos al frente del anaquel (FEFO)."
+            )
+
+        return {
+            "ok": True,
+            "proveedor": prov_nombre,
+            "numero_factura": num_factura,
+            "productos_creados": creados,
+            "productos_actualizados": actualizados,
+            "total_renglones_procesados": len(productos_procesados),
+            "total_unidades_ingresadas": total_unidades_ingresadas,
+            "demandas_resueltas": demandas_resueltas,
+            "alertas_vencimiento_factura": alertas_vencimiento_factura,
+            "resumen_voz_ia": " ".join(msg_partes),
+            "detalles": productos_procesados
+        }
+
+
+    # =========================================================================
+    # REGISTRO AUTOMATICO DE "VENTAS PERDIDAS" (DEMANDA NO CUBIERTA / FALTANTES)
+    # =========================================================================
+
+    def _ensure_unmet_demand_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS demandas_insatisfechas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                termino_buscado TEXT NOT NULL,
+                termino_normalizado TEXT NOT NULL,
+                origen TEXT NOT NULL DEFAULT 'POS',
+                veces_solicitado INTEGER NOT NULL DEFAULT 1,
+                principio_activo_sugerido TEXT DEFAULT '',
+                categoria_sugerida TEXT DEFAULT '',
+                estado TEXT NOT NULL DEFAULT 'PENDIENTE',
+                primera_solicitud TEXT NOT NULL,
+                ultima_solicitud TEXT NOT NULL
+            )
+        """)
+
+    def record_unmet_demand(
+        self,
+        termino_buscado: str,
+        origen: str = "POS",
+        farmacia_id: int = 1,
+        principio_activo_sugerido: str = "",
+        categoria_sugerida: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        fid = int(farmacia_id or 1)
+        raw = (termino_buscado or "").strip()
+        # Ignorar búsquedas demasiado cortas (< 3 letras) o puros números cortos
+        if len(raw) < 3:
+            return None
+
+        norm = re.sub(r"\s+", " ", raw.lower()).strip()
+        # Evitar registrar palabras genéricas de comandos
+        stop_words = {"farma", "hola", "todos", "efectivo", "tarjeta", "transferencia", "cobrar", "carrito"}
+        if norm in stop_words:
+            return None
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_unmet_demand_table(conn)
+
+            # Verificar que realmente no exista hoy en stock > 0 en `productos`
+            has_stock = conn.execute("""
+                SELECT COUNT(*) FROM productos
+                WHERE farmacia_id = ? AND stock_total_unidades > 0
+                  AND (LOWER(nombre_comercial) LIKE ? OR LOWER(principio_activo) LIKE ?)
+            """, (fid, f"%{norm}%", f"%{norm}%")).fetchone()[0]
+
+            if has_stock > 0:
+                return None
+
+            existing = conn.execute("""
+                SELECT id, veces_solicitado, origenes_set FROM (
+                    SELECT id, veces_solicitado, origen AS origenes_set
+                    FROM demandas_insatisfechas
+                    WHERE farmacia_id = ? AND termino_normalizado = ? AND estado = 'PENDIENTE'
+                )
+            """, (fid, norm)).fetchone()
+
+            if existing:
+                new_count = int(existing["veces_solicitado"]) + 1
+                conn.execute("""
+                    UPDATE demandas_insatisfechas
+                    SET veces_solicitado = ?,
+                        ultima_solicitud = ?,
+                        origen = CASE WHEN INSTR(origen, ?) > 0 THEN origen ELSE origen || ', ' || ? END
+                    WHERE id = ?
+                """, (new_count, now_str, origen, origen, existing["id"]))
+                row_id = existing["id"]
+            else:
+                cur = conn.execute("""
+                    INSERT INTO demandas_insatisfechas (
+                        farmacia_id, termino_buscado, termino_normalizado, origen,
+                        veces_solicitado, principio_activo_sugerido, categoria_sugerida,
+                        estado, primera_solicitud, ultima_solicitud
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?, 'PENDIENTE', ?, ?)
+                """, (fid, raw.title(), norm, origen, principio_activo_sugerido, categoria_sugerida, now_str, now_str))
+                row_id = cur.lastrowid
+
+            row = conn.execute("SELECT * FROM demandas_insatisfechas WHERE id = ?", (row_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_unmet_demand(self, farmacia_id: int = 1) -> List[Dict[str, Any]]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_unmet_demand_table(conn)
+            rows = conn.execute("""
+                SELECT id, farmacia_id, termino_buscado, termino_normalizado, origen,
+                       veces_solicitado, principio_activo_sugerido, categoria_sugerida,
+                       estado, primera_solicitud, ultima_solicitud
+                FROM demandas_insatisfechas
+                WHERE farmacia_id = ? AND estado = 'PENDIENTE'
+                ORDER BY veces_solicitado DESC, ultima_solicitud DESC
+            """, (fid,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def resolve_unmet_demand(self, demand_id: int, farmacia_id: int = 1) -> bool:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_unmet_demand_table(conn)
+            conn.execute(
+                "DELETE FROM demandas_insatisfechas WHERE id = ? AND farmacia_id = ?",
+                (int(demand_id), fid)
+            )
+            return True
+
+
+    # =========================================================================
+    # RESPALDO LOCAL (BACKUP) EN 1 CLIC Y RESPALDO AUTOMÁTICO DIARIO
+    # =========================================================================
+
+    @property
+    def backups_dir(self) -> str:
+        d = os.path.join(os.path.dirname(self.data_dir), "respaldos")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _sqlite_snapshot_bytes(self, src_path: str) -> bytes:
+        """Copia consistente de una base SQLite en caliente usando la API backup()."""
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            src = sqlite3.connect(src_path, timeout=15.0)
+            dst = sqlite3.connect(tmp_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _rows_to_csv_bytes(rows: List[Any]) -> bytes:
+        import csv
+        import io
+        buf = io.StringIO()
+        if rows:
+            cols = list(rows[0].keys())
+            w = csv.writer(buf)
+            w.writerow(cols)
+            for r in rows:
+                w.writerow([r[k] for k in cols])
+        return ("\ufeff" + buf.getvalue()).encode("utf-8")  # BOM para abrir bien en Excel
+
+    def create_backup_zip(self, farmacia_id: int = 1) -> Tuple[bytes, str, Dict[str, Any]]:
+        """
+        Genera un ZIP con:
+        - Copia exacta de la base de datos SQLite de la farmacia (inventario, ventas, cierres, deudores, etc.)
+        - inventario.csv (abre en Excel)
+        - ventas_del_dia.csv y detalle_ventas_del_dia.csv
+        - LEEME_RESTAURAR.txt
+        """
+        import io
+        import zipfile
+        fid = int(farmacia_id or 1)
+        now = datetime.now()
+        stamp = now.strftime("%Y%m%d_%H%M%S")
+        src_path = self._resolve_db_path(fid)
+        stats: Dict[str, Any] = {"productos": 0, "ventas_hoy": 0, "db_archivo": os.path.basename(src_path)}
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"base_datos/{os.path.basename(src_path)}", self._sqlite_snapshot_bytes(src_path))
+
+            with self._get_connection(farmacia_id=fid) as conn:
+                try:
+                    prods = conn.execute("""
+                        SELECT id, codigo_barras, nombre_comercial, principio_activo, concentracion, categoria,
+                               laboratorio, lote, fecha_vencimiento, stock_total_unidades, precio_costo,
+                               precio_base, ubicacion_anaquel, activo
+                        FROM productos WHERE farmacia_id = ? ORDER BY nombre_comercial
+                    """, (fid,)).fetchall()
+                    stats["productos"] = len(prods)
+                    zf.writestr("inventario.csv", self._rows_to_csv_bytes(prods))
+                except Exception as e:
+                    zf.writestr("inventario_ERROR.txt", str(e))
+
+                try:
+                    ventas = conn.execute("""
+                        SELECT * FROM transacciones
+                        WHERE farmacia_id = ? AND fecha_hora >= datetime('now', 'localtime', 'start of day')
+                        ORDER BY fecha_hora
+                    """, (fid,)).fetchall()
+                    stats["ventas_hoy"] = len(ventas)
+                    zf.writestr("ventas_del_dia.csv", self._rows_to_csv_bytes(ventas))
+                    detalle = conn.execute("""
+                        SELECT dt.* FROM detalle_transacciones dt
+                        JOIN transacciones t ON t.id = dt.transaccion_id
+                        WHERE t.farmacia_id = ? AND t.fecha_hora >= datetime('now', 'localtime', 'start of day')
+                    """, (fid,)).fetchall()
+                    zf.writestr("detalle_ventas_del_dia.csv", self._rows_to_csv_bytes(detalle))
+                except Exception as e:
+                    zf.writestr("ventas_ERROR.txt", str(e))
+
+            zf.writestr("LEEME_RESTAURAR.txt", (
+                "RESPALDO FARMACIA DAVALSI\n"
+                f"Fecha: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Farmacia ID: {fid}\n"
+                f"Productos: {stats['productos']} | Ventas del dia: {stats['ventas_hoy']}\n\n"
+                "COMO RESTAURAR:\n"
+                "1. Detenga el servidor (server.py).\n"
+                f"2. Copie base_datos/{stats['db_archivo']} sobre el archivo del mismo nombre en farmacia-davalsi/data o farmacia-davalsi/data/tenants.\n"
+                "3. Inicie nuevamente el servidor.\n\n"
+                "Los archivos .csv se pueden abrir directamente en Excel.\n"
+            ))
+
+        filename = f"Respaldo_Farmacia_Davalsi_{fid}_{stamp}.zip"
+        return buf.getvalue(), filename, stats
+
+    def list_local_backups(self) -> List[Dict[str, Any]]:
+        out = []
+        for f in sorted(os.listdir(self.backups_dir), reverse=True):
+            if f.endswith(".zip"):
+                p = os.path.join(self.backups_dir, f)
+                out.append({
+                    "archivo": f,
+                    "tamano_kb": round(os.path.getsize(p) / 1024, 1),
+                    "fecha": datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M:%S")
+                })
+        return out
+
+    def run_automatic_backup(self, farmacia_id: int = 1, keep_last: int = 14, force: bool = False) -> Optional[str]:
+        """Guarda un respaldo diario en farmacia-davalsi/respaldos (conserva los últimos N)."""
+        fid = int(farmacia_id or 1)
+        today_tag = datetime.now().strftime("%Y%m%d")
+        prefix = f"Respaldo_Farmacia_Davalsi_{fid}_"
+        existing = [f for f in os.listdir(self.backups_dir) if f.startswith(prefix) and f.endswith(".zip")]
+        if not force and any(f.startswith(prefix + today_tag) for f in existing):
+            return None
+        data, filename, _ = self.create_backup_zip(fid)
+        path = os.path.join(self.backups_dir, filename)
+        with open(path, "wb") as f:
+            f.write(data)
+        existing = sorted(
+            [f for f in os.listdir(self.backups_dir) if f.startswith(prefix) and f.endswith(".zip")],
+            reverse=True
+        )
+        for old in existing[keep_last:]:
+            try:
+                os.remove(os.path.join(self.backups_dir, old))
+            except OSError:
+                pass
+        return path

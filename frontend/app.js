@@ -4415,58 +4415,73 @@ window.capturarUbicacionActualGPS = function() {
   const icon = document.getElementById('app-gps-status-icon');
   const feedback = document.getElementById('app-gps-feedback');
 
-  if (!navigator.geolocation) {
-    if (typeof showToast === 'function') showToast('Tu navegador no soporta geolocalización GPS.', 'error');
-    return;
-  }
+  const aplicarCoordenadas = (lat, lng, esAproximado) => {
+    if (latInp) latInp.value = lat;
+    if (lngInp) lngInp.value = lng;
+    if (icon) icon.classList.remove('hidden');
+    if (feedback) {
+      feedback.classList.remove('hidden');
+      if (esAproximado) {
+        feedback.innerHTML = '<span>📍</span> <span>Ubicación base (Santo Domingo) asignada. Puedes detallar tu calle o casa abajo.</span>';
+      } else {
+        feedback.innerHTML = '<span>🎯</span> <span>Ubicación GPS capturada con éxito para navegación directa del motorizado.</span>';
+      }
+    }
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = esAproximado ? '<span>📍</span> <span>Ubicación Lista</span>' : '<span>✅</span> <span>GPS Capturado</span>';
+      btn.className = 'px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-extrabold text-[11px] border border-emerald-300 shadow-2xs transition flex items-center gap-1 cursor-pointer';
+    }
+
+    if (addrInp && (!addrInp.value.trim() || addrInp.value.includes('GPS:') || addrInp.value.includes('Ubicación'))) {
+      addrInp.value = esAproximado ? 'Santo Domingo, Distrito Nacional' : 'Mi Ubicación Actual (GPS: ' + Number(lat).toFixed(4) + ', ' + Number(lng).toFixed(4) + ')';
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(esAproximado ? '📍 Ubicación base asignada para el delivery.' : '📍 Coordenadas GPS capturadas con éxito.', 'success');
+    }
+  };
 
   if (btn) {
     btn.disabled = true;
     btn.innerHTML = '<span>⏳</span> <span>Detectando GPS...</span>';
   }
 
+  if (!navigator.geolocation) {
+    aplicarCoordenadas(18.4835, -69.9405, true);
+    return;
+  }
+
+  let resuelto = false;
+  const timeoutId = setTimeout(() => {
+    if (!resuelto) {
+      resuelto = true;
+      aplicarCoordenadas(18.4835, -69.9405, true);
+    }
+  }, 4000);
+
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      if (latInp) latInp.value = lat;
-      if (lngInp) lngInp.value = lng;
-      if (icon) icon.classList.remove('hidden');
-      if (feedback) feedback.classList.remove('hidden');
-
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = '<span>✅</span> <span>GPS Capturado</span>';
-        btn.className = 'px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-extrabold text-[11px] border border-emerald-300 shadow-2xs transition flex items-center gap-1';
-      }
-
-      // Si no ha escrito dirección, sugerirle una etiqueta referencial
-      if (addrInp && (!addrInp.value.trim() || addrInp.value.includes('GPS:'))) {
-        addrInp.value = `Mi Ubicación Actual (GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)})`;
-      }
-
-      if (typeof showToast === 'function') showToast('📍 Coordenadas capturadas con precisión.', 'success');
+      if (resuelto) return;
+      resuelto = true;
+      clearTimeout(timeoutId);
+      aplicarCoordenadas(pos.coords.latitude, pos.coords.longitude, false);
     },
     (err) => {
-      console.warn('Error al obtener GPS:', err);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = '<span>📍</span> <span>Usar mi ubicación actual</span>';
-      }
-      if (typeof showToast === 'function') showToast('No se pudo acceder a tu ubicación. Por favor escribe tu dirección física.', 'warning');
+      if (resuelto) return;
+      resuelto = true;
+      clearTimeout(timeoutId);
+      console.warn('Geolocation fallback used:', err);
+      aplicarCoordenadas(18.4835, -69.9405, true);
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    { enableHighAccuracy: false, timeout: 3500, maximumAge: 60000 }
   );
 };
-
 
 // =========================================================================
 // RASTREO EN VIVO CON LEAFLET MAP PARA EL PACIENTE (MODAL & CANAL EN TIEMPO REAL)
 // =========================================================================
-let appTrackingMap = null;
-let appTrackingInterval = null;
-let currentTrackingOrderCode = null;
-
 window.openDeliveryTrackingModal = async function(codigoOrden) {
   const modal = document.getElementById('modal-delivery-tracking');
   if (!modal) return;
