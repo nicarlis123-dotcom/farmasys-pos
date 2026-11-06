@@ -1395,14 +1395,16 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 farmacia_id = safe_farmacia_id(body, 1)
                 termino = str(body.get("termino_buscado", "")).strip()
                 origen = str(body.get("origen", "POS")).strip()
-                enr = farma_brain._fallback_enrichment(termino, "") if termino else {}
-                rec = db.record_unmet_demand(
-                    termino_buscado=termino,
-                    origen=origen,
-                    farmacia_id=farmacia_id,
-                    principio_activo_sugerido=enr.get("principio_activo_dci", ""),
-                    categoria_sugerida=enr.get("familia_farmacologica", "")
-                )
+                rec = None
+                if termino and farma_brain._is_valid_medicine_demand(termino):
+                    enr = farma_brain._fallback_enrichment(termino, "")
+                    rec = db.record_unmet_demand(
+                        termino_buscado=termino,
+                        origen=origen,
+                        farmacia_id=farmacia_id,
+                        principio_activo_sugerido=enr.get("principio_activo_dci", ""),
+                        categoria_sugerida=enr.get("familia_farmacologica", "")
+                    )
                 items = db.list_unmet_demand(farmacia_id=farmacia_id)
                 self._send_json(200, {"ok": True, "recorded": rec, "items": items, "total_faltantes": len(items)})
                 return
@@ -1423,27 +1425,18 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 session_id = str(body.get("session_id", f"{context_type}_{farmacia_id}")).strip()
                 client_memory = body.get("client_memory")
                 catalog = db.list_products(farmacia_id=farmacia_id) or body.get("catalogo_resumen") or []
+                sales_summary = db.get_dashboard_and_reports(farmacia_id=farmacia_id)
                 res = farma_brain.parse_voice_command(
                     transcript=transcript,
                     context_type=context_type,
                     catalog_products=catalog,
                     operator_name=operator_name,
                     session_id=session_id,
-                    client_memory=client_memory
+                    client_memory=client_memory,
+                    sales_summary=sales_summary
                 )
-                if res.get("demanda_insatisfecha_detectada"):
-                    faltantes = res.get("terminos_faltantes") or ([res["termino_faltante"]] if res.get("termino_faltante") else [])
-                    for tf_raw in faltantes:
-                        tf = str(tf_raw).strip()
-                        if tf:
-                            enr = farma_brain._fallback_enrichment(tf, "")
-                            db.record_unmet_demand(
-                                termino_buscado=tf,
-                                origen=f"VOZ_{context_type}",
-                                farmacia_id=farmacia_id,
-                                principio_activo_sugerido=enr.get("principio_activo_dci", ""),
-                                categoria_sugerida=enr.get("familia_farmacologica", "")
-                            )
+                # Demanda insatisfecha desactivada permanentemente por voz
+                pass
                 self._send_json(200, res)
                 return
 

@@ -68,6 +68,86 @@
         transition: transform 0.3s ease;
       }
 
+      
+      /* Anillo de Partículas / Audio Visualizer alrededor del avatar */
+      .farma-audio-halo {
+        position: absolute;
+        inset: -10px;
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        pointer-events: none;
+        transition: all 0.15s ease;
+      }
+      .farma-audio-halo.active-listening {
+        border-color: rgba(20, 184, 166, 0.7);
+        box-shadow: 0 0 25px rgba(20, 184, 166, 0.6), inset 0 0 15px rgba(20, 184, 166, 0.4);
+        animation: haloPulse 1.2s infinite alternate ease-in-out;
+      }
+      .farma-audio-halo.active-speaking {
+        border-color: rgba(56, 189, 248, 0.85);
+        box-shadow: 0 0 35px rgba(56, 189, 248, 0.8), inset 0 0 20px rgba(56, 189, 248, 0.5);
+        animation: haloSpeaking 0.6s infinite alternate ease-in-out;
+      }
+      @keyframes haloPulse {
+        0% { transform: scale(0.96); opacity: 0.6; }
+        100% { transform: scale(1.12); opacity: 1; }
+      }
+      @keyframes haloSpeaking {
+        0% { transform: scale(1.0); opacity: 0.75; }
+        100% { transform: scale(1.22); opacity: 1; filter: hue-rotate(30deg); }
+      }
+
+      /* Boca animada para Lip-Sync en el fallback SVG */
+      .farma-mouth-talking {
+        animation: mouthLipSync 0.22s infinite alternate ease-in-out !important;
+        transform-origin: 50% 68%;
+      }
+      @keyframes mouthLipSync {
+        0% { transform: scaleY(0.4) scaleX(0.85); }
+        50% { transform: scaleY(1.8) scaleX(1.15); }
+        100% { transform: scaleY(1.1) scaleX(0.95); }
+      }
+
+      /* Widget interactivo dentro de la burbuja */
+      .farma-interactive-widget {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px dashed rgba(20, 184, 166, 0.4);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .farma-action-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        border-radius: 9999px;
+        font-size: 11px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .farma-action-chip-primary {
+        background: linear-gradient(135deg, #0d9488, #14b8a6);
+        color: #ffffff;
+        box-shadow: 0 3px 10px rgba(13, 148, 136, 0.4);
+        border: 1px solid rgba(94, 234, 212, 0.5);
+      }
+      .farma-action-chip-primary:hover {
+        transform: translateY(-1.5px) scale(1.04);
+        box-shadow: 0 5px 15px rgba(13, 148, 136, 0.6);
+      }
+      .farma-action-chip-secondary {
+        background: rgba(30, 41, 59, 0.85);
+        color: #94a3b8;
+        border: 1px solid rgba(71, 85, 105, 0.6);
+      }
+      .farma-action-chip-secondary:hover {
+        background: rgba(51, 65, 85, 0.95);
+        color: #ffffff;
+      }
+
       /* =========================================================================
          2. ANIMACIONES DE LEVITACIÓN Y PULSO MÉDICO
          ========================================================================= */
@@ -220,6 +300,11 @@
       this.bubbleTitle = null;
       this.pointerEl = null;
       this.autoDismissTimer = null;
+
+      this.haloEl = null;
+      this.svgMouthEl = null;
+      this.headTrackingBound = false;
+      this.lastClickTime = 0;
       this.init();
     }
 
@@ -254,6 +339,7 @@
 
         <!-- Malla Levitante del Avatar con Indicador Direccional -->
         <div class="farma-mesh-wrapper" id="farma-master-mesh" onclick="window.farmaUnifiedAgent.handleAvatarClick()">
+          <div id="farma-audio-halo" class="farma-audio-halo"></div>
           <!-- Puntero Animado Direccional -->
           <div id="farma-master-pointer" class="farma-pointer-arrow">
             <svg class="w-12 h-12 text-teal-400 filter drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
@@ -283,7 +369,7 @@
                 <circle cx="64" cy="46" r="6" fill="#34d399">
                   <animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite"/>
                 </circle>
-                <path d="M38 65 Q50 74 62 65" stroke="#34d399" stroke-width="3" fill="none" stroke-linecap="round"/>
+                <path id="farma-svg-mouth" d="M38 65 Q50 74 62 65" stroke="#34d399" stroke-width="3" fill="none" stroke-linecap="round"/>
                 <path d="M47 28 H53 V38 H47 Z M42 33 H58 V33 H42 Z" stroke="#38bdf8" stroke-width="3" fill="none"/>
               </svg>
             </div>
@@ -300,7 +386,12 @@
       this.bubbleEl = document.getElementById('farma-master-bubble');
       this.bubbleText = document.getElementById('farma-bubble-text');
       this.bubbleTitle = document.getElementById('farma-bubble-title');
-      this.pointerEl = document.getElementById('farma-master-pointer');
+            this.pointerEl = document.getElementById('farma-master-pointer');
+      this.haloEl = document.getElementById('farma-audio-halo');
+      this.svgMouthEl = document.getElementById('farma-svg-mouth');
+
+      this.initHeadTracking();
+
 
       // Escuchar eventos globales del ciclo de vida
       this.bindGlobalTriggers();
@@ -314,10 +405,24 @@
       }
     }
 
-    say(text, title = 'Farma IA', autoDismissSec = 12) {
+    say(text, title = 'Farma IA', autoDismissSec = 12, actions = []) {
       if (!this.bubbleEl || !this.bubbleText) return;
       this.bubbleTitle.textContent = title;
-      this.bubbleText.innerHTML = text;
+
+      let html = text;
+      if (Array.isArray(actions) && actions.length > 0) {
+        html += '<div class="farma-interactive-widget"><div class="text-[10px] uppercase font-bold text-teal-300">Acciones Rápidas:</div><div class="flex flex-wrap gap-1.5">';
+        actions.forEach((act, idx) => {
+          const btnClass = act.primary ? 'farma-action-chip farma-action-chip-primary' : 'farma-action-chip farma-action-chip-secondary';
+          html += `<button type="button" class="${btnClass}" onclick="window.farmaUnifiedAgent.triggerWidgetAction(${idx})">${act.icon || '⚡'} ${act.label}</button>`;
+        });
+        html += '</div></div>';
+        this._currentActions = actions;
+      } else {
+        this._currentActions = [];
+      }
+
+      this.bubbleText.innerHTML = html;
       this.bubbleEl.classList.remove('hidden-bubble');
 
       if (this.autoDismissTimer) clearTimeout(this.autoDismissTimer);
@@ -334,12 +439,118 @@
       }
     }
 
+
+    /* =========================================================================
+       SEGUIMIENTO OCULAR Y DE CABEZA CON EL CURSOR (HEAD TRACKING)
+       ========================================================================= */
+    initHeadTracking() {
+      if (this.headTrackingBound) return;
+      this.headTrackingBound = true;
+
+      window.addEventListener('mousemove', (e) => {
+        if (!this.root || farmaState.isFlying) return;
+        const rect = this.root.getBoundingClientRect();
+        const avatarCenterX = rect.left + rect.width / 2;
+        const avatarCenterY = rect.top + rect.height / 2;
+
+        const deltaX = (e.clientX - avatarCenterX) / window.innerWidth;
+        const deltaY = (e.clientY - avatarCenterY) / window.innerHeight;
+
+        // Limitar rotación sutil entre -15 y +15 grados
+        const rotY = Math.max(-16, Math.min(16, deltaX * 32));
+        const rotX = Math.max(-10, Math.min(10, -deltaY * 20));
+
+        if (this.modelViewer) {
+          const baseYaw = farmaState.pointingSide === 'left' ? 45 : (farmaState.pointingSide === 'right' ? -45 : 0);
+          this.modelViewer.cameraOrbit = `${baseYaw + rotY}deg ${75 - rotX}deg 105%`;
+        }
+
+        const meshEl = document.getElementById('farma-master-mesh');
+        if (meshEl && !meshEl.classList.contains('farma-mouth-talking')) {
+          meshEl.style.transform = `perspective(600px) rotateY(${rotY * 0.45}deg) rotateX(${rotX * 0.45}deg)`;
+        }
+      }, { passive: true });
+    }
+
+    /* =========================================================================
+       LIP-SYNC Y AUDIO VISUALIZER (ESTADOS AUDITIVOS EN VIVO)
+       ========================================================================= */
+    setAudioState(state) { // 'idle' | 'listening' | 'speaking'
+      if (!this.haloEl) this.haloEl = document.getElementById('farma-audio-halo');
+      if (!this.svgMouthEl) this.svgMouthEl = document.getElementById('farma-svg-mouth');
+
+      if (this.haloEl) {
+        this.haloEl.classList.remove('active-listening', 'active-speaking');
+        if (state === 'listening') this.haloEl.classList.add('active-listening');
+        if (state === 'speaking') this.haloEl.classList.add('active-speaking');
+      }
+
+      if (this.svgMouthEl) {
+        if (state === 'speaking') {
+          this.svgMouthEl.classList.add('farma-mouth-talking');
+        } else {
+          this.svgMouthEl.classList.remove('farma-mouth-talking');
+        }
+      }
+
+      if (state === 'speaking') {
+        this.setAnimation('Talking');
+      } else if (state === 'listening') {
+        this.setAnimation('Wave');
+      } else {
+        this.setAnimation('Idle');
+      }
+    }
+
+    /* =========================================================================
+       HOTSPOTS TÁCTILES SOBRE EL AVATAR (DOBLE CLIC, UN CLIC)
+       ========================================================================= */
     handleAvatarClick() {
+      const now = Date.now();
+      const isDouble = (now - this.lastClickTime) < 320;
+      this.lastClickTime = now;
+
+      if (isDouble) {
+        // Doble clic: Resumen de Carrito / Estado
+        const isPOS = window.location.pathname.includes('sistema') || Boolean(document.getElementById('pos-barcode-input'));
+        if (isPOS && window.sysState && window.sysState.posCart) {
+          const count = window.sysState.posCart.length;
+          const total = (typeof window.calculatePosCartTotal === 'function') ? window.calculatePosCartTotal() : 0;
+          this.say(`Llevas ${count} producto(s) en el carrito por un total de RD$ ${Number(total).toFixed(2)}.`, 'Resumen de Carrito');
+        } else if (window.state && window.state.cart) {
+          const count = window.state.cart.length;
+          this.say(`Tienes ${count} producto(s) en tu carrito de compras de la farmacia.`, 'Tu Carrito');
+        } else {
+          this.say('Sistema listo y sincronizado. Di "Farma" seguido de tu orden.', 'Farma Estado');
+        }
+        return;
+      }
+
+      // Un clic: Repetir o Saludo
+      this.setAnimation('Wave');
+      this.say('Hola, estoy atenta a tu voz. Solo di <strong>"Farma..."</strong> seguido de lo que necesitas.', 'Farma Copiloto');
+      setTimeout(() => {
+        this.setAnimation('Idle');
+      }, 3000);
+    }
+
+    _oldHandleAvatarClick() {
       this.setAnimation('Wave');
       this.say('Hola, soy Farma, el copiloto inteligente de Farmacia Davalsi. ¿En qué puedo asistirte hoy?', 'Farma Copiloto');
       setTimeout(() => {
         this.setAnimation('Idle');
       }, 3500);
+    }
+
+    triggerWidgetAction(index) {
+      if (this._currentActions && this._currentActions[index]) {
+        const act = this._currentActions[index];
+        if (typeof act.onClick === 'function') {
+          act.onClick();
+        } else if (typeof act.command === 'string' && window.farmaVoice) {
+          window.farmaVoice.handleFinalVoiceTranscript(act.command, true);
+        }
+      }
     }
 
     bindGlobalTriggers() {

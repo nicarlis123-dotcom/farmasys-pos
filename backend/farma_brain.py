@@ -1164,7 +1164,8 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
         catalog_products: Optional[List[Dict[str, Any]]] = None,
         operator_name: str = "Operador",
         session_id: str = "default_pos",
-        client_memory: Optional[Dict[str, Any]] = None
+        client_memory: Optional[Dict[str, Any]] = None,
+        sales_summary: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Motor NLU + Gemini con las 4 mejoras:
@@ -1195,7 +1196,7 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
 
         # Usamos siempre primero el motor determinista enriquecido para garantizar velocidad < 50ms,
         # precisión exacta en comandos compuestos multi-producto, cálculo exacto de precios RD$ y bioequivalencia.
-        return self._deterministic_voice_nlu(text_raw, context_type, catalog, operator_name, session_id)
+        return self._deterministic_voice_nlu(text_raw, context_type, catalog, operator_name, session_id, sales_summary=sales_summary)
 
     def _match_product_in_catalog(self, raw_drug: str, catalog: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not raw_drug:
@@ -1235,13 +1236,229 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
                 matched_prod = p
         return matched_prod
 
+    def _norm_simple(self, s: str) -> str:
+        s = s.lower().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        s = re.sub(r"[^\w\s]", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    def _is_valid_medicine_demand(self, term: str) -> bool:
+        if not term:
+            return False
+        t = term.lower().strip()
+        t_clean = re.sub(r"[^\w\s]", " ", t)
+        tokens = [tok for tok in t_clean.split() if tok]
+        if not tokens or len(t) < 3 or t.isdigit():
+            return False
+
+        invalid_keywords = [
+            "cuanto", "cuánto", "vendido", "ventas", "como se", "cómo se", "corte", "caja", "hola", "buenos",
+            "precio", "deudor", "reporte", "ticket", "imprimir", "ayuda", "farma", "quien eres", "quién eres",
+            "gracias", "cambiar", "usuario", "login", "salir", "sistema", "dinero", "ganancias",
+            "dia", "día", "hoy", "mes", "ano", "año", "hora", "que es", "por que", "para que", "hacer", "puedes",
+            "donde", "dónde", "cuando", "cuándo", "stock", "buscar", "agregar", "cobrar", "cliente", "factura",
+            "explicame", "explícame", "enseñame", "enséñame", "donde esta", "dónde está", "prueba", "test",
+            "demo", "ejemplo", "inventado", "cualquiera", "nada", "todo", "algo", "ver", "mostrar"
+        ]
+        if any(k in t for k in invalid_keywords):
+            return False
+
+        for tok in tokens:
+            if re.search(r"[a-z]+\d+|\d+[a-z]+", tok):
+                if not re.search(r"^\d+(?:mg|mcg|ml|g|ui|ug|mcl|l)$", tok):
+                    return False
+
+        if not re.search(r"[aeiouáéíóú]", t):
+            return False
+        return True
+
+    def _is_sales_query(self, text: str) -> bool:
+        t = self._norm_simple(text)
+        patterns = [
+            "cuanto hemos vendido", "cuanto se a vendido", "cuanto se ha vendido",
+            "cuanto vendimos", "ventas de hoy", "venta de hoy", "como van las ventas",
+            "dime las ventas", "dime la venta", "total vendido", "cuanto hay en caja",
+            "ventas del dia", "reporte de ventas de hoy", "cuanto llevamos vendido",
+            "cuanto se vendio hoy", "cuanto dinero hay", "resumen de ventas",
+            "hemos vendido algo", "se ha vendido algo", "se a vendido algo"
+        ]
+        return any(p in t for p in patterns)
+
+    def _format_sales_answer(self, sales_summary: Optional[Dict[str, Any]], query_text: str, is_pos: bool) -> str:
+        if not is_pos:
+            return "Las consultas financieras y de ventas están reservadas exclusivamente para el personal administrativo en el mostrador físico de la farmacia."
+        s = sales_summary or {}
+        ventas_hoy_rd = float(s.get("ventas_hoy_rd", 0.0) or 0.0)
+        ventas_hoy_count = int(s.get("ventas_hoy_count", 0) or 0)
+        ticket_prom = float(s.get("ticket_promedio_rd", 0.0) or 0.0)
+        ventas_pos = float(s.get("ventas_pos_rd", 0.0) or 0.0)
+        ventas_app = float(s.get("ventas_app_rd", 0.0) or 0.0)
+
+        t = self._norm_simple(query_text)
+        if "mes" in t:
+            v_mes_rd = float(s.get("ventas_mes_actual_rd", 0.0) or 0.0)
+            v_mes_cnt = int(s.get("ventas_mes_actual_count", 0) or 0)
+            if v_mes_cnt == 0:
+                return "En lo que va de este mes aún no se han registrado ventas en el sistema."
+            return f"En lo que va de mes se han realizado {v_mes_cnt} ventas por un total acumulado de RD$ {v_mes_rd:,.2f}."
+
+        if ventas_hoy_count == 0 or ventas_hoy_rd == 0.0:
+            return "Hoy aún no se ha registrado ninguna venta en el sistema. El total facturado es RD$ 0.00."
+        elif ventas_hoy_count == 1:
+            resp = f"Hoy se ha realizado 1 venta por un total de RD$ {ventas_hoy_rd:,.2f}."
+        else:
+            resp = f"Hoy hemos realizado {ventas_hoy_count} ventas por un total de RD$ {ventas_hoy_rd:,.2f}, con un ticket promedio de RD$ {ticket_prom:,.2f}."
+
+        if is_pos and ventas_pos > 0 and ventas_app > 0:
+            resp += f" (Mostrador físico: RD$ {ventas_pos:,.2f} • Pedidos en línea: RD$ {ventas_app:,.2f})."
+        return resp
+
+    def _check_navigation_intent(self, text: str, is_pos: bool = True) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
+        if not is_pos:
+            t_test = self._norm_simple(text)
+            if any(k in t_test for k in ["reporte", "deudor", "inventario", "corte", "arqueo", "pos", "mostrador", "cierre"]):
+                return ("Esa sección corresponde a la administración del mostrador físico de la farmacia. Aquí en la app con gusto te asisto con tus medicamentos y pedidos.", [])
+            return None
+        t = self._norm_simple(text)
+        # Reportes / Estadísticas
+        if any(k in t for k in ["ver los reportes", "ver reporte", "ver reportes", "abre reportes", "abre reporte", "abrir reportes", "ir a reportes", "reportes de venta", "reporte de ventas", "reporte de venta", "estadisticas de venta", "graficos de venta", "modulo de reportes"]):
+            return ("Abriendo el módulo de reportes y estadísticas de ventas.", [{"tipo": "NAV_REPORTES"}])
+        # Deudores / Cuentas por cobrar
+        if any(k in t for k in ["abre deudores", "abrir deudores", "ver deudores", "ir a deudores", "cuentas por cobrar", "modulo de deudores", "quienes deben", "cobros a clientes", "lista de deudores", "ver los fiados"]):
+            return ("Abriendo el módulo de control de deudores y cuentas por cobrar.", [{"tipo": "NAV_DEUDORES"}])
+        # Inventario / Catálogo general
+        if any(k in t for k in ["abre el inventario", "abre inventario", "abrir inventario", "ver inventario", "ir a inventario", "catalogo de productos", "catalogo de medicamentos", "modulo de inventario", "existencias", "stock de productos"]):
+            return ("Abriendo el catálogo e inventario general de medicamentos.", [{"tipo": "NAV_INVENTARIO"}])
+        # Pedidos / Delivery / Solicitudes
+        if any(k in t for k in ["ver pedidos", "pedidos a domicilio", "delivery", "abrir pedidos", "modulo de pedidos", "pedidos whatsapp", "solicitudes de compra"]):
+            return ("Abriendo el panel de pedidos y seguimiento de entregas a domicilio.", [{"tipo": "NAV_PEDIDOS"}])
+        # Vencimientos / Caducidades
+        if any(k in t for k in ["ver vencimientos", "alertas de vencimiento", "medicamentos vencidos", "caducidades", "modulo de vencimientos"]):
+            return ("Mostrando las alertas de vencimiento FEFO del inventario.", [{"tipo": "NAV_VENCIMIENTOS"}])
+        # Recetas
+        if any(k in t for k in ["ver recetas", "abrir recetas", "modulo de recetas", "validar recetas"]):
+            return ("Abriendo el módulo de recetas médicas y validaciones.", [{"tipo": "NAV_RECETAS"}])
+        # Pacientes crónicos
+        if any(k in t for k in ["ver cronicos", "pacientes cronicos", "modulo de cronicos", "adherencia terapeutica"]):
+            return ("Abriendo el módulo de pacientes crónicos.", [{"tipo": "NAV_CRONICOS"}])
+        # POS / Mostrador
+        if any(k in t for k in ["ir a pos", "ir al pos", "ir al mostrador", "volver al mostrador", "volver a ventas", "pantalla de ventas"]):
+            return ("Cambiando a la pantalla de venta en mostrador.", [{"tipo": "NAV_POS"}])
+        return None
+
+    def _check_discount_intent(self, text: str) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
+        t = self._norm_simple(text)
+        if any(w in t for w in ["descuento", "rebaja", "oferta"]) and not any(w in t for w in ["busca", "agrega", "dame"]):
+            m = re.search(r"\b(\d+)\s*(?:%|por\s*ciento)?\b", t)
+            pct = int(m.group(1)) if m else 5
+            pct = max(1, min(100, pct))
+            return (f"Aplicando {pct}% de descuento a la venta en mostrador.", [{"tipo": "APPLY_DISCOUNT", "porcentaje": pct}])
+        return None
+
+    def _check_system_howto(self, text: str, is_pos: bool) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
+        t = self._norm_simple(text)
+        is_question = bool(re.search(r"\b(como|donde|que|pasos|ayuda|explicame|ensename|guia)\b", t))
+        direct_topics = [
+            "corte de caja", "cierre de caja", "arqueo de caja", "vender a credito",
+            "tomar la presion", "subir receta", "psicotropicos", "ley 50 88",
+            "subo medicamentos", "subir medicamentos", "nuevo producto"
+        ]
+        if not is_question and not any(dt in t for dt in direct_topics):
+            return None
+
+        if any(k in t for k in ["corte", "cierre de caja", "cerrar caja", "arqueo"]):
+            return (
+                "Para hacer un corte de caja, ve al menú 'Ventas y Caja' y pulsa 'Caja: Cortes X / Z'. Digita el dinero físico contado en la gaveta y presiona 'Guardar Arqueo'. El sistema calculará la diferencia e imprimirá el comprobante.",
+                [{"tipo": "OPEN_CAJA_MODAL"}]
+            )
+        elif any(k in t for k in ["credito", "fiado", "fiar", "deudor", "deudores"]):
+            return (
+                "Para vender a crédito, al cobrar en el POS selecciona el método 'Abono / Crédito' e indica el cliente. Para consultar saldos o recibir abonos, abre la pestaña 'Deudores (Cobros)' en el menú Ventas y Caja, donde también puedes enviarles su estado de cuenta por WhatsApp en 1 clic.",
+                [{"tipo": "OPEN_DEUDORES"}]
+            )
+        elif any(k in t for k in ["presion", "azucar", "glicemia", "glucosa", "talla", "peso", "signos vitales", "atencion farmaceutica"]):
+            return (
+                "En la barra de accesos rápidos del POS, pulsa el botón 'Toma de Presión / Glicemia'. Digita el nombre del paciente, su presión sistólica, diastólica o nivel de azúcar. FarmaSys clasificará su riesgo cardiovascular de inmediato e imprimirá el comprobante térmico.",
+                [{"tipo": "OPEN_PHARMACARE"}]
+            )
+        elif any(k in t for k in ["nuevo producto", "producto nuevo", "crear producto", "subir producto", "sumar stock", "entrada de compra", "mercancia", "reabastecer", "subo medicamentos", "subir medicamentos"]) or ("agregar" in t and "producto" in t):
+            return (
+                "Para registrar un medicamento nuevo, pulsa 'Nuevo Producto / Mercancía' en la barra rápida del POS e ingresa el nombre comercial, principio activo, concentración y precios en unidad, blíster y caja. Para sumarle stock a productos existentes, pulsa 'Entrada de Compra / Sumar Stock'.",
+                [{"tipo": "OPEN_NEW_PRODUCT"}]
+            )
+        elif any(k in t for k in ["receta", "escanear", "ocr"]):
+            return (
+                "Ve al menú 'Recetas y Control' y selecciona 'Escanear Receta (OCR IA)'. Carga o toma una foto clara de la receta manuscrita: la inteligencia artificial leerá los medicamentos, verificará alergias y los agregará al carrito en un toque.",
+                [{"tipo": "OPEN_RECETA_OCR"}]
+            )
+        elif any(k in t for k in ["psicotropico", "ley 50 88", "controlado", "estupefaciente", "libro"]):
+            return (
+                "En el menú 'Recetas y Control', abre 'Psicotrópicos (Ley 50-88)'. En este libro oficial registras las entradas y salidas de medicamentos controlados junto con el médico tratante, su exequátur, cédula y diagnóstico para Salud Pública y la DNCD.",
+                [{"tipo": "OPEN_PSICOTROPICOS"}]
+            )
+        elif any(k in t for k in ["kit", "kits", "oferta", "combo"]):
+            return (
+                "En la barra dorada 'Kits Médicos IA' debajo de los accesos rápidos verás los kits generados con tus productos con stock. Pulsa sobre cualquier kit para cargarlo directamente a la venta con su precio especial con descuento.",
+                [{"tipo": "HIGHLIGHT_KITS"}]
+            )
+        elif any(k in t for k in ["cronico", "recordatorio", "5 dias", "10 dias"]):
+            return (
+                "En el menú 'Clientes', pulsa 'Pacientes Crónicos y Alertas'. El sistema identifica a los pacientes cuyos tratamientos hipertensivos o diabéticos están por terminarse para que puedas ofrecerles reposición por WhatsApp en un toque.",
+                [{"tipo": "OPEN_CRONICOS"}]
+            )
+        elif any(k in t for k in ["rol", "usuario", "cajero", "cambiar rol", "perfil"]):
+            return (
+                "En la cabecera superior, haz clic en el botón 'Cambiar Rol' junto a tu nombre de usuario. Podrás alternar en caliente entre Administrador, Regente Farmacéutico y Cajero Mostrador.",
+                [{"tipo": "TOGGLE_ROLE_DROPDOWN"}]
+            )
+        elif any(k in t for k in ["reporte", "ganancia", "estadistica", "grafico"]):
+            return (
+                "En el menú 'Gestión', selecciona 'Reportes de Ventas'. Podrás visualizar gráficos diarios, semanales y mensuales, ventas por vendedor, ticket promedio y márgenes de ganancia.",
+                [{"tipo": "OPEN_REPORTES"}]
+            )
+        elif any(k in t for k in ["whatsapp", "pedido", "delivery", "solicitud", "solicitudes"]):
+            return (
+                "En la barra superior, pulsa 'Pedidos WhatsApp / App'. Cada vez que un paciente ordena por la app o WhatsApp, aparece allí con aviso sonoro para confirmar empaque, cobro y asignar el motorista con GPS en vivo.",
+                [{"tipo": "OPEN_PEDIDOS"}]
+            )
+        elif any(k in t for k in ["respaldo", "copia de seguridad", "backup"]):
+            return (
+                "El sistema genera respaldos automáticos todos los días a las 11:59 PM. Además, puedes descargar en cualquier momento un archivo ZIP con tu base de datos SQLite y tus tablas de Excel desde el módulo de Configuración.",
+                [{"tipo": "OPEN_CONFIG"}]
+            )
+        else:
+            return (
+                "En FarmaSys puedes realizar ventas en el POS, registrar tomas de presión y azúcar, escanear recetas manuscritas con IA, controlar psicotrópicos, gestionar deudores y pedidos por WhatsApp. Dime qué función específica deseas realizar y te guiaré con gusto.",
+                []
+            )
+
+    def _check_greetings_and_identity(self, text: str, operator_name: str, is_pos: bool) -> Optional[str]:
+        t = self._norm_simple(text)
+        if not t or t in ["farma", "hola farma", "oye farma"]:
+            op_saludo = f" {operator_name}" if operator_name and operator_name != "Operador" else ""
+            return f"¡Hola{op_saludo}! Farma a tu servicio. Puedes pedirme agregar medicamentos a la venta, consultar ventas de hoy, o preguntarme cómo usar el sistema."
+        if any(h in t for h in ["me escuchas", "estas ahi", "estas conectada", "puedes oirme", "oye", "farma me escuchas", "me oyes"]):
+            return "Sí, te escucho claramente. ¿Qué medicamento u operación deseas realizar?"
+        if any(s in t for s in ["silencio", "callate", "tranquila", "pausa", "espera"]):
+            return "De acuerdo, quedo atenta cuando me necesites."
+        if any(g in t for g in ["hola", "buenos dias", "buenas tardes", "buenas noches", "que tal", "como estas"]):
+            op_saludo = f" {operator_name}" if operator_name and operator_name != "Operador" else ""
+            return f"¡Hola{op_saludo}! Farma a tu servicio. Puedes pedirme agregar medicamentos a la venta, consultar ventas de hoy, o preguntarme cómo usar las funciones del sistema."
+        if any(q in t for q in ["quien eres", "que eres", "que puedes hacer", "ayuda", "para que sirves"]):
+            return "Soy Farma, tu asistente de inteligencia artificial farmacéutica y clínica en Farmacia Davalsi. Conozco el inventario, los precios en unidad, blíster y caja, y todas las funciones del sistema para ayudarte en el mostrador."
+        if any(th in t for th in ["gracias", "muchas gracias", "te agradezco", "excelente farma"]):
+            return "¡Con muchísimo gusto! Aquí sigo atenta a cualquier otra orden o consulta."
+        if any(ad in t for ad in ["adios", "hasta luego", "nos vemos", "chao"]):
+            return "¡Hasta luego! Que tengas un excelente turno."
+        return None
+
     def _deterministic_voice_nlu(
         self,
         text_raw: str,
         context_type: str,
         catalog: List[Dict[str, Any]],
         operator_name: str,
-        session_id: str = "default_pos"
+        session_id: str = "default_pos",
+        sales_summary: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         mem = self._get_session_memory(session_id)
         ultimo_prod = mem.get("ultimo_producto")
@@ -1249,14 +1466,13 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
         ultimo_termino = mem.get("ultimo_termino_buscado", "")
         is_pos_mode = str(context_type or "POS").upper() == "POS"
 
-        t_low = text_raw.lower()
-        t_clean = re.sub(r"^\s*(hola\s+)?farma[,:\s]*", "", t_low, flags=re.IGNORECASE).strip()
+        t_norm = self._norm_simple(text_raw)
+        t_clean = re.sub(r"^(hola\s+)?farma\s*", "", t_norm, flags=re.IGNORECASE).strip()
+        if not t_clean and any(w in t_norm for w in ["farma", "hola"]):
+            t_clean = "hola farma" 
 
         acciones: List[Dict[str, Any]] = []
         respuestas_partes: List[str] = []
-        demanda_insatisfecha = False
-        termino_faltante = ""
-        terminos_faltantes_lista: List[str] = []
         matched_prod_for_memory: Optional[Dict[str, Any]] = None
         sustituto_for_memory: Optional[Dict[str, Any]] = None
         searched_term_for_memory = ""
@@ -1269,19 +1485,209 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             "doce": 12, "quince": 15, "veinte": 20, "treinta": 30
         }
 
-        # ---------------------------------------------------------------------
-        # MEJORA #2B: Confirmación en 1 paso de Sustituto Bioequivalente ("Sí, ponme dos", "Dale, agrégalo")
-        # ---------------------------------------------------------------------
+        # 1. SALUDOS, PREGUNTAS GENERALES Y ESTADO DE ESCUCHA
+        saludo = self._check_greetings_and_identity(t_clean, operator_name, is_pos_mode)
+        if saludo:
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply=saludo,
+                matched_product=None,
+                searched_term="saludo",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": [],
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": saludo
+            }
+
+        # 2. CONSULTAS DE VENTAS Y FINANZAS ("¿Cuánto hemos vendido hoy?")
+        if self._is_sales_query(t_clean):
+            resp_ventas = self._format_sales_answer(sales_summary, t_clean, is_pos_mode)
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply=resp_ventas,
+                matched_product=None,
+                searched_term="ventas_hoy",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": [{"tipo": "SHOW_SALES_REPORT"}] if is_pos_mode else [],
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": resp_ventas
+            }
+
+        # 3. NAVEGACION DE MODULOS DEL SISTEMA (Reportes, Deudores, Inventario, Pedidos)
+        nav = self._check_navigation_intent(t_clean, is_pos=is_pos_mode)
+        if nav:
+            nav_text, nav_actions = nav
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply=nav_text,
+                matched_product=None,
+                searched_term="navegacion",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": nav_actions,
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": nav_text
+            }
+
+        # 4. APLICAR DESCUENTO / REBAJA
+        desc = self._check_discount_intent(t_clean)
+        if desc:
+            desc_text, desc_actions = desc
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply=desc_text,
+                matched_product=None,
+                searched_term="descuento",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": desc_actions,
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": desc_text
+            }
+
+        # 5. LIMPIAR CARRITO / CANCELAR VENTA
+        t_norm_quick = self._norm_simple(t_clean)
+        if any(w in t_norm_quick for w in ["limpia el carrito", "limpiar carrito", "vacia el carrito", "vaciar carrito", "cancela la venta", "cancelar venta", "borra todo", "borrar orden", "anular venta"]):
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply="Carrito vaciado. Listo para una nueva venta.",
+                matched_product=None,
+                searched_term="limpiar_carrito",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": [{"tipo": "CLEAR_CART"}],
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": "Carrito vaciado. Listo para una nueva venta."
+            }
+
+        # 6. EXPLICACION DE FUNCIONES ("¿Cómo se hace X?", "Cómo subo medicamentos")
+        howto = self._check_system_howto(t_clean, is_pos_mode)
+        if howto:
+            resp_txt, acciones_howto = howto
+            updated_mem = self._update_session_memory(
+                session_id=session_id,
+                user_text=text_raw,
+                farma_reply=resp_txt,
+                matched_product=None,
+                searched_term="guia_sistema",
+                presentation="",
+                sustituto_sugerido=None
+            )
+            return {
+                "ok": True,
+                "comando_original": text_raw,
+                "modo_respuesta": "CAJERO_EJECUTIVO" if is_pos_mode else "PACIENTE_EMPATICO",
+                "operador": operator_name,
+                "acciones": acciones_howto,
+                "subtotal_comando_rd": 0.0,
+                "sustituto_bioequivalente": None,
+                "demanda_insatisfecha_detectada": False,
+                "termino_faltante": "",
+                "terminos_faltantes": [],
+                "memoria_sesion": {
+                    "ultimo_producto": updated_mem.get("ultimo_producto"),
+                    "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),
+                    "ultimo_termino_buscado": updated_mem.get("ultimo_termino_buscado"),
+                    "turnos_recientes": updated_mem.get("turnos", [])
+                },
+                "respuesta_voz": resp_txt
+            }
+
+        # 7. CONFIRMACION DE SUSTITUTO BIOEQUIVALENTE ("Sí, ponme dos", "Dale, agrégalo")
         es_confirmacion_sustituto = bool(re.search(
             r"^(s[ií]|claro|dale|ok|est[aá]\s+bien|de\s+acuerdo|perfecto|acepto|ponme|agr[eé]galo|agr[eé]gala|dame)\b",
             t_clean,
             flags=re.IGNORECASE
         )) and not any(w in t_clean for w in ["busca", "qué hay", "que hay", "cuánto", "cuanto"])
 
-        if es_confirmacion_sustituto and sustituto_sugerido and not any(
-            tok in t_clean for tok in ["losartan", "losartán", "amoxicilina", "acetaminofen", "acetaminofén", "omeprazol", "atorvastatina", "lipitor"]
-            if tok not in (sustituto_sugerido.get("nombre_comercial", "").lower())
-        ):
+        if es_confirmacion_sustituto and sustituto_sugerido:
             qty_m = re.search(r"\b(\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b", t_clean)
             raw_qty = qty_m.group(1) if qty_m else "1"
             qty = int(raw_qty) if raw_qty.isdigit() else num_map.get(raw_qty, 1)
@@ -1296,7 +1702,6 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             subtotal_comando_rd += item_sub
             matched_prod_for_memory = sustituto_sugerido
             pres_for_memory = pres
-            # Limpiar sustituto pendiente tras aplicarlo
             mem["sustituto_sugerido"] = None
 
             acciones.append({
@@ -1309,53 +1714,53 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             })
             pres_lbl = "blísteres" if (pres == "BLISTER" and qty > 1) else ("blíster" if pres == "BLISTER" else ("cajas" if (pres == "CAJA" and qty > 1) else ("caja" if pres == "CAJA" else ("unidades" if qty > 1 else "unidad"))))
             if is_pos_mode:
-                respuestas_partes.append(
-                    f"Sustituto aplicado: {qty} {pres_lbl} de {sustituto_sugerido.get('nombre_comercial')} (RD$ {item_sub:.2f})."
-                )
+                respuestas_partes.append(f"Sustituto aplicado: {qty} {pres_lbl} de {sustituto_sugerido.get('nombre_comercial')} (RD$ {item_sub:.2f}).")
             else:
                 tip = self._patient_clinical_tip(sustituto_sugerido)
-                respuestas_partes.append(
-                    f"¡Excelente elección! He agregado {qty} {pres_lbl} del bioequivalente {sustituto_sugerido.get('nombre_comercial')} (RD$ {item_sub:.2f}) a tu pedido. {tip}"
-                )
+                respuestas_partes.append(f"He agregado {qty} {pres_lbl} del bioequivalente {sustituto_sugerido.get('nombre_comercial')} (RD$ {item_sub:.2f}) a tu pedido. {tip}")
 
-        # Detectar si la frase usa pronombres anafóricos que apuntan al medicamento del turno anterior
-        usa_pronombre_contexto = bool(re.search(
-            r"\b(ese\s+mismo|esa\s+misma|de\s+ese|de\s+esa|de\s+eso|del\s+mismo|de\s+la\s+misma|ponlo|agr[eé]galo|agr[eé]gala|dame\s+m[aá]s|otro\s+m[aá]s|otra\s+m[aá]s|c[aá]mbialo|c[aá]mbiala)\b",
-            t_clean,
-            flags=re.IGNORECASE
-        ))
+        # 8. CONSULTA DE PRECIOS ("¿Cuánto cuesta el Paracetamol?", "¿Qué precio tiene la caja de Losartán?")
+        es_pregunta_precio = any(w in t_clean for w in ["cuanto cuesta", "que precio", "a como sale", "cuanto vale", "precio de", "precio del"])
+        if es_pregunta_precio and not acciones:
+            clean_p = re.sub(r"^(cuanto cuesta|que precio tiene|a como sale|cuanto vale|dime el precio de|cual es el precio de|precio de|precio del|precio)\s+(el|la|los|las)?\s*", "", t_clean, flags=re.IGNORECASE).strip()
+            p_target = None
+            if clean_p:
+                p_target = self._match_product_in_catalog(clean_p, catalog)
+            if not p_target and ultimo_prod:
+                p_target = ultimo_prod
 
-        # 0. Detectar Consulta de Precio sobre el medicamento en memoria ("¿cuánto cuesta?", "¿qué precio tiene la caja?")
-        es_pregunta_precio = any(w in t_clean for w in ["cuánto cuesta", "cuanto cuesta", "qué precio", "que precio", "a cómo sale", "a como sale", "cuánto vale", "cuanto vale"])
-        if es_pregunta_precio and (ultimo_prod or ultimo_termino) and not acciones:
-            p_ctx = ultimo_prod
-            if p_ctx:
-                p_unidad = self._compute_item_price_rd(p_ctx, "UNIDAD", 1)
-                p_blister = self._compute_item_price_rd(p_ctx, "BLISTER", 1)
-                p_caja = self._compute_item_price_rd(p_ctx, "CAJA", 1)
+            if p_target:
+                p_uni = self._compute_item_price_rd(p_target, "UNIDAD", 1)
+                p_bli = self._compute_item_price_rd(p_target, "BLISTER", 1)
+                p_caj = self._compute_item_price_rd(p_target, "CAJA", 1)
+                nom = p_target.get("nombre_comercial", "")
+                anaq = p_target.get("ubicacion_anaquel", "A-01")
+                matched_prod_for_memory = p_target
+                searched_term_for_memory = nom
+
                 if "caja" in t_clean:
-                    respuestas_partes.append(f"La caja de {p_ctx['nombre_comercial']} cuesta RD$ {p_caja:.2f}.")
-                elif "blíster" in t_clean or "blister" in t_clean:
-                    respuestas_partes.append(f"El blíster de {p_ctx['nombre_comercial']} cuesta RD$ {p_blister:.2f}.")
+                    respuestas_partes.append(f"La caja de {nom} cuesta RD$ {p_caj:.2f} (Anaquel: {anaq}).")
+                elif "blister" in t_clean or "blíster" in t_clean:
+                    respuestas_partes.append(f"El blíster de {nom} cuesta RD$ {p_bli:.2f} (Anaquel: {anaq}).")
                 else:
-                    respuestas_partes.append(f"{p_ctx['nombre_comercial']} cuesta RD$ {p_unidad:.2f} por unidad, RD$ {p_blister:.2f} el blíster y RD$ {p_caja:.2f} la caja.")
+                    respuestas_partes.append(f"{nom} cuesta RD$ {p_uni:.2f} por unidad, RD$ {p_bli:.2f} el blíster y RD$ {p_caj:.2f} la caja (Anaquel: {anaq}).")
+
                 acciones.append({
                     "tipo": "PRICE_INQUIRY",
-                    "producto_id": p_ctx.get("id"),
-                    "termino_busqueda": p_ctx.get("nombre_comercial", "")
+                    "producto_id": p_target.get("id"),
+                    "termino_busqueda": nom
                 })
             else:
-                respuestas_partes.append(f"El producto {ultimo_termino} aún no tiene precio registrado en el inventario actual.")
+                respuestas_partes.append(f"No encontramos '{clean_p or ultimo_termino}' en el catálogo de medicamentos.")
 
-        # A. Detectar Consulta Clínica / Filtrado Inteligente
-        es_consulta = any(w in t_clean for w in [
-            "qué tenemos", "que tenemos", "qué hay", "que hay", "recomienda",
+        # 9. CONSULTA CLINICA / SINTOMAS ("Busco algo para el dolor de cabeza", "Qué tienes para la fiebre")
+        es_consulta_clinica = any(w in t_clean for w in [
+            "qué tenemos para", "que tenemos para", "qué hay para", "que hay para", "recomienda",
             "busco algo para", "para la gripe", "para el dolor", "para la tos",
-            "para la fiebre", "para la diarrea", "para la infeccion", "no suba la presion",
-            "no suba la presión", "hipertenso", "diabetico", "diabético"
+            "para la fiebre", "para la diarrea", "para la infeccion", "para la infecci",
+            "para la gastritis", "para la acidez", "no suba la presion", "hipertenso"
         ])
-
-        if es_consulta and not acciones:
+        if es_consulta_clinica and not acciones:
             no_hta = any(w in t_clean for w in ["no suba la presion", "no suba la presión", "hipertens", "presión alta", "presion alta"])
             no_diab = any(w in t_clean for w in ["diabet", "azúcar", "azucar", "sin azúcar"])
 
@@ -1369,60 +1774,45 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             for p in catalog:
                 texto_prod = f"{p.get('nombre_comercial', '')} {p.get('principio_activo', '')} {p.get('categoria', '')} {p.get('sintomas_tags', '')}".lower()
                 if sintoma and sintoma not in texto_prod:
-                    if sintoma == "gripe" and not any(k in texto_prod for k in ["grip", "acetaminof", "paracetamol", "loratadina", "cetirizina", "vitamina c", "descongest"]):
+                    if sintoma == "gripe" and not any(k in texto_prod for k in ["grip", "acetaminof", "paracetamol", "loratadina", "cetirizina"]):
                         continue
                     elif sintoma != "gripe":
                         continue
 
-                if no_hta and any(riesgo in texto_prod for riesgo in ["pseudoefedrina", "fenilefrina", "ibuprofeno", "diclofenac", "naproxeno", "ketorolaco"]):
+                if no_hta and any(riesgo in texto_prod for riesgo in ["pseudoefedrina", "fenilefrina", "ibuprofeno", "diclofenac"]):
                     continue
-                if no_diab and any(riesgo in texto_prod for riesgo in ["jarabe azucarado", "sacarosa", "dextrosa"]):
+                if no_diab and any(riesgo in texto_prod for riesgo in ["jarabe azucarado", "sacarosa"]):
                     continue
-
                 candidatos.append(p)
 
-            termino_filtro = sintoma or t_clean
-            searched_term_for_memory = termino_filtro
             if candidatos:
                 matched_prod_for_memory = candidatos[0]
-
-            acciones.append({
-                "tipo": "FILTER_CATALOG",
-                "termino_busqueda": termino_filtro,
-                "filtro_seguridad": "HIPERTENSION" if no_hta else ("DIABETES" if no_diab else "NINGUNO"),
-                "productos_sugeridos_ids": [c.get("id") for c in candidatos[:6]]
-            })
-
-            if candidatos:
-                if is_pos_mode:
-                    nombres_top = ", ".join([f"{c.get('nombre_comercial')} ({c.get('ubicacion_anaquel', 'A-01')}, RD$ {float(c.get('precio_base', 0)):.0f})" for c in candidatos[:2]])
-                    nota_hta = " seguros en HTA" if no_hta else ""
-                    respuestas_partes.append(f"Opciones{nota_hta}: {nombres_top}. Di 'agrega 1 blíster de ese mismo' para despachar.")
-                else:
-                    nombres_top = ", ".join([f"{c.get('nombre_comercial')} (RD$ {float(c.get('precio_base', 0)):.2f})" for c in candidatos[:2]])
-                    nota_hta = " que no elevan tu presión arterial" if no_hta else ""
-                    respuestas_partes.append(
-                        f"Para aliviar {sintoma or 'ese malestar'} contamos con {nombres_top}{nota_hta}. Si deseas llevarlo, solo dime 'agrega 1 de ese mismo'."
-                    )
+                searched_term_for_memory = sintoma or t_clean
+                acciones.append({
+                    "tipo": "FILTER_CATALOG",
+                    "termino_busqueda": sintoma or t_clean,
+                    "filtro_seguridad": "HIPERTENSION" if no_hta else ("DIABETES" if no_diab else "NINGUNO"),
+                    "productos_sugeridos_ids": [c.get("id") for c in candidatos[:4]]
+                })
+                nombres_top = ", ".join([f"{c.get('nombre_comercial')} (Anaquel {c.get('ubicacion_anaquel', 'A-01')}, RD$ {float(c.get('precio_base', 0)):.2f})" for c in candidatos[:2]])
+                respuestas_partes.append(f"Para {sintoma or 'tu consulta'} disponemos de: {nombres_top}.")
             else:
-                if no_hta and sintoma == "gripe":
-                    respuestas_partes.append(
-                        "Para gripe en hipertensos recomendamos Acetaminofén o Loratadina libre de fenilefrina. He filtrado el buscador."
-                    )
-                else:
-                    respuestas_partes.append(f"He filtrado el catálogo buscando opciones para {sintoma or 'tu consulta clínica'}.")
+                respuestas_partes.append(f"No encontramos medicamentos específicos en catálogo para '{sintoma or t_clean}'.")
 
-        # ---------------------------------------------------------------------
-        # B. MEJORA #1: COMANDOS COMPUESTOS MULTI-PRODUCTO EN UNA SOLA FRASE
-        #    Ej: "agrega 1 caja de Losartán 50, 2 blísteres de Acetaminofén 500 y 1 Omeprazol 20, y ponlo en transferencia"
-        # ---------------------------------------------------------------------
+        # 10. AGREGAR MEDICAMENTOS (COMANDOS COMPUESTOS O SIMPLES)
+        usa_pronombre_contexto = bool(re.search(
+            r"\b(ese\s+mismo|esa\s+misma|de\s+ese|de\s+esa|de\s+eso|del\s+mismo|de\s+la\s+misma|ponlo|agr[eé]galo|agr[eé]gala|dame\s+m[aá]s|otro\s+m[aá]s|otra\s+m[aá]s)\b",
+            t_clean,
+            flags=re.IGNORECASE
+        ))
+
         patron_add_block = re.search(
-            r"(?:agrega|agr[eé]gale|agr[eé]game|añade|anade|pon|ponme|ponle|despacha|vende|dame|quiero)\s+(.+?)(?=(?:\s*(?:,\s*)?(?:y\s+)?(?:cobra|cobrar|factura|facturar|paga|pagar|ponlo\s+en|en\s+efectivo|con\s+tarjeta|por\s+transferencia|en\s+transferencia))|$)",
+            r"(?:agrega|agr[eé]gale|agr[eé]game|añade|anade|pon|ponme|ponle|despacha|vende|dame|necesito\s+vender)\s+(.+?)(?=(?:\s*(?:,\s*)?(?:y\s+)?(?:cobra|cobrar|factura|facturar|paga|pagar|ponlo\s+en|en\s+efectivo|con\s+tarjeta|por\s+transferencia|en\s+transferencia))|$)",
             t_clean,
             flags=re.IGNORECASE
         )
 
-        if not patron_add_block and usa_pronombre_contexto and (ultimo_prod or ultimo_termino) and not acciones:
+        if not patron_add_block and usa_pronombre_contexto and ultimo_prod and not acciones:
             qty_m = re.search(r"\b(\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b", t_clean)
             raw_qty = qty_m.group(1) if qty_m else "1"
             qty = int(raw_qty) if raw_qty.isdigit() else num_map.get(raw_qty, 1)
@@ -1433,29 +1823,23 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             else:
                 pres = mem.get("ultima_presentacion") or "UNIDAD"
 
+            matched_prod_for_memory = ultimo_prod
             pres_for_memory = pres
-            if ultimo_prod:
-                matched_prod_for_memory = ultimo_prod
-                item_sub = self._compute_item_price_rd(ultimo_prod, pres, qty)
-                subtotal_comando_rd += item_sub
-                acciones.append({
-                    "tipo": "ADD_CART",
-                    "producto_id": ultimo_prod.get("id"),
-                    "termino_busqueda": ultimo_prod.get("nombre_comercial"),
-                    "cantidad": max(1, qty),
-                    "presentacion": pres,
-                    "subtotal_rd": item_sub
-                })
-                pres_label = "blísteres" if (pres == "BLISTER" and qty > 1) else ("blíster" if pres == "BLISTER" else ("cajas" if (pres == "CAJA" and qty > 1) else ("caja" if pres == "CAJA" else ("unidades" if qty > 1 else "unidad"))))
-                if is_pos_mode:
-                    respuestas_partes.append(f"Agregado: {qty} {pres_label} de {ultimo_prod.get('nombre_comercial')} (RD$ {item_sub:.2f}).")
-                else:
-                    tip = self._patient_clinical_tip(ultimo_prod)
-                    respuestas_partes.append(f"Con gusto agregué {qty} {pres_label} de {ultimo_prod.get('nombre_comercial')} (RD$ {item_sub:.2f}) a tu carrito. {tip}")
+            item_sub = self._compute_item_price_rd(ultimo_prod, pres, qty)
+            subtotal_comando_rd += item_sub
+            acciones.append({
+                "tipo": "ADD_CART",
+                "producto_id": ultimo_prod.get("id"),
+                "termino_busqueda": ultimo_prod.get("nombre_comercial"),
+                "cantidad": max(1, qty),
+                "presentacion": pres,
+                "subtotal_rd": item_sub
+            })
+            pres_label = "blísteres" if (pres == "BLISTER" and qty > 1) else ("blíster" if pres == "BLISTER" else ("cajas" if (pres == "CAJA" and qty > 1) else ("caja" if pres == "CAJA" else ("unidades" if qty > 1 else "unidad"))))
+            respuestas_partes.append(f"Agregado: {qty} {pres_label} de {ultimo_prod.get('nombre_comercial')} (RD$ {item_sub:.2f}).")
 
         elif patron_add_block and not acciones:
             items_chunk = patron_add_block.group(1).strip()
-            # Separar cláusulas de múltiples medicamentos separados por ",", " y ", " más ", " también "
             sub_clauses = re.split(
                 r"\s*,\s*(?:y\s+)?|\s+(?:y|m[aá]s|tambi[eé]n)\s+(?=(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|quince|veinte|treinta|bl[ií]ster|caja|unidad|tableta|pastilla|frasco|agrega|pon|dame)\b)",
                 items_chunk,
@@ -1463,10 +1847,8 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             )
 
             items_agregados_resumen = []
-            ultimo_matched_multi = None
-
             for clause in sub_clauses:
-                c_str = re.sub(r"^(?:agrega|añade|pon|ponme|dame|quiero)\s+", "", clause.strip(), flags=re.IGNORECASE).strip()
+                c_str = re.sub(r"^(?:agrega|añade|pon|ponme|dame|quiero|necesito\s+vender)\s+", "", clause.strip(), flags=re.IGNORECASE).strip()
                 if not c_str:
                     continue
 
@@ -1495,21 +1877,15 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
                 if not raw_drug:
                     continue
 
-                # Resolver pronombres de memoria ("ese mismo", "de esa")
-                es_referencia_memoria = any(ref in raw_drug.lower() for ref in ["ese", "esa", "eso", "mismo", "misma", "anterior", "más", "mas"])
-                if es_referencia_memoria and (ultimo_prod or ultimo_termino):
+                es_ref_memoria = any(ref in raw_drug.lower() for ref in ["ese", "esa", "eso", "mismo", "misma", "anterior"])
+                if es_ref_memoria and ultimo_prod:
                     matched_prod = ultimo_prod
-                    if not matched_prod and ultimo_termino:
-                        raw_drug = ultimo_termino
-                    elif matched_prod:
-                        raw_drug = matched_prod.get("nombre_comercial", raw_drug)
                 else:
                     matched_prod = self._match_product_in_catalog(raw_drug, catalog)
 
                 pres_label = "blísteres" if (pres == "BLISTER" and qty > 1) else ("blíster" if pres == "BLISTER" else ("cajas" if (pres == "CAJA" and qty > 1) else ("caja" if pres == "CAJA" else ("unidades" if qty > 1 else "unidad"))))
 
                 if matched_prod:
-                    ultimo_matched_multi = matched_prod
                     matched_prod_for_memory = matched_prod
                     searched_term_for_memory = matched_prod.get("nombre_comercial", raw_drug)
                     item_sub = self._compute_item_price_rd(matched_prod, pres, qty)
@@ -1525,12 +1901,6 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
                     })
                     items_agregados_resumen.append(f"{qty} {pres_label} de {matched_prod.get('nombre_comercial')}")
                 else:
-                    # MEJORA #2: ¡No está en stock! Buscar automáticamente un Bioequivalente (mismo Principio Activo DCI)
-                    demanda_insatisfecha = True
-                    termino_faltante = raw_drug
-                    terminos_faltantes_lista.append(raw_drug)
-                    searched_term_for_memory = raw_drug
-
                     bio_sub = self._find_bioequivalent_in_catalog(raw_drug, catalog)
                     if bio_sub:
                         sustituto_for_memory = bio_sub
@@ -1545,47 +1915,17 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
                             "presentacion_sugerida": pres,
                             "cantidad_sugerida": max(1, qty)
                         })
-                        if is_pos_mode:
-                            respuestas_partes.append(
-                                f"Agotado {raw_drug}, pero tenemos bioequivalente {bio_sub.get('nombre_comercial')} ({bio_sub.get('principio_activo')}) en anaquel {bio_sub.get('ubicacion_anaquel', 'A-01')} a RD$ {p_sub_rd:.2f}. ¿Te agrego {qty} de ese en su lugar?"
-                            )
-                        else:
-                            respuestas_partes.append(
-                                f"En este momento no nos queda {raw_drug}, pero contamos con {bio_sub.get('nombre_comercial')}, que contiene exactamente el mismo principio activo ({bio_sub.get('principio_activo')}) a RD$ {p_sub_rd:.2f}. ¿Deseas que te agregue ese en su lugar?"
-                            )
+                        respuestas_partes.append(
+                            f"No tenemos {raw_drug} en stock, pero contamos con el bioequivalente {bio_sub.get('nombre_comercial')} ({bio_sub.get('principio_activo')}) en anaquel {bio_sub.get('ubicacion_anaquel', 'A-01')} a RD$ {p_sub_rd:.2f}. ¿Deseas que agregue ese en su lugar?"
+                        )
                     else:
-                        acciones.append({
-                            "tipo": "FILTER_CATALOG",
-                            "termino_busqueda": raw_drug,
-                            "filtro_seguridad": "NINGUNO"
-                        })
-                        if is_pos_mode:
-                            respuestas_partes.append(
-                                f"Sin stock de {raw_drug}; anotado en Ventas Perdidas."
-                            )
-                        else:
-                            respuestas_partes.append(
-                                f"Lo sentimos, en este momento no tenemos {raw_drug} disponible, pero ya lo hemos anotado como prioritario para nuestro próximo ingreso."
-                            )
+                        respuestas_partes.append(f"No tenemos {raw_drug} disponible en este momento en el inventario.")
 
-            # Generar respuesta adaptativa (Mejora #3) para los productos agregados
             if items_agregados_resumen:
                 lista_str = ", ".join(items_agregados_resumen)
-                if is_pos_mode:
-                    # Modo Cajero Rápido: directo, ejecutivo y con total exacto en RD$
-                    respuestas_partes.insert(
-                        0,
-                        f"Agregado: {lista_str}. Total orden: RD$ {subtotal_comando_rd:.2f}."
-                    )
-                else:
-                    # Modo Paciente Empático: cálido + consejo clínico
-                    tip_txt = self._patient_clinical_tip(ultimo_matched_multi) if ultimo_matched_multi else ""
-                    respuestas_partes.insert(
-                        0,
-                        f"Con mucho gusto he agregado {lista_str} a tu carrito (Subtotal: RD$ {subtotal_comando_rd:.2f}). {tip_txt}".strip()
-                    )
+                respuestas_partes.insert(0, f"Agregado: {lista_str}. Total orden: RD$ {subtotal_comando_rd:.2f}.")
 
-        # C. Detectar Método de Pago y Cobro
+        # 11. DETECTAR METODO DE PAGO Y COBRO
         metodo_pago = None
         if "efectivo" in t_clean:
             metodo_pago = "EFECTIVO"
@@ -1611,40 +1951,24 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             pago_txt = f" en {metodo_pago.lower()}" if metodo_pago else ""
             respuestas_partes.append(f"Procesando cobro{pago_txt}.")
 
-        # D. Limpiar carrito
-        if any(w in t_clean for w in ["limpia el carrito", "vacía el carrito", "vacia el carrito", "cancela la venta", "borrar carrito"]):
-            acciones.append({"tipo": "CLEAR_CART"})
-            respuestas_partes.append("Carrito vaciado.")
-
-        # E. Búsqueda directa de un fármaco (ej. "Farma, busca Lipitor 20mg" o "Farma, busca Pregabalina 75mg")
-        if not acciones:
+        # 12. BUSQUEDA DIRECTA DE UN MEDICAMENTO EN EL BUSCADOR (ej: "busca Losartán")
+        if not acciones and not respuestas_partes:
             clean_search = re.sub(r"^(busca|b[uú]scame|tenemos|hay|consulta|ver)\s+", "", t_clean, flags=re.IGNORECASE).strip()
-            searched_term_for_memory = clean_search
-
             matched_search = self._match_product_in_catalog(clean_search, catalog)
-
             if matched_search:
                 matched_prod_for_memory = matched_search
+                searched_term_for_memory = matched_search.get("nombre_comercial")
+                p_base = float(matched_search.get("precio_base", 0))
+                anaq = matched_search.get("ubicacion_anaquel", "A-01")
                 acciones.append({
                     "tipo": "FILTER_CATALOG",
-                    "termino_busqueda": clean_search,
+                    "termino_busqueda": matched_search.get("nombre_comercial"),
                     "filtro_seguridad": "NINGUNO"
                 })
-                if is_pos_mode:
-                    respuestas_partes.append(
-                        f"En stock: {matched_search.get('nombre_comercial')} en anaquel {matched_search.get('ubicacion_anaquel', 'A-01')} a RD$ {float(matched_search.get('precio_base', 0)):.2f}. Di 'agrega 1 caja de ese mismo' para despachar."
-                    )
-                else:
-                    tip = self._patient_clinical_tip(matched_search)
-                    respuestas_partes.append(
-                        f"Sí, tenemos {matched_search.get('nombre_comercial')} disponible a RD$ {float(matched_search.get('precio_base', 0)):.2f} por unidad. {tip}"
-                    )
+                respuestas_partes.append(
+                    f"En stock: {matched_search.get('nombre_comercial')} en anaquel {anaq} a RD$ {p_base:.2f}. Di 'agrega 1 caja de ese mismo' para despachar."
+                )
             else:
-                demanda_insatisfecha = True
-                termino_faltante = clean_search
-                terminos_faltantes_lista.append(clean_search)
-
-                # MEJORA #2: Buscar Bioequivalente automáticamente también en búsquedas por voz
                 bio_sub = self._find_bioequivalent_in_catalog(clean_search, catalog)
                 if bio_sub:
                     sustituto_for_memory = bio_sub
@@ -1659,30 +1983,18 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
                         "presentacion_sugerida": "BLISTER",
                         "cantidad_sugerida": 1
                     })
-                    if is_pos_mode:
-                        respuestas_partes.append(
-                            f"No queda {clean_search}, pero tenemos {bio_sub.get('nombre_comercial')} (mismo principio activo: {bio_sub.get('principio_activo')}) en anaquel {bio_sub.get('ubicacion_anaquel', 'A-01')} a RD$ {p_blist:.2f} el blíster. ¿Te agrego ese en su lugar?"
-                        )
-                    else:
-                        respuestas_partes.append(
-                            f"Ahora mismo no nos queda {clean_search}, pero tenemos disponible {bio_sub.get('nombre_comercial')}, con el mismo principio activo ({bio_sub.get('principio_activo')}), a RD$ {p_blist:.2f} el blíster. ¿Deseas que te lo agregue?"
-                        )
+                    respuestas_partes.append(
+                        f"No nos queda {clean_search}, pero tenemos el bioequivalente {bio_sub.get('nombre_comercial')} ({bio_sub.get('principio_activo')}) en anaquel {bio_sub.get('ubicacion_anaquel', 'A-01')} a RD$ {p_blist:.2f} el blíster. ¿Deseas que te agregue ese?"
+                    )
                 else:
-                    acciones.append({
-                        "tipo": "FILTER_CATALOG",
-                        "termino_busqueda": clean_search,
-                        "filtro_seguridad": "NINGUNO"
-                    })
-                    if is_pos_mode:
-                        respuestas_partes.append(
-                            f"Sin stock de {clean_search}. Registrado en Faltantes para próximo pedido."
-                        )
-                    else:
-                        respuestas_partes.append(
-                            f"No encontramos {clean_search} disponible en este momento, pero lo hemos anotado para nuestro próximo abastecimiento."
-                        )
+                    # FALLBACK AMIGABLE SIN REGISTRAR FALTANTES
+                    respuestas_partes.append(
+                        f"No encontré '{clean_search}' en catálogo. Puedes pedirme agregar un medicamento específico, consultar cuánto hemos vendido hoy, o preguntarme 'cómo se hace' una función."
+                    )
 
         respuesta_final = " ".join(respuestas_partes).strip()
+        if not respuesta_final:
+            respuesta_final = "No comprendí esa orden. Puedes pedirme agregar un medicamento, consultar precios, ver reportes de ventas, o preguntarme cómo usar las funciones del sistema."
 
         updated_mem = self._update_session_memory(
             session_id=session_id,
@@ -1702,9 +2014,9 @@ Analiza la imagen de este comprobante o váucher de transferencia bancaria y ext
             "acciones": acciones,
             "subtotal_comando_rd": round(subtotal_comando_rd, 2),
             "sustituto_bioequivalente": sustituto_for_memory,
-            "demanda_insatisfecha_detectada": demanda_insatisfecha,
-            "termino_faltante": termino_faltante,
-            "terminos_faltantes": terminos_faltantes_lista,
+            "demanda_insatisfecha_detectada": False,
+            "termino_faltante": "",
+            "terminos_faltantes": [],
             "memoria_sesion": {
                 "ultimo_producto": updated_mem.get("ultimo_producto"),
                 "sustituto_sugerido": updated_mem.get("sustituto_sugerido"),

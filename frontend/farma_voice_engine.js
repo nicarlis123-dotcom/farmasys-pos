@@ -24,7 +24,7 @@
     constructor() {
       this.isMuted = localStorage.getItem(STORAGE_MUTE_KEY) === 'true';
       // Por defecto activado una vez que el usuario lo enciende, recordando su estado entre recargas
-      this.alwaysOnEnabled = localStorage.getItem(STORAGE_ALWAYS_ON_KEY) === 'true';
+      this.alwaysOnEnabled = localStorage.getItem(STORAGE_ALWAYS_ON_KEY) !== 'false';
       this.isListening = false;
       this.isSpeaking = false;
       this.isEnrolling = false;
@@ -69,19 +69,27 @@
 
       if (isPOS) {
         await this.loadVoiceProfiles();
-        await this.loadUnmetDemand();
-        setTimeout(() => this.injectUnmetDemandNavButton(), 500);
+        // await this.loadUnmetDemand();
+        setTimeout(() => this.injectUnmetDemandNavButton(), 100);
       }
-      setTimeout(() => this.bindZeroResultSearchHooks(), 800);
+      // setTimeout(() => this.bindZeroResultSearchHooks(), 800);
 
-      // Acoplar controles al avatar 3D y arrancar escucha continua si ya estaba habilitada
+      // Acoplar controles al avatar 3D y arrancar escucha continua automáticamente en el POS
       setTimeout(() => {
         this.attachAvatarControls();
         this.patchUnifiedAgentSpeech();
 
-        if (this.alwaysOnEnabled) {
-          this.startContinuousSentinel(true);
-        }
+        // Tanto en POS físico como en la App del Paciente, Farma está siempre atenta a su nombre ("Farma...")
+        this.startContinuousSentinel(true);
+
+        // Desbloqueo automático ante la primera interacción si el navegador exige gesto de usuario para el micrófono
+        const unlockMicOnFirstGesture = () => {
+          if (!this.isListening) {
+            this.startContinuousSentinel(true);
+          }
+        };
+        document.addEventListener('pointerdown', unlockMicOnFirstGesture, { once: true, passive: true });
+        document.addEventListener('keydown', unlockMicOnFirstGesture, { once: true, passive: true });
       }, 650);
 
       console.log('[FarmaVoiceEngine] Escucha Continua con Wake-Word ("Farma") lista.');
@@ -276,14 +284,23 @@
 
         utter.onstart = () => {
           this.isSpeaking = true;
+          if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+            window.farmaUnifiedAgent.setAudioState('speaking');
+          }
         };
         utter.onend = () => {
           setTimeout(() => {
             this.isSpeaking = false;
+            if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+              window.farmaUnifiedAgent.setAudioState(this.awaitingOrderAfterWake ? 'listening' : 'idle');
+            }
           }, 250);
         };
         utter.onerror = () => {
           this.isSpeaking = false;
+          if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+            window.farmaUnifiedAgent.setAudioState('idle');
+          }
         };
 
         this.synth.speak(utter);
@@ -553,8 +570,27 @@
       };
 
       this.recognition.onresult = (event) => {
-        // Ignorar si Farma está hablando en este instante para evitar auto-activarse
-        if (this.isSpeaking) return;
+        // Barge-In: Si Farma está hablando y se detecta voz con la palabra Farma o comando, silenciar a Farma al instante
+        if (this.isSpeaking) {
+          let hasSpeech = false;
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const t = (event.results[i][0].transcript || '').toLowerCase();
+            if (t.includes('farma') || t.includes('espera') || t.includes('para') || t.includes('agrega') || t.length > 5) {
+              hasSpeech = true;
+              break;
+            }
+          }
+          if (hasSpeech) {
+            if (this.synth) this.synth.cancel();
+            this.isSpeaking = false;
+            this.playChime('barge');
+            if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+              window.farmaUnifiedAgent.setAudioState('listening');
+            }
+          } else {
+            return;
+          }
+        }
 
         let interim = '';
         let finalChunk = '';
@@ -612,12 +648,64 @@
       };
     }
 
+
+    /* =========================================================================
+       AUDIO CHIMES SINTETIZADOS (FEEDBACK AUDITIVO INMEDIATO)
+       ========================================================================= */
+    playChime(type = 'wake') {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        if (type === 'wake') {
+          // Sonar / Wake chime: tono ascendente suave y futurista (440Hz -> 880Hz)
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.exponentialRampToValueAtTime(880, now + 0.14);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+          osc.start(now);
+          osc.stop(now + 0.28);
+        } else if (type === 'success') {
+          // Éxito: acorde musical mayor rápido
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, now); // C5
+          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+          gain.gain.setValueAtTime(0.10, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        } else if (type === 'barge') {
+          // Interrupción inmediata: clic sutil
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(300, now);
+          gain.gain.setValueAtTime(0.08, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+          osc.start(now);
+          osc.stop(now + 0.06);
+        }
+      } catch (e) {}
+    }
+
     openFollowUpWakeWindow(seconds = 10) {
       this.awaitingOrderAfterWake = true;
+      this.playChime('wake');
+      if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+        window.farmaUnifiedAgent.setAudioState('listening');
+      }
       this.updateToolbarUI();
       if (this.wakeWindowTimer) clearTimeout(this.wakeWindowTimer);
       this.wakeWindowTimer = setTimeout(() => {
         this.awaitingOrderAfterWake = false;
+        if (window.farmaUnifiedAgent && typeof window.farmaUnifiedAgent.setAudioState === 'function') {
+          window.farmaUnifiedAgent.setAudioState('idle');
+        }
         this.updateToolbarUI();
         this.hideLiveTranscriptBanner();
       }, seconds * 1000);
@@ -666,22 +754,9 @@
     async startContinuousSentinel(silentStart = false) {
       if (isPOS) {
         await this.loadVoiceProfiles();
-        if (!this.voiceProfiles.length) {
-          this.alwaysOnEnabled = false;
-          localStorage.setItem(STORAGE_ALWAYS_ON_KEY, 'false');
-          this.updateToolbarUI();
-          if (!silentStart) {
-            if (window.farmaUnifiedAgent) {
-              window.farmaUnifiedAgent.say(
-                'Para activar la escucha continua en caja, registra primero al menos 1 voz autorizada (máximo 5).',
-                'Seguridad Biométrica POS',
-                8
-              );
-            }
-            this.openVoiceProfilesModal();
-          }
-          return;
-        }
+        // Si no hay voces aún en el POS, iniciamos escucha para permitirle al operador usar el sistema o pedirle grabar su voz al decir "Farma"
+        this.alwaysOnEnabled = true;
+        localStorage.setItem(STORAGE_ALWAYS_ON_KEY, 'true');
       }
 
       this.alwaysOnEnabled = true;
@@ -748,6 +823,14 @@
       // Validación de Voz Autorizada en POS
       if (isPOS) {
         if (!this.voiceProfiles.length) {
+          if (window.farmaUnifiedAgent) {
+            window.farmaUnifiedAgent.say(
+              'Hola. Para que solo responda a tu voz en caja, dime tu nombre o presiona Grabar en este asistente.',
+              'Seguridad Biométrica POS',
+              8,
+              [{ label: 'Grabar mi voz ahora', icon: '🎙️', primary: true, onClick: () => window.farmaVoice.openVoiceProfilesModal() }]
+            );
+          }
           this.openVoiceProfilesModal();
           return;
         }
@@ -797,6 +880,45 @@
           }
           // Mantener ventana de seguimiento conversacional abierta por 15 segundos
           this.openFollowUpWakeWindow(15);
+          this.playChime('success');
+
+          // Generar chips interactivos si hay acciones relevantes (ej: sustituto bioequivalente, cobro, etc.)
+          const interactiveActions = [];
+          if (Array.isArray(data.acciones)) {
+            data.acciones.forEach(acc => {
+              if (acc.tipo === 'SUGGEST_SUBSTITUTE' && acc.termino_busqueda) {
+                interactiveActions.push({
+                  label: `Agregar ${acc.termino_busqueda} (${acc.presentacion_sugerida || 'Blíster'})`,
+                  icon: '🔄',
+                  primary: true,
+                  command: `agrega 1 ${acc.presentacion_sugerida || 'blíster'} de ${acc.termino_busqueda}`
+                });
+              } else if (acc.tipo === 'FILTER_CATALOG' && acc.termino_busqueda) {
+                interactiveActions.push({
+                  label: `Ver ${acc.termino_busqueda}`,
+                  icon: '🔍',
+                  onClick: () => {
+                    const inp = document.getElementById(isPOS ? 'pos-barcode-input' : 'app-search-input');
+                    if (inp) {
+                      inp.value = acc.termino_busqueda;
+                      if (isPOS && typeof window.handlePosSearchInput === 'function') window.handlePosSearchInput(acc.termino_busqueda);
+                      else if (!isPOS && typeof window.handleAppSearch === 'function') window.handleAppSearch();
+                    }
+                  }
+                });
+              }
+            });
+          }
+
+          if (window.farmaUnifiedAgent) {
+            window.farmaUnifiedAgent.say(
+              data.respuesta_voz || 'Orden ejecutada.',
+              isPOS ? 'Farma POS Copilot' : 'Farma Salud',
+              12,
+              interactiveActions
+            );
+          }
+
           this.executeDomActions(data.acciones || [], data.respuesta_voz || '', operatorName);
         } else {
           if (window.farmaUnifiedAgent) {
@@ -816,46 +938,23 @@
     }
 
     async loadUnmetDemand() {
-      if (!isPOS) return;
-      try {
-        const res = await fetch(`/api/farma/unmet-demand?farmacia_id=${this.getFarmaciaId()}`);
-        const data = await res.json();
-        this.unmetDemandItems = (data && data.ok && Array.isArray(data.items)) ? data.items : [];
-      } catch (e) {
-        this.unmetDemandItems = [];
-      }
+      this.unmetDemandItems = [];
       this.updateUnmetDemandBadge();
-      const modal = document.getElementById('farma-unmet-demand-modal');
-      if (modal && !modal.classList.contains('hidden')) this.renderUnmetDemandModal();
     }
 
     updateUnmetDemandBadge() {
-      const n = this.unmetDemandItems.length;
+      this.unmetDemandItems = [];
       document.querySelectorAll('[data-unmet-count]').forEach(el => {
-        el.textContent = String(n);
-        el.style.display = n > 0 ? 'inline-flex' : 'none';
+        el.textContent = '0';
+        el.style.display = 'none';
       });
     }
 
     injectUnmetDemandNavButton() {
-      if (!isPOS) return;
-      let dock = document.getElementById('davalsi-quick-dock');
-      if (!dock) {
-        dock = document.createElement('div');
-        dock.id = 'davalsi-quick-dock';
-        dock.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:9990;display:flex;gap:8px;';
-        document.body.appendChild(dock);
-      }
-      if (!document.getElementById('btn-unmet-demand-dock')) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.id = 'btn-unmet-demand-dock';
-        btn.title = 'Medicamentos que los clientes pidieron y no había en stock';
-        btn.className = 'px-3 py-2 rounded-2xl bg-slate-900/95 hover:bg-slate-800 text-amber-300 font-black text-xs shadow-lg border border-amber-500/40 flex items-center gap-1.5 cursor-pointer';
-        btn.innerHTML = '<span>📈</span><span>Faltantes</span><span data-unmet-count class="px-1.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black" style="display:none">0</span>';
-        btn.onclick = () => this.openUnmetDemandModal();
-        dock.appendChild(btn);
-      }
+      const btn = document.getElementById('btn-unmet-demand-dock');
+      if (btn) btn.remove();
+      const modal = document.getElementById('farma-unmet-demand-modal');
+      if (modal) modal.remove();
       this.updateUnmetDemandBadge();
     }
 
@@ -951,46 +1050,30 @@
       }
     }
 
+    isPlausibleMedicine(term) {
+      if (!term || typeof term !== 'string') return false;
+      const t = term.trim().toLowerCase();
+      if (t.length < 3 || /^\d+$/.test(t)) return false;
+      const invalid = [
+        'cuanto', 'cuánto', 'vendido', 'ventas', 'como se', 'cómo se', 'corte', 'caja', 'hola', 'buenos',
+        'precio', 'deudor', 'reporte', 'ticket', 'imprimir', 'ayuda', 'farma', 'quien eres', 'quién eres',
+        'gracias', 'cambiar', 'usuario', 'login', 'salir', 'sistema', 'dinero', 'ganancias',
+        'dia', 'día', 'hoy', 'mes', 'ano', 'año', 'hora', 'que es', 'por que', 'para que', 'hacer', 'puedes',
+        'donde', 'dónde', 'cuando', 'cuándo', 'stock', 'buscar', 'agregar', 'cobrar', 'cliente', 'factura',
+        'explicame', 'explícame', 'enseñame', 'enséñame', 'donde esta', 'dónde está', 'prueba', 'test',
+        'demo', 'ejemplo', 'inventado', 'cualquiera', 'nada', 'todo', 'algo', 'ver', 'mostrar'
+      ];
+      if (invalid.some(k => t.includes(k))) return false;
+      if (!/[aeiouáéíóú]/.test(t)) return false;
+      return true;
+    }
+
     bindZeroResultSearchHooks() {
-      const ids = isPOS ? ['pos-barcode-input'] : ['app-search-input'];
-      ids.forEach(id => {
-        const inp = document.getElementById(id);
-        if (!inp || inp.dataset.zeroHook === '1') return;
-        inp.dataset.zeroHook = '1';
-        inp.addEventListener('input', () => {
-          clearTimeout(this.searchZeroDebounce);
-          const term = String(inp.value || '').trim();
-          if (term.length < 3 || /^\d+$/.test(term)) return;
-          this.searchZeroDebounce = setTimeout(() => this.checkZeroResultSearch(term, isPOS ? 'BUSCADOR_POS' : 'APP_PACIENTE'), 1400);
-        });
-      });
+      // Desactivado: no registrar faltantes automáticos
     }
 
     async checkZeroResultSearch(term, origen) {
-      const products = (window.sysState && Array.isArray(window.sysState.products) && window.sysState.products)
-        || (window.state && Array.isArray(window.state.products) && window.state.products)
-        || [];
-      const t = term.toLowerCase();
-      const hasStock = products.some(p => {
-        const txt = `${p.nombre_comercial || ''} ${p.principio_activo || ''} ${p.codigo_barras || ''}`.toLowerCase();
-        const stock = Number(p.stock_total_unidades != null ? p.stock_total_unidades : (p.inventario && p.inventario.stock_total_unidades) || 0);
-        return stock > 0 && txt.includes(t);
-      });
-      if (hasStock) return;
-      try {
-        const res = await fetch('/api/farma/unmet-demand/record', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ farmacia_id: this.getFarmaciaId(), termino_buscado: term, origen: origen })
-        });
-        const data = await res.json();
-        if (data && data.ok && isPOS) {
-          this.unmetDemandItems = data.items || [];
-          this.updateUnmetDemandBadge();
-        }
-      } catch (e) {
-        /* silencioso */
-      }
+      return;
     }
 
     /* =========================================================================
@@ -1060,6 +1143,57 @@
               window.sysState.posCart = [];
               if (typeof window.renderPosCart === 'function') window.renderPosCart();
             }
+          } else if (tipo === 'APPLY_DISCOUNT') {
+            const pct = Math.max(1, Math.min(100, Number(acc.porcentaje || 5)));
+            if (window.sysState) {
+              window.sysState.posManualDiscountPct = pct;
+              const bonusCheck = document.getElementById('pos-apply-bonus-check');
+              if (bonusCheck) bonusCheck.checked = true;
+              const bonusPctLabel = document.getElementById('pos-bonus-pct-label');
+              if (bonusPctLabel) bonusPctLabel.textContent = `${pct}%`;
+              const bonusContainer = document.getElementById('pos-plan-bonus-container');
+              if (bonusContainer) bonusContainer.classList.remove('hidden');
+              if (typeof window.renderPosCart === 'function') window.renderPosCart();
+            }
+          } else if (tipo === 'NAV_REPORTES' || tipo === 'SHOW_SALES_REPORT' || tipo === 'OPEN_REPORTES') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('reportes');
+          } else if (tipo === 'NAV_DEUDORES' || tipo === 'OPEN_DEUDORES') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('deudores');
+          } else if (tipo === 'NAV_INVENTARIO' || tipo === 'OPEN_INVENTARIO') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('inventario');
+          } else if (tipo === 'NAV_PEDIDOS' || tipo === 'OPEN_PEDIDOS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('solicitudes');
+          } else if (tipo === 'NAV_POS' || tipo === 'OPEN_POS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('pos');
+          } else if (tipo === 'NAV_VENCIMIENTOS' || tipo === 'OPEN_VENCIMIENTOS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('vencimientos');
+          } else if (tipo === 'NAV_RECETAS' || tipo === 'OPEN_RECETAS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('recetas');
+          } else if (tipo === 'NAV_CRONICOS' || tipo === 'OPEN_CRONICOS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('cronicos');
+          } else if (tipo === 'OPEN_CAJA_MODAL') {
+            if (typeof window.openPosCajaModal === 'function') window.openPosCajaModal();
+          } else if (tipo === 'OPEN_DEUDORES') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('deudores');
+          } else if (tipo === 'OPEN_PHARMACARE') {
+            if (typeof window.openPharmaCareModal === 'function') window.openPharmaCareModal();
+          } else if (tipo === 'OPEN_NEW_PRODUCT') {
+            if (typeof window.openNewProductModal === 'function') window.openNewProductModal();
+          } else if (tipo === 'OPEN_RECETA_OCR') {
+            if (typeof window.openPosRecetaOcrModal === 'function') window.openPosRecetaOcrModal();
+          } else if (tipo === 'OPEN_PSICOTROPICOS') {
+            if (typeof window.openPosPsicotropicosModal === 'function') window.openPosPsicotropicosModal();
+          } else if (tipo === 'OPEN_CRONICOS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('cronicos');
+          } else if (tipo === 'OPEN_PEDIDOS') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('solicitudes');
+          } else if (tipo === 'OPEN_CONFIG') {
+            if (typeof window.switchSysTab === 'function') window.switchSysTab('config');
+          } else if (tipo === 'TOGGLE_ROLE_DROPDOWN') {
+            if (typeof window.toggleRbacQuickSwitchDropdown === 'function') window.toggleRbacQuickSwitchDropdown();
+          } else if (tipo === 'HIGHLIGHT_KITS') {
+            const el = document.getElementById('pos-quick-kits-container') || document.querySelector('[class*="kits"]');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
         } else {
           if (tipo === 'ADD_CART') {

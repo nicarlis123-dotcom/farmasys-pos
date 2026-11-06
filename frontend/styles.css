@@ -348,3 +348,174 @@ body {
   width: 50%;
   animation: farmasysBarIndeterminate 1.8s ease-in-out infinite;
 }
+
+/* =========================================================================
+   NUEVO SÍMBOLO DE CARGA 3D CON LUCES ALTERNADAS (FARMASYS 3D LOADER)
+   ========================================================================= */
+.farmasys-3d-stage {
+  perspective: 900px;
+  transform-style: preserve-3d;
+  width: 140px;
+  height: 140px;
+}
+
+.farmasys-ambient-glow {
+  position: absolute;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  filter: blur(28px);
+  pointer-events: none;
+  transition: all 0.5s ease;
+}
+
+.glow-teal {
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.45) 0%, rgba(13, 148, 136, 0) 70%);
+  animation: farmasysGlowA 3s ease-in-out infinite alternate;
+}
+
+.glow-emerald {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.45) 0%, rgba(5, 150, 105, 0) 70%);
+  animation: farmasysGlowB 3s ease-in-out infinite alternate 1.5s;
+}
+
+.farmasys-holo-ring {
+  position: absolute;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(45, 212, 191, 0.35);
+  animation: farmasysHoloSpin 12s linear infinite;
+  pointer-events: none;
+}
+
+.farmasys-holo-ring-inner {
+  position: absolute;
+  width: 114px;
+  height: 114px;
+  border-radius: 50%;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  animation: farmasysHoloSpinRev 8s linear infinite;
+  pointer-events: none;
+}
+
+.farmasys-3d-capsule-card {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  transform-style: preserve-3d;
+  animation: farmasys3dHover 3.4s ease-in-out infinite;
+  filter: drop-shadow(0 14px 22px rgba(4, 47, 46, 0.65));
+}
+
+.farmasys-3d-capsule-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* LUCES ALTERNADAS ENTRE ELLAS */
+.farmasys-neon-group-a {
+  transform-origin: 80px 80px;
+  animation: farmasysNeonPulseA 1.35s ease-in-out infinite;
+}
+
+.farmasys-neon-group-b {
+  transform-origin: 80px 80px;
+  animation: farmasysNeonPulseB 1.35s ease-in-out infinite;
+}
+
+.farmasys-cross-relief {
+  animation: farmasysCrossGlow 2.7s ease-in-out infinite;
+  transform-origin: 80px 80px;
+}
+
+@keyframes farmasys3dHover {
+  0% {
+    transform: translateY(0px) rotateX(18deg) rotateY(-14deg) rotateZ(0deg);
+  }
+  50% {
+    transform: translateY(-9px) rotateX(24deg) rotateY(12deg) rotateZ(4deg);
+  }
+  100% {
+    transform: translateY(0px) rotateX(18deg) rotateY(-14deg) rotateZ(0deg);
+  }
+}
+
+@keyframes farmasysNeonPulseA {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 10px #2dd4bf) drop-shadow(0 0 18px #14b8a6);
+  }
+  50% {
+    opacity: 0.18;
+    filter: drop-shadow(0 0 2px #0f766e);
+  }
+}
+
+@keyframes farmasysNeonPulseB {
+  0%, 100% {
+    opacity: 0.18;
+    filter: drop-shadow(0 0 2px #065f46);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 10px #34d399) drop-shadow(0 0 18px #10b981);
+  }
+}
+
+@keyframes farmasysCrossGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.95)) drop-shadow(0 0 22px rgba(14, 165, 233, 0.7));
+  }
+}
+
+@keyframes farmasysHoloSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes farmasysHoloSpinRev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes farmasysGlowA {
+  0% { transform: scale(0.9) translate(-5px, -5px); opacity: 0.5; }
+  100% { transform: scale(1.15) translate(5px, 5px); opacity: 0.85; }
+}
+
+@keyframes farmasysGlowB {
+  0% { transform: scale(1.15) translate(5px, 5px); opacity: 0.85; }
+  100% { transform: scale(0.9) translate(-5px, -5px); opacity: 0.5; }
+}
+
+/* COMPORTAMIENTO CUANDO EL SISTEMA SE PONE LENTO */
+.farmasys-is-slow .farmasys-neon-group-a {
+  animation-duration: 0.65s !important;
+}
+
+.farmasys-is-slow .farmasys-neon-group-b {
+  animation-duration: 0.65s !important;
+}
+
+.farmasys-is-slow .farmasys-holo-ring {
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  animation-duration: 4s !important;
+}
+
+.farmasys-is-slow .farmasys-holo-ring-inner {
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  animation-duration: 3s !important;
+}
+
+.farmasys-is-slow .glow-teal {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.55) 0%, rgba(217, 119, 6, 0) 70%) !important;
+}
+
+.farmasys-is-slow .glow-emerald {
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.65) 0%, rgba(13, 148, 136, 0) 70%) !important;
+}

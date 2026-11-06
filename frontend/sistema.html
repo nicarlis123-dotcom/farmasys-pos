@@ -129,23 +129,146 @@
 
 </head>
 <body class="min-h-screen flex flex-col bg-slate-100 text-slate-900">
-  <!-- =====================================================================
-       PANTALLA DE CARGA OFICIAL FARMASYS (PASTILLA ANIMADA 3D)
+    <!-- =====================================================================
+       PANTALLA DE CARGA OFICIAL FARMASYS (SÍMBOLO 3D CON LUCES ALTERNADAS)
        ===================================================================== -->
-  <div id="farmasys-global-loader" class="fixed inset-0 z-[9999] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-300 opacity-0 pointer-events-none hidden" style="pointer-events: none; display: none;">
-    <div class="relative flex items-center justify-center mb-6">
-      <div class="w-24 h-24 rounded-full border-4 border-slate-800 border-t-teal-400 border-r-emerald-500 animate-spin"></div>
-      <div class="absolute inset-0 w-24 h-24 rounded-full bg-teal-500/20 blur-xl animate-pulse"></div>
-      <div class="absolute flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 border border-teal-500/40 shadow-inner">
-        <div class="farmasys-pill-loader">
-          <svg class="w-9 h-9" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M14 24C14 18.4772 18.4772 14 24 14C29.5228 14 34 18.4772 34 24H14Z" fill="#14b8a6"/>
-            <path d="M14 24H34V28C34 33.5228 29.5228 38 24 38C18.4772 38 14 33.5228 14 28V24Z" fill="#f8fafc"/>
-            <path d="M18 18C20 16 23 16 24 16" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
-            <line x1="14" y1="24" x2="34" y2="24" stroke="#0f766e" stroke-width="1.5"/>
-          </svg>
-        </div>
+  <div id="farmasys-global-loader" class="fixed inset-0 z-[9999] bg-slate-950/92 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-300 opacity-0 pointer-events-none hidden" style="pointer-events: none; display: none;">
+    <!-- SÍMBOLO 3D ISOMETRIC CON LUCES ALTERNADAS -->
+    <div class="farmasys-3d-stage relative flex items-center justify-center mb-6">
+      <div class="farmasys-ambient-glow glow-teal"></div>
+      <div class="farmasys-ambient-glow glow-emerald"></div>
+      
+      <div class="farmasys-holo-ring"></div>
+      <div class="farmasys-holo-ring-inner"></div>
+
+      <div class="farmasys-3d-capsule-card">
+        <svg class="farmasys-3d-capsule-svg" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="capsule-shadow" x="-20%" y="-20%" width="150%" height="150%">
+              <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#042f2e" flood-opacity="0.6"/>
+            </filter>
+            <filter id="neon-glow-odd" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+              <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+            <filter id="neon-glow-even" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+              <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+            <linearGradient id="capsule-grad-left" x1="20" y1="20" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#5eead4"/>
+              <stop offset="30%" stop-color="#14b8a6"/>
+              <stop offset="75%" stop-color="#0d9488"/>
+              <stop offset="100%" stop-color="#042f2e"/>
+            </linearGradient>
+            <linearGradient id="capsule-grad-right" x1="60" y1="60" x2="140" y2="140" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="35%" stop-color="#a7f3d0"/>
+              <stop offset="75%" stop-color="#10b981"/>
+              <stop offset="100%" stop-color="#064e3b"/>
+            </linearGradient>
+            <linearGradient id="capsule-seam" x1="77" y1="53" x2="83" y2="107" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#38bdf8"/>
+              <stop offset="50%" stop-color="#0284c7"/>
+              <stop offset="100%" stop-color="#0f172a"/>
+            </linearGradient>
+            <linearGradient id="specular-glare" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.85"/>
+              <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0"/>
+            </linearGradient>
+          </defs>
+
+          <!-- Sombra proyectada en la base -->
+          <ellipse cx="80" cy="140" rx="44" ry="10" fill="#020617" opacity="0.65" filter="blur(5px)"/>
+
+          <!-- Cuerpo 3D de la Cápsula girada a -45° con Cruz Relieve -->
+          <g filter="url(#capsule-shadow)">
+            <g transform="rotate(-45 80 80)">
+              <!-- Hemisferio Izquierdo (Teal Médico) -->
+              <path d="M 46 80 A 26 26 0 0 1 80 54 L 80 106 A 26 26 0 0 1 46 80 Z" fill="url(#capsule-grad-left)"/>
+              <!-- Hemisferio Derecho (Esmeralda Perla) -->
+              <path d="M 114 80 A 26 26 0 0 1 80 106 L 80 54 A 26 26 0 0 1 114 80 Z" fill="url(#capsule-grad-right)"/>
+              <!-- Anillo central de titanio -->
+              <rect x="77" y="53" width="6" height="53" rx="3" fill="url(#capsule-seam)"/>
+              
+              <!-- Reflejo curvo de brillo de vidrio -->
+              <path d="M 52 70 Q 80 56 108 70 Q 80 62 52 70 Z" fill="url(#specular-glare)" opacity="0.75"/>
+              
+              <!-- Cruz Médica 3D en relieve con luz central -->
+              <g class="farmasys-cross-relief">
+                <rect x="76" y="65" width="8" height="30" rx="3" fill="#ffffff" opacity="0.95"/>
+                <rect x="65" y="76" width="30" height="8" rx="3" fill="#ffffff" opacity="0.95"/>
+                <rect x="77.5" y="67" width="5" height="26" rx="2" fill="#38bdf8"/>
+                <rect x="67" y="77.5" width="26" height="5" rx="2" fill="#38bdf8"/>
+              </g>
+            </g>
+          </g>
+
+          <!-- LUCES ALTERNADAS ENTRE ELLAS -->
+          <!-- Grupo A (Impares: Resplandecen en fase 1) -->
+          <g class="farmasys-neon-group-a">
+            <circle cx="46" cy="46" r="5" fill="#5eead4" filter="url(#neon-glow-odd)"/>
+            <circle cx="46" cy="46" r="2.2" fill="#ffffff"/>
+
+            <circle cx="80" cy="80" r="5.5" fill="#38bdf8" filter="url(#neon-glow-odd)"/>
+            <circle cx="80" cy="80" r="2.5" fill="#ffffff"/>
+
+            <circle cx="114" cy="114" r="5" fill="#34d399" filter="url(#neon-glow-odd)"/>
+            <circle cx="114" cy="114" r="2.2" fill="#ffffff"/>
+
+            <circle cx="54" cy="106" r="4.5" fill="#2dd4bf" filter="url(#neon-glow-odd)"/>
+            <circle cx="54" cy="106" r="2" fill="#ffffff"/>
+          </g>
+
+          <!-- Grupo B (Pares: Resplandecen en fase 2 alternada con Grupo A) -->
+          <g class="farmasys-neon-group-b">
+            <circle cx="106" cy="54" r="4.5" fill="#10b981" filter="url(#neon-glow-even)"/>
+            <circle cx="106" cy="54" r="2" fill="#ffffff"/>
+
+            <circle cx="80" cy="36" r="5" fill="#22d3ee" filter="url(#neon-glow-even)"/>
+            <circle cx="80" cy="36" r="2.2" fill="#ffffff"/>
+
+            <circle cx="80" cy="124" r="5" fill="#fbbf24" filter="url(#neon-glow-even)"/>
+            <circle cx="80" cy="124" r="2.2" fill="#ffffff"/>
+
+            <circle cx="124" cy="80" r="4.5" fill="#4ade80" filter="url(#neon-glow-even)"/>
+            <circle cx="124" cy="80" r="2" fill="#ffffff"/>
+          </g>
+        </svg>
       </div>
+    </div>
+
+    <!-- TÍTULOS Y AVISO DE CARGA EXTENDIDA/LENTA -->
+    <div class="text-center space-y-1.5 px-4 max-w-sm">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        <span class="text-[11px] font-black tracking-widest text-emerald-300 uppercase">FARMACIA DAVALSI</span>
+      </div>
+      <h3 id="farmasys-loader-title" class="text-white font-extrabold text-base tracking-tight">Cargando Sistema...</h3>
+      <p id="farmasys-loader-sub" class="text-slate-400 text-xs font-medium">Sincronizando farmacia e inventario seguro</p>
+
+      <!-- AVISO INTELIGENTE CUANDO SE PONE LENTO -->
+      <div id="farmasys-slow-notice" class="hidden mt-3 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/35 transition-all duration-300">
+        <div class="flex items-center justify-center gap-1.5 text-amber-300 font-extrabold text-xs">
+          <span class="animate-pulse">⚡</span>
+          <span id="farmasys-slow-msg">Operación en curso: sincronizando módulos...</span>
+        </div>
+        <p class="text-[10px] text-amber-200/80 mt-0.5">Por favor espera un momento sin recargar la página.</p>
+      </div>
+    </div>
+
+    <div class="w-48 h-1 bg-slate-800 rounded-full mt-5 overflow-hidden">
+      <div class="farmasys-loader-bar h-full bg-gradient-to-r from-teal-400 via-emerald-300 to-teal-400"></div>
+    </div>
+  </div>
     </div>
     <div class="text-center space-y-1.5 px-4">
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30">
@@ -226,13 +349,13 @@
           </div>
 
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">2. Usuario (Opcional: Admin o Vendedor)</label>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">2. Usuario</label>
             <input
               id="login-username-input"
               type="text"
-              value=""
+              value="admin"
               placeholder="Ej. admin o regente o cajero"
-              class="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold"
+              class="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold bg-white"
             />
           </div>
 
@@ -242,20 +365,29 @@
               id="login-password-input"
               type="password"
               required
-              value=""
+              value="123456"
               placeholder="Ingresa la clave de acceso..."
-              class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-mono font-bold"
+              class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-mono font-bold bg-white"
             />
           </div>
 
           <div id="login-error-msg" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
 
-          <button
-            type="submit"
-            class="w-full py-3.5 rounded-xl bg-slate-900 hover:bg-teal-700 text-white font-extrabold text-sm shadow-lg transition"
-          >
-            🔓 Entrar al Sistema de la Farmacia
-          </button>
+          <div class="space-y-2">
+            <button
+              type="submit"
+              class="w-full py-3.5 rounded-xl bg-slate-900 hover:bg-teal-700 text-white font-extrabold text-sm shadow-lg transition cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>🔓</span> <span>Entrar al Sistema de la Farmacia</span>
+            </button>
+            <button
+              type="button"
+              onclick="quickDirectLogin(1, 'admin', '123456')"
+              class="w-full py-2.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-800 border border-teal-400/50 font-black text-xs transition cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>⚡</span> <span>Entrada Rápida con Administrador (123456)</span>
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -273,12 +405,12 @@
         <div>
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-black text-sm sm:text-base tracking-wider text-emerald-400 uppercase bg-slate-950 px-2.5 py-0.5 rounded-lg border border-emerald-500/40 shadow-xs flex items-center gap-1.5">
-              <span>💊</span> <span>FARMACIA DAVALSI</span>
+              <span>💊</span> <span id="sys-header-pharmacy-name">Farmacia Davalsi</span>
             </span>
             <span class="text-slate-600 font-bold">|</span>
-            <span id="sys-header-pharmacy-name" class="font-extrabold text-base sm:text-lg text-white">POS & Gestión Clínica</span>
+            <span class="font-extrabold text-xs sm:text-sm text-slate-300">POS & Gestión Clínica</span>
             <span id="sys-header-user-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/20 text-purple-200 border border-purple-400/40 flex items-center gap-1">
-              🛡️ nicarlis123
+              🛡️ admin
             </span>
             <!-- SELECTOR RÁPIDO DE ROLES RBAC -->
             <div class="relative inline-block">
@@ -315,16 +447,6 @@
                 </div>
               </div>
             </div>
-
-                        <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
-              <span>🎯</span> <span>Demo del Sistema</span>
-            </button>
-            <button type="button" id="btn-nav-training-toggle" onclick="if(window.farmaTraining) window.farmaTraining.toggle();" title="Activar simulador en memoria para practicar y aprender sin afectar la base de datos de producción" class="farma-training-switch-btn px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-teal-500/30 to-emerald-500/30 hover:from-teal-500/50 hover:to-emerald-500/50 text-teal-200 border border-teal-400/60 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
-              <span>🎓</span> <span>Modo Entrenamiento con Farma</span>
-            </button>
-            <button onclick="logoutPharmacy()" title="Cambiar de sucursal o registrar nueva" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 transition cursor-pointer">
-              ⇄ Cambiar Sucursal
-            </button>
           </div>
           <p id="sys-header-pharmacy-sub" class="text-[11px] text-slate-400">Base de Datos Independiente • POS Multi-Sucursal • RD$</p>
         </div>
@@ -455,25 +577,6 @@
           </div>
         </div>
 
-        <!-- GRUPO: IA Y AYUDA -->
-        <div id="sys-grp-container-ia" class="sys-dropdown-container relative">
-          <button type="button" id="sys-grp-btn-ia" onclick="toggleSysDropdown('sys-grp-container-ia')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
-            <span>🤖</span><span>IA y Ayuda</span><svg class="w-3.5 h-3.5 text-slate-400 transition-transform dropdown-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-          </button>
-          <div class="sys-dropdown-menu absolute right-0 top-full pt-1.5 w-72 z-50">
-            <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2 space-y-0.5">
-              <span class="text-[10px] font-black uppercase tracking-wider text-purple-400 px-2 block mb-1">🤖 IA y Ayuda</span>
-              <button type="button" id="sys-nav-ai-btn" onclick="closeAllSysDropdowns(); openAiAssistantModal('principio_activo');" title="Sustitutos por principio activo y copiloto" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer">
-                <span class="flex items-center gap-1.5"><span>🤖</span><span>Asistente FarmaIA</span></span><span id="badge-sys-ai-alerts" class="px-1.5 py-0.2 bg-amber-300 text-slate-950 font-black rounded-full text-[10px]">IA</span>
-              </button>
-
-              <button type="button" id="sys-nav-guide-btn" onclick="closeAllSysDropdowns(); window.posGuide ? window.posGuide.openHub() : null;" title="Demo Interactiva: Explicación paso a paso de cada función" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-purple-300 cursor-pointer">
-                <span class="flex items-center gap-1.5"><span>🎯</span><span>Guía en Vivo del POS</span></span>
-              </button>
-            </div>
-          </div>
-        </div>
-
         <!-- GRUPO: GESTIÓN -->
         <div id="sys-grp-container-gestion" class="sys-dropdown-container relative">
           <button type="button" id="sys-grp-btn-gestion" onclick="toggleSysDropdown('sys-grp-container-gestion')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-700/60 cursor-pointer border border-slate-600/60">
@@ -487,9 +590,6 @@
               </button>
               <button type="button" id="sys-nav-staff-btn" onclick="closeAllSysDropdowns(); openPosStaffRbacModal();" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
                 <span class="flex items-center gap-1.5"><span>🔐</span><span>Personal y Roles</span></span>
-              </button>
-              <button type="button" id="sys-nav-services-btn" onclick="closeAllSysDropdowns(); toggleQuickServicesConfigModal();" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
-                <span class="flex items-center gap-1.5"><span>💳</span><span>Pago / Domicilio / ARS</span></span>
               </button>
               <button type="button" id="sys-tab-config" onclick="closeAllSysDropdowns(); switchSysTab('config');" class="w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 text-slate-200 hover:bg-slate-800 hover:text-rose-300 cursor-pointer">
                 <span class="flex items-center gap-1.5"><span>⚙️</span><span>Configuración Farmacia</span></span>
@@ -528,9 +628,6 @@
         <button id="sys-header-btn-new-pharmacy" onclick="openCreatePharmacyModal()" class="px-2.5 py-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 text-xs font-bold">
           ➕ Nueva Farmacia
         </button>
-                    <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
-              <span>🎯</span> <span>Demo del Sistema</span>
-            </button>
             <button onclick="logoutPharmacy()" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold">
           🔒 Salir
         </button>
@@ -589,12 +686,6 @@
             <button id="mob-tab-delivery-monitor" onclick="toggleMobileNavDrawer(); openPosDeliveryTrackingModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🛵 Monitor Delivery GPS</span></button>
             <button id="mob-nav-quejas-btn" onclick="toggleMobileNavDrawer(); openPosQuejasModal();" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📢 Buzón de Quejas</span></button>
           </div>
-          <div id="mob-grp-ia" class="space-y-1 pt-2 border-t border-slate-800">
-            <span class="text-[10px] uppercase font-black tracking-wider text-purple-400 px-3">🤖 IA y Ayuda</span>
-            <button id="mob-nav-ai-btn" onclick="toggleMobileNavDrawer(); openAiAssistantModal('principio_activo');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🤖 Asistente FarmaIA</span></button>
-
-            <button id="mob-nav-guide-btn" onclick="toggleMobileNavDrawer(); window.posGuide ? window.posGuide.openHub() : null;" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>🎯 Demo y Guía de Funciones</span></button>
-          </div>
           <div id="mob-grp-gestion" class="space-y-1 pt-2 border-t border-slate-800">
             <span class="text-[10px] uppercase font-black tracking-wider text-rose-400 px-3">📊 Gestión</span>
             <button id="mob-tab-reportes" onclick="toggleMobileNavDrawer(); switchSysTab('reportes');" class="w-full text-left px-3.5 py-2 rounded-xl hover:bg-slate-800 flex items-center justify-between text-slate-200"><span>📈 Reportes de Ventas</span></button>
@@ -608,9 +699,6 @@
         <a href="/app" target="_blank" class="w-full block text-center py-2.5 rounded-xl bg-teal-600/20 text-teal-300 font-bold text-xs border border-teal-500/30">
           📱 Abrir App Pacientes
         </a>
-                    <button type="button" onclick="window.posGuide && window.posGuide.openHub()" title="Aprender a usar todas las funciones del sistema con demostración interactiva" class="px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-teal-500/25 to-emerald-500/25 hover:from-teal-500/40 hover:to-emerald-500/40 text-teal-200 border border-teal-400/50 flex items-center gap-1.5 transition cursor-pointer shadow-xs">
-              <span>🎯</span> <span>Demo del Sistema</span>
-            </button>
             <button onclick="logoutPharmacy()" class="w-full py-2.5 rounded-xl bg-rose-600/20 text-rose-300 font-bold text-xs border border-rose-500/30">
           🔒 Cerrar Sesión
         </button>
@@ -873,9 +961,6 @@
               </button>
               <button type="button" onclick="openPharmaCareModal()" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer">
                 <span>🩺</span> <span>Toma de Presión / Glicemia</span>
-              </button>
-              <button type="button" onclick="openAiAssistantModal('principio_activo')" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer">
-                <span>🤖</span> <span>Asistente IA Vendedor</span>
               </button>
             </div>
           </div>
@@ -5198,39 +5283,7 @@
 
         <!-- PESTAÑA 5: ASISTENCIA EN EL USO DEL SISTEMA DE VENTA (COPILOTO POS) -->
         <div id="ai-tab-view-guia_sistema" class="hidden space-y-4">
-          
-            <!-- Panel de Lanzamiento Rápido de Guía Interactiva en Vivo con Marco Verde y Robot -->
-            <div id="live-guide-launchpad" class="p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 border-2 border-emerald-400/50 text-white space-y-2.5 shadow-lg">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span class="text-xs font-black uppercase text-emerald-300 tracking-wider">🎯 COPILOTO VISUAL ACTIVO (MARCO VERDE & ROBOT 3D)</span>
-                </div>
-                <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-400/40 font-extrabold">Canal Local WebSocket :8085</span>
-              </div>
-              <p class="text-xs text-slate-200">
-                Selecciona cualquier flujo para que el <strong>Robot FarmaIA</strong> te guíe en vivo directamente en la pantalla, moviendo el <strong>marco verde</strong> a cada control y explicando el paso a seguir:
-              </p>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
-                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('venta_rapida');" class="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
-                  <span class="text-base">🛒</span>
-                  <span>1. Venta Rápida</span>
-                </button>
-                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('toma_presion_azucar');" class="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
-                  <span class="text-base">❤️</span>
-                  <span>2. Presión y Azúcar</span>
-                </button>
-                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('despachar_kit');" class="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
-                  <span class="text-base">⚡</span>
-                  <span>3. Despachar Kit</span>
-                </button>
-                <button type="button" onclick="closeAiAssistantModal(); window.posGuide.startScenario('bajo_stock_compras');" class="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-center transition cursor-pointer shadow flex flex-col items-center gap-1">
-                  <span class="text-base">📦</span>
-                  <span>4. Bajo Stock</span>
-                </button>
-              </div>
-            </div>
-<div class="p-4 rounded-2xl bg-slate-900 text-white space-y-3">
+            <div class="p-4 rounded-2xl bg-slate-900 text-white space-y-3">
             <h4 class="font-black text-sm text-teal-300">🧭 Copiloto Interactivo de Asistencia en el Uso del Sistema de Venta</h4>
             <p class="text-xs text-slate-300">Selecciona una tarea frecuente o escribe tu pregunta para recibir los pasos exactos y un botón directo a la función:</p>
             <div class="flex flex-wrap gap-1.5 pt-1 text-[11px]">
@@ -5331,25 +5384,9 @@
 
       <!-- Content -->
       <div class="p-5 overflow-y-auto space-y-4 text-xs">
-        <!-- Subir imagen o Recetas de Demostración Clínicas -->
+        <!-- Subir imagen de Receta Médica -->
         <div class="p-4 rounded-2xl bg-slate-50 border-2 border-dashed border-indigo-300 text-center space-y-3">
-          <p class="font-extrabold text-slate-800 text-sm">Arrastra la foto de la receta médica manuscrita o selecciona una prueba clínica:</p>
-          
-          <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
-            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_amoxicilina.jpg')" class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
-              <span>🩺 Receta 1: Amoxicilina</span>
-              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">Carlos Morales (Alérgico a Penicilina)</span>
-            </button>
-            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_sulfas.jpg')" class="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
-              <span>🩺 Receta 2: Trimetoprim/Sulfa</span>
-              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">María Fernández (Alérgica a Sulfas)</span>
-            </button>
-            <button type="button" onclick="executeDemoRecetaOcr('receta_demo_segura.jpg')" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1.5">
-              <span>🩺 Receta 3: Azitromicina</span>
-              <span class="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">Juan Gómez (Segura / Sin Alergias)</span>
-            </button>
-          </div>
-
+          <p class="font-extrabold text-slate-800 text-sm">Carga la foto de la receta médica manuscrita para análisis con OCR e Inteligencia Artificial:</p>
           <div class="pt-2 flex items-center justify-center gap-2">
             <label class="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-extrabold cursor-pointer flex items-center gap-2">
               <span>📁 Cargar Imagen Personalizada (JPG, PNG)</span>
@@ -5427,7 +5464,7 @@
   <div id="pos-allergy-block-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-5">
     <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border-4 border-rose-500 space-y-4 text-center">
       <div class="w-20 h-20 mx-auto rounded-3xl bg-rose-100 border-2 border-rose-400 flex items-center justify-center text-4xl shadow-md">
-        <img src="assets/robot_atencion.png" alt="FarmaIA Alerta" class="w-16 h-16 object-contain animate-bounce" onerror="this.src='/farmaia_model.jpg'" />
+        <span class="text-4xl">⛔</span>
       </div>
 
       <div class="space-y-1">

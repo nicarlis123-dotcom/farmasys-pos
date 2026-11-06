@@ -9502,16 +9502,27 @@ class DatabaseManager:
         principio_activo_sugerido: str = "",
         categoria_sugerida: str = ""
     ) -> Optional[Dict[str, Any]]:
+        return None
+
         fid = int(farmacia_id or 1)
         raw = (termino_buscado or "").strip()
-        # Ignorar búsquedas demasiado cortas (< 3 letras) o puros números cortos
-        if len(raw) < 3:
+        # Ignorar búsquedas demasiado cortas (< 3 letras) o puros números
+        if len(raw) < 3 or raw.isdigit():
             return None
 
         norm = re.sub(r"\s+", " ", raw.lower()).strip()
-        # Evitar registrar palabras genéricas de comandos
-        stop_words = {"farma", "hola", "todos", "efectivo", "tarjeta", "transferencia", "cobrar", "carrito"}
-        if norm in stop_words:
+        # Filtro estricto: evitar registrar preguntas, comandos, números o palabras del sistema
+        invalid_keywords = [
+            "cuanto", "cuánto", "vendido", "ventas", "como se", "cómo se", "corte", "caja", "hola", "buenos",
+            "precio", "deudor", "reporte", "ticket", "imprimir", "ayuda", "farma", "quien eres", "quién eres",
+            "gracias", "cambiar", "usuario", "login", "salir", "sistema", "dinero", "ganancias",
+            "dia", "día", "hoy", "mes", "ano", "año", "hora", "que es", "por que", "para que", "hacer", "puedes",
+            "donde", "dónde", "cuando", "cuándo", "stock", "buscar", "agregar", "cobrar", "cliente", "factura",
+            "explicame", "explícame", "enseñame", "enséñame", "donde esta", "dónde está"
+        ]
+        if any(k in norm for k in invalid_keywords):
+            return None
+        if not re.search(r"[aeiouáéíóú]", norm):
             return None
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -9561,6 +9572,8 @@ class DatabaseManager:
             return dict(row) if row else None
 
     def list_unmet_demand(self, farmacia_id: int = 1) -> List[Dict[str, Any]]:
+        return []
+
         fid = int(farmacia_id or 1)
         with self._get_connection(farmacia_id=fid) as conn:
             self._ensure_unmet_demand_table(conn)

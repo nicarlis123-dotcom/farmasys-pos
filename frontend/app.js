@@ -2,26 +2,55 @@
 /* =========================================================================
    CONTROLADOR DE PANTALLA DE CARGA FARMASYS (SEGURO Y SIN BLOQUEOS)
    ========================================================================= */
+let farmasysSlowTimer = null;
+let farmasysSlowStageTimer = null;
+
 function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Un momento por favor...") {
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     const tEl = document.getElementById('farmasys-loader-title');
     const sEl = document.getElementById('farmasys-loader-sub');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    const slowMsg = document.getElementById('farmasys-slow-msg');
+
     if (tEl) tEl.textContent = title;
     if (sEl) sEl.textContent = sub;
+    if (slowNotice) slowNotice.classList.add('hidden');
+    el.classList.remove('farmasys-is-slow');
+
     el.style.display = 'flex';
     el.style.pointerEvents = 'auto';
     el.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
     el.classList.add('opacity-100');
+
+    clearTimeout(farmasysSlowTimer);
+    clearTimeout(farmasysSlowStageTimer);
+    farmasysSlowTimer = setTimeout(() => {
+      if (el && !el.classList.contains('hidden') && !el.classList.contains('opacity-0')) {
+        el.classList.add('farmasys-is-slow');
+        if (slowNotice) slowNotice.classList.remove('hidden');
+        if (slowMsg) slowMsg.textContent = "Sincronizando módulos e inventario seguro...";
+        
+        farmasysSlowStageTimer = setTimeout(() => {
+          if (slowMsg && el && !el.classList.contains('hidden')) {
+            slowMsg.textContent = "Optimizando respuestas y bases de datos...";
+          }
+        }, 3000);
+      }
+    }, 2500);
   }
 }
 
 function hideFarmasysLoader() {
+  clearTimeout(farmasysSlowTimer);
+  clearTimeout(farmasysSlowStageTimer);
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     el.style.pointerEvents = 'none';
     el.classList.add('opacity-0', 'pointer-events-none');
-    el.classList.remove('opacity-100');
+    el.classList.remove('opacity-100', 'farmasys-is-slow');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    if (slowNotice) slowNotice.classList.add('hidden');
     setTimeout(() => {
       el.style.display = 'none';
       el.classList.add('hidden');
