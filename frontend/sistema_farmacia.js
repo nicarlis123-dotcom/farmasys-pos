@@ -12175,3 +12175,272 @@ window.descargarPdfBajoStock = descargarPdfBajoStock;
 window.loadDashboardFinanzas = loadDashboardFinanzas;
 window.ejecutarConciliacionIa = ejecutarConciliacionIa;
 window.ejecutarCierreCajaAsistido = ejecutarCierreCajaAsistido;
+
+
+// =============================================================================
+// AUDITORÍA DE CUENTAS, REGISTRO DE USO E INACTIVIDAD CON PODER DE BORRADO
+// =============================================================================
+let accountsAuditState = {
+  currentTab: 'staff', // 'staff' | 'pacientes' | 'farmacias'
+  data: { staff: [], pacientes: [], farmacias: [], resumen: {} },
+  searchQuery: ''
+};
+
+function openAccountsAuditModal() {
+  const modal = document.getElementById('accounts-usage-audit-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadAccountsUsageData();
+}
+
+function closeAccountsAuditModal() {
+  const modal = document.getElementById('accounts-usage-audit-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function switchAccountsAuditTab(tab) {
+  accountsAuditState.currentTab = tab;
+  ['staff', 'pacientes', 'farmacias'].forEach((t) => {
+    const btn = document.getElementById(`audit-tab-btn-${t}`);
+    if (btn) {
+      if (t === tab) {
+        btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer bg-white text-slate-900 shadow-xs';
+      } else {
+        btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer text-slate-600 hover:text-slate-900';
+      }
+    }
+  });
+  renderAccountsAuditList();
+}
+
+async function loadAccountsUsageData() {
+  const container = document.getElementById('accounts-audit-list-container');
+  if (container) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-slate-400 space-y-2">
+        <div class="inline-block animate-spin text-2xl">⏳</div>
+        <p class="text-xs font-bold">Calculando tiempos de inactividad de cuentas...</p>
+      </div>
+    `;
+  }
+
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch(`/api/accounts/usage?farmacia_id=${fid}`);
+    const json = await res.json();
+    if (!json.ok) {
+      if (container) container.innerHTML = `<div class="p-6 text-center text-rose-600 font-bold text-xs">${json.error || 'Error al cargar auditoría'}</div>`;
+      return;
+    }
+
+    accountsAuditState.data = json.report || { staff: [], pacientes: [], farmacias: [], resumen: {} };
+    const r = accountsAuditState.data.resumen || {};
+
+    // Actualizar contadores de resumen
+    const elTot = document.getElementById('audit-stat-total');
+    const elAct = document.getElementById('audit-stat-activas');
+    const elMod = document.getElementById('audit-stat-moderadas');
+    const elInact = document.getElementById('audit-stat-inactivas');
+
+    if (elTot) elTot.textContent = r.total_cuentas || 0;
+    if (elAct) elAct.textContent = r.activas || 0;
+    if (elMod) elMod.textContent = r.moderadas || 0;
+    if (elInact) elInact.textContent = r.inactivas || 0;
+
+    const bStaff = document.getElementById('audit-badge-cnt-staff');
+    const bPac = document.getElementById('audit-badge-cnt-pacientes');
+    const bFar = document.getElementById('audit-badge-cnt-farmacias');
+
+    if (bStaff) bStaff.textContent = (accountsAuditState.data.staff || []).length;
+    if (bPac) bPac.textContent = (accountsAuditState.data.pacientes || []).length;
+    if (bFar) bFar.textContent = (accountsAuditState.data.farmacias || []).length;
+
+    renderAccountsAuditList();
+  } catch (err) {
+    console.error('Error en loadAccountsUsageData:', err);
+    if (container) {
+      container.innerHTML = `<div class="p-6 text-center text-rose-600 font-bold text-xs">Error de conexión al cargar el registro de cuentas.</div>`;
+    }
+  }
+}
+
+function filterAccountsAuditList() {
+  const inp = document.getElementById('audit-accounts-search');
+  accountsAuditState.searchQuery = inp ? inp.value.trim().toLowerCase() : '';
+  renderAccountsAuditList();
+}
+
+function renderAccountsAuditList() {
+  const container = document.getElementById('accounts-audit-list-container');
+  if (!container) return;
+
+  const currentTab = accountsAuditState.currentTab || 'staff';
+  const list = accountsAuditState.data[currentTab] || [];
+  const q = accountsAuditState.searchQuery;
+
+  const filtered = list.filter((a) => {
+    if (!q) return true;
+    const txt = `${a.username || ''} ${a.nombre_completo || ''} ${a.rol || ''} ${a.telefono || ''} ${a.cedula || ''} ${a.email || ''}`.toLowerCase();
+    return txt.includes(q);
+  });
+
+  if (filtered.length === 0) {
+    const labels = {
+      staff: 'personal registrado en el POS',
+      pacientes: 'cuentas de pacientes en la App',
+      farmacias: 'sucursales de farmacias en el directorio'
+    };
+    container.innerHTML = `
+      <div class="p-10 text-center bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+        <div class="text-3xl">📭</div>
+        <p class="text-sm font-extrabold text-slate-800">No se encontraron cuentas de ${labels[currentTab] || 'este tipo'}</p>
+        <p class="text-xs text-slate-400">
+          ${q ? `Ningún registro coincide con la búsqueda "${q}".` : 'No hay cuentas registradas en esta categoría actualmente.'}
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((a) => {
+    // Badges visuales de inactividad
+    let badgeClass = 'bg-slate-100 text-slate-600 border-slate-200';
+    let dotClass = 'bg-slate-400';
+    if (a.estado_inactividad === 'ACTIVO') {
+      badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      dotClass = 'bg-emerald-500 animate-pulse';
+    } else if (a.estado_inactividad === 'MODERADO') {
+      badgeClass = 'bg-amber-50 text-amber-800 border-amber-200';
+      dotClass = 'bg-amber-500';
+    } else if (a.estado_inactividad === 'INACTIVO') {
+      badgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+      dotClass = 'bg-rose-500';
+    }
+
+    let roleIcon = '👤';
+    let roleName = a.rol || 'USUARIO';
+    if (a.rol === 'ADMINISTRADOR') { roleIcon = '🛡️'; roleName = 'Administrador Principal'; }
+    else if (a.rol === 'REGENTE') { roleIcon = '🩺'; roleName = 'Regente Farmacéutico'; }
+    else if (a.rol === 'CAJERO') { roleIcon = '💼'; roleName = 'Cajero Mostrador'; }
+    else if (a.rol === 'PACIENTE_APP') { roleIcon = '📱'; roleName = 'Paciente App Móvil'; }
+    else if (a.rol === 'SUCURSAL_FARMACIA') { roleIcon = '🏢'; roleName = 'Sucursal Farmacia'; }
+
+    const regDateStr = a.fecha_registro ? a.fecha_registro.replace('T', ' ').slice(0, 16) : 'No registrada';
+    const lastUsageStr = a.ultimo_acceso_fmt || 'Sin actividad tras registro';
+
+    const extraDetail = a.telefono ? `Tel: ${a.telefono}` : (a.cedula ? `Céd: ${a.cedula}` : (a.email ? `Email: ${a.email}` : ''));
+
+    return `
+      <div class="p-4 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 transition">
+        <div class="flex items-start gap-3.5">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-xl shrink-0">
+            ${roleIcon}
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-extrabold text-slate-900">${escapeQuote(a.nombre_completo || a.username)}</span>
+              <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[10px] font-bold">@${escapeQuote(a.username)}</span>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">• ${roleName}</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+              ${extraDetail ? `<span>${extraDetail}</span> <span>•</span>` : ''}
+              <span>Registrada: <span class="font-medium text-slate-700">${regDateStr}</span></span>
+              <span>•</span>
+              <span>Último uso: <span class="font-bold text-slate-800">${lastUsageStr}</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0">
+          <!-- Badge de Tiempo Sin Usar -->
+          <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${badgeClass}">
+            <span class="w-2 h-2 rounded-full ${dotClass}"></span>
+            <span>${a.tiempo_inactivo || 'Sin datos'}</span>
+          </div>
+
+          <!-- Acción con Poder de Borrado -->
+          <div>
+            ${
+              !a.can_delete
+                ? `<span class="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-500 font-bold text-xs border border-slate-200 flex items-center gap-1" title="La cuenta de Administrador principal de la farmacia está protegida">
+                    🔒 Admin Protegido
+                   </span>`
+                : `<button
+                    type="button"
+                    onclick="confirmDeleteAccount('${a.tipo}', '${a.raw_id}', '${escapeQuote(a.nombre_completo || a.username)}')"
+                    class="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 font-extrabold text-xs shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Eliminar permanentemente esta cuenta inactiva del sistema"
+                  >
+                    <span>🗑️</span> <span>Borrar Cuenta</span>
+                  </button>`
+            }
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function confirmDeleteAccount(tipo, accountId, nombre) {
+  const tipoLabel = tipo === 'staff' ? 'personal del sistema' : (tipo === 'paciente' ? 'paciente de la app' : 'sucursal');
+  const msg = `¿Estás seguro de ELIMINAR PERMANENTEMENTE la cuenta de ${nombre} (${tipoLabel})?\n\nEsta acción borrará de forma definitiva sus credenciales y accesos.`;
+  
+  if (!confirm(msg)) {
+    return;
+  }
+
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch('/api/accounts/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo: tipo,
+        account_id: accountId,
+        farmacia_id: fid
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      if (typeof showToast === 'function') {
+        showToast(data.error || 'No se pudo eliminar la cuenta.', 'error');
+      } else {
+        alert(data.error || 'No se pudo eliminar la cuenta.');
+      }
+      return;
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`Cuenta de ${nombre} eliminada correctamente.`, 'success');
+    }
+
+    // Refrescar lista de auditoría
+    await loadAccountsUsageData();
+
+    // Si era personal, refrescar lista de staff en pestaña configuración
+    if (tipo === 'staff' && typeof loadSysStaff === 'function') {
+      loadSysStaff(fid);
+    }
+    // Si era farmacia, refrescar directorio
+    if (tipo === 'farmacia' && typeof loadPharmaciesForLogin === 'function') {
+      loadPharmaciesForLogin();
+    }
+  } catch (err) {
+    console.error('Error al eliminar cuenta:', err);
+    if (typeof showToast === 'function') {
+      showToast('Error de conexión al eliminar la cuenta.', 'error');
+    }
+  }
+}
+
+window.openAccountsAuditModal = openAccountsAuditModal;
+window.closeAccountsAuditModal = closeAccountsAuditModal;
+window.switchAccountsAuditTab = switchAccountsAuditTab;
+window.loadAccountsUsageData = loadAccountsUsageData;
+window.filterAccountsAuditList = filterAccountsAuditList;
+window.renderAccountsAuditList = renderAccountsAuditList;
+window.confirmDeleteAccount = confirmDeleteAccount;

@@ -158,6 +158,14 @@ class DatabaseManager:
 
 
     def _ensure_service_columns(self, conn: sqlite3.Connection) -> None:
+        # Asegurar columna ultimo_acceso para el registro de uso e inactividad
+        for tbl in ("personal_farmacia", "pacientes_usuarios", "pacientes", "farmacias", "farmacias_directorio"):
+            try:
+                cols = [col[1] for col in conn.execute(f"PRAGMA table_info({tbl})").fetchall()]
+                if cols and "ultimo_acceso" not in cols:
+                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN ultimo_acceso TEXT DEFAULT NULL")
+            except Exception:
+                pass
 
         # =========================================================================
         # TABLAS CLÍNICAS Y DE TRAZABILIDAD AVANZADA (FARMASYS MULTI-CLIENTE)
@@ -1654,6 +1662,16 @@ class DatabaseManager:
                     d["nombre_usuario_actual"] = f"{d['usuario_admin']} (Administrador)"
                     d["rol_actual"] = "ADMINISTRADOR"
                     d["permisos"] = self.get_role_permissions("ADMINISTRADOR")
+                    now_iso = datetime.now().isoformat()
+                    try:
+                        conn.execute("UPDATE farmacias SET ultimo_acceso = ? WHERE id = ?", (now_iso, row["id"]))
+                    except Exception:
+                        pass
+                    try:
+                        with self._get_connection() as mconn:
+                            mconn.execute("UPDATE farmacias_directorio SET ultimo_acceso = ? WHERE id = ?", (now_iso, row["id"]))
+                    except Exception:
+                        pass
                     return d
 
                 # 2. ¿Es un miembro del personal registrado en personal_farmacia?
@@ -1683,6 +1701,11 @@ class DatabaseManager:
                 d["nombre_usuario_actual"] = staff_row["nombre_completo"]
                 d["rol_actual"] = staff_row["rol"]
                 d["permisos"] = self.get_role_permissions(staff_row["rol"])
+                now_iso = datetime.now().isoformat()
+                try:
+                    conn.execute("UPDATE personal_farmacia SET ultimo_acceso = ? WHERE id = ?", (now_iso, staff_row["id"]))
+                except Exception:
+                    pass
                 return d
 
             # Si NO especificó usuario (login solo con clave general de la farmacia):
@@ -1702,6 +1725,16 @@ class DatabaseManager:
                 d["nombre_usuario_actual"] = f"{d['usuario_admin']} (Administrador)"
                 d["rol_actual"] = "ADMINISTRADOR"
                 d["permisos"] = self.get_role_permissions("ADMINISTRADOR")
+                now_iso = datetime.now().isoformat()
+                try:
+                    conn.execute("UPDATE farmacias SET ultimo_acceso = ? WHERE id = ?", (now_iso, row["id"]))
+                except Exception:
+                    pass
+                try:
+                    with self._get_connection() as mconn:
+                        mconn.execute("UPDATE farmacias_directorio SET ultimo_acceso = ? WHERE id = ?", (now_iso, row["id"]))
+                except Exception:
+                    pass
                 return d
 
             raise ValueError("Clave de acceso incorrecta para esta farmacia.")
@@ -2393,6 +2426,244 @@ class DatabaseManager:
                 raise ValueError("No se puede eliminar al Administrador principal de la farmacia.")
 
             conn.execute("DELETE FROM personal_farmacia WHERE id = ? AND farmacia_id = ?", (int(staff_id), int(farmacia_id)))
+
+    # =========================================================================
+    # AUDITORÍA DE CUENTAS, REGISTRO DE USO E INACTIVIDAD CON PODER DE BORRADO
+    # =========================================================================
+
+    def format_inactivity_info(self, ultimo_acceso_str: Optional[str], fecha_registro_str: Optional[str]) -> Dict[str, Any]:
+        """Calcula el tiempo exacto transcurrido sin usar una cuenta con formato humano y estado."""
+        now = datetime.now()
+        ts = None
+        if ultimo_acceso_str:
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    clean_ts = str(ultimo_acceso_str).strip()[:19]
+                    ts = datetime.strptime(clean_ts, fmt[:len(clean_ts)])
+                    break
+                except Exception:
+                    pass
+
+        if not ts and fecha_registro_str:
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    clean_reg = str(fecha_registro_str).strip()[:19]
+                    created_dt = datetime.strptime(clean_reg, fmt[:len(clean_reg)])
+                    delta_reg = now - created_dt
+                    days_since_reg = max(0, delta_reg.days)
+                    return {
+                        "ultimo_acceso": None,
+                        "ultimo_acceso_fmt": "Sin actividad tras registro",
+                        "tiempo_inactivo": f"Nunca usada ({days_since_reg} días registrada)",
+                        "dias_inactivo": days_since_reg,
+                        "estado_inactividad": "NUNCA_USADA",
+                        "badge_color": "slate"
+                    }
+                except Exception:
+                    pass
+            return {
+                "ultimo_acceso": None,
+                "ultimo_acceso_fmt": "Sin actividad tras registro",
+                "tiempo_inactivo": "Nunca usada (Sin actividad)",
+                "dias_inactivo": 999,
+                "estado_inactividad": "NUNCA_USADA",
+                "badge_color": "slate"
+            }
+
+        if not ts:
+            return {
+                "ultimo_acceso": None,
+                "ultimo_acceso_fmt": "Sin actividad registrada",
+                "tiempo_inactivo": "Sin datos de uso",
+                "dias_inactivo": 999,
+                "estado_inactividad": "NUNCA_USADA",
+                "badge_color": "slate"
+            }
+
+        delta = now - ts
+        seconds = max(0, int(delta.total_seconds()))
+        days = delta.days
+
+        if seconds < 120:
+            tiempo_str = "Activo hace instantes"
+            estado = "ACTIVO"
+            color = "emerald"
+        elif seconds < 3600:
+            mins = max(1, seconds // 60)
+            tiempo_str = f"Activo hace {mins} min"
+            estado = "ACTIVO"
+            color = "emerald"
+        elif seconds < 86400:
+            hours = max(1, seconds // 3600)
+            tiempo_str = f"Activo hace {hours} h"
+            estado = "ACTIVO"
+            color = "emerald"
+        elif days == 1:
+            tiempo_str = "Inactivo hace 1 día"
+            estado = "ACTIVO"
+            color = "emerald"
+        elif days < 7:
+            tiempo_str = f"Inactivo hace {days} días"
+            estado = "ACTIVO"
+            color = "emerald"
+        elif days < 30:
+            tiempo_str = f"Inactivo hace {days} días"
+            estado = "MODERADO"
+            color = "amber"
+        elif days < 365:
+            months = max(1, days // 30)
+            tiempo_str = f"Inactivo hace {months} mes{'es' if months > 1 else ''} ({days}d)"
+            estado = "INACTIVO"
+            color = "rose"
+        else:
+            years = max(1, days // 365)
+            tiempo_str = f"Inactivo hace {years} año{'s' if years > 1 else ''}"
+            estado = "INACTIVO"
+            color = "rose"
+
+        return {
+            "ultimo_acceso": ts.isoformat(),
+            "ultimo_acceso_fmt": ts.strftime("%d/%m/%Y %I:%M %p"),
+            "tiempo_inactivo": tiempo_str,
+            "dias_inactivo": days,
+            "estado_inactividad": estado,
+            "badge_color": color
+        }
+
+    def get_accounts_usage_report(self, farmacia_id: Optional[int] = None) -> Dict[str, Any]:
+        """Obtiene el reporte consolidado de uso e inactividad de todas las cuentas registradas."""
+        fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+        staff_list = []
+        pacientes_list = []
+        farmacias_list = []
+
+        # 1. Cuentas de Personal POS (Vendedores, Cajeros, Regente y Administrador)
+        with self._get_connection(farmacia_id=fid) as conn:
+            # Info admin principal de la farmacia
+            f_row = conn.execute("SELECT * FROM farmacias WHERE id = ? OR id = 1 LIMIT 1", (fid,)).fetchone()
+            if f_row:
+                f_dict = dict(f_row)
+                inact = self.format_inactivity_info(f_dict.get("ultimo_acceso"), f_dict.get("fecha_creacion"))
+                staff_list.append({
+                    "id": f"admin_{f_dict['id']}",
+                    "raw_id": f_dict["id"],
+                    "username": f_dict.get("usuario_admin", "admin"),
+                    "nombre_completo": f"{f_dict.get('nombre', 'Farmacia')} (Administrador Principal)",
+                    "rol": "ADMINISTRADOR",
+                    "pista_clave": f_dict.get("pista_clave_demo", ""),
+                    "tipo": "staff",
+                    "fecha_registro": f_dict.get("fecha_creacion", ""),
+                    "can_delete": False,
+                    **inact
+                })
+
+            staff_rows = conn.execute("SELECT * FROM personal_farmacia ORDER BY id DESC").fetchall()
+            for s in staff_rows:
+                s_dict = dict(s)
+                inact = self.format_inactivity_info(s_dict.get("ultimo_acceso"), s_dict.get("fecha_creacion"))
+                staff_list.append({
+                    "id": s_dict["id"],
+                    "raw_id": s_dict["id"],
+                    "username": s_dict["username"],
+                    "nombre_completo": s_dict.get("nombre_completo", s_dict["username"]),
+                    "rol": s_dict.get("rol", "VENDEDOR"),
+                    "pista_clave": s_dict.get("pista_clave", ""),
+                    "tipo": "staff",
+                    "fecha_registro": s_dict.get("fecha_creacion", ""),
+                    "can_delete": True,
+                    **inact
+                })
+
+        # 2. Cuentas de Pacientes / Clientes registradas desde la App Móvil
+        with self._get_connection() as mconn:
+            try:
+                pac_rows = mconn.execute("SELECT * FROM pacientes_usuarios ORDER BY id DESC").fetchall()
+                for p in pac_rows:
+                    p_dict = dict(p)
+                    inact = self.format_inactivity_info(p_dict.get("ultimo_acceso"), p_dict.get("fecha_registro"))
+                    pacientes_list.append({
+                        "id": p_dict["id"],
+                        "raw_id": p_dict["id"],
+                        "username": p_dict.get("telefono", p_dict.get("cedula", f"paciente_{p_dict['id']}")),
+                        "nombre_completo": p_dict.get("nombre_completo", "Paciente App"),
+                        "telefono": p_dict.get("telefono", ""),
+                        "cedula": p_dict.get("cedula", ""),
+                        "email": p_dict.get("email", ""),
+                        "rol": "PACIENTE_APP",
+                        "tipo": "paciente",
+                        "fecha_registro": p_dict.get("fecha_registro", ""),
+                        "can_delete": True,
+                        **inact
+                    })
+            except Exception:
+                pass
+
+        # 3. Cuentas de Sucursales / Farmacias registradas en el Directorio
+        with self._get_connection() as mconn:
+            try:
+                far_rows = mconn.execute("SELECT * FROM farmacias_directorio ORDER BY id DESC").fetchall()
+                for f in far_rows:
+                    f_dict = dict(f)
+                    inact = self.format_inactivity_info(f_dict.get("ultimo_acceso"), f_dict.get("fecha_creacion"))
+                    farmacias_list.append({
+                        "id": f_dict["id"],
+                        "raw_id": f_dict["id"],
+                        "username": f_dict.get("usuario_admin", "admin"),
+                        "nombre_completo": f_dict.get("nombre", "Farmacia"),
+                        "telefono": f_dict.get("telefono", ""),
+                        "rnc": f_dict.get("rnc", ""),
+                        "rol": "SUCURSAL_FARMACIA",
+                        "tipo": "farmacia",
+                        "fecha_registro": f_dict.get("fecha_creacion", ""),
+                        "can_delete": True,
+                        **inact
+                    })
+            except Exception:
+                pass
+
+        all_accounts = staff_list + pacientes_list + farmacias_list
+        total = len(all_accounts)
+        activas = sum(1 for a in all_accounts if a["estado_inactividad"] == "ACTIVO")
+        moderadas = sum(1 for a in all_accounts if a["estado_inactividad"] == "MODERADO")
+        inactivas = sum(1 for a in all_accounts if a["estado_inactividad"] in ("INACTIVO", "NUNCA_USADA"))
+
+        return {
+            "staff": staff_list,
+            "pacientes": pacientes_list,
+            "farmacias": farmacias_list,
+            "resumen": {
+                "total_cuentas": total,
+                "total_staff": len(staff_list),
+                "total_pacientes": len(pacientes_list),
+                "total_farmacias": len(farmacias_list),
+                "activas": activas,
+                "moderadas": moderadas,
+                "inactivas": inactivas
+            }
+        }
+
+    def delete_account(self, tipo: str, account_id: Any, farmacia_id: Optional[int] = None) -> bool:
+        """Elimina permanentemente una cuenta (personal POS, paciente de app o farmacia)."""
+        t = str(tipo or "").lower().strip()
+        if t == "staff":
+            if str(account_id).startswith("admin_"):
+                raise ValueError("No se puede eliminar la cuenta del Administrador principal de la farmacia.")
+            fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+            with self._get_connection(farmacia_id=fid) as conn:
+                conn.execute("DELETE FROM personal_farmacia WHERE id = ?", (int(account_id),))
+            return True
+        elif t == "paciente":
+            pid = int(account_id)
+            with self._get_connection() as mconn:
+                mconn.execute("DELETE FROM pacientes_usuarios WHERE id = ?", (pid,))
+                mconn.execute("DELETE FROM pacientes WHERE id = ?", (pid,))
+            return True
+        elif t == "farmacia":
+            fid = int(account_id)
+            self.delete_pharmacy_permanently(fid)
+            return True
+        else:
+            raise ValueError(f"Tipo de cuenta '{tipo}' no reconocido.")
 
 
 
@@ -5356,10 +5627,18 @@ class DatabaseManager:
 
 
 
+            now_iso = datetime.now().isoformat()
+            try:
+                conn.execute("UPDATE pacientes_usuarios SET ultimo_acceso = ? WHERE id = ?", (now_iso, matched["id"]))
+            except Exception:
+                pass
+            try:
+                conn.execute("UPDATE pacientes SET ultimo_acceso = ? WHERE id = ?", (now_iso, matched["id"]))
+            except Exception:
+                pass
             d = dict(matched)
-
             d.pop("clave_hash", None)
-
+            d["ultimo_acceso"] = now_iso
             return d
 
 

@@ -444,6 +444,12 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "config": cfg})
                 return
 
+            if path == "/api/accounts/usage":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                report = db.get_accounts_usage_report(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "report": report})
+                return
+
             if path == "/api/staff":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
                 staff = db.list_staff(farmacia_id=farmacia_id)
@@ -1086,6 +1092,14 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 farmacia_id = safe_farmacia_id(body, 1)
                 new_seller = db.create_seller(farmacia_id, body)
                 self._send_json(201, {"ok": True, "seller": new_seller})
+                return
+
+            if path == "/api/accounts/delete":
+                farmacia_id = safe_farmacia_id(body, 1)
+                tipo = str(body.get("tipo", "staff")).strip()
+                account_id = body.get("account_id")
+                db.delete_account(tipo=tipo, account_id=account_id, farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "message": f"Cuenta {tipo} eliminada correctamente."})
                 return
 
             if path == "/api/staff/delete":
