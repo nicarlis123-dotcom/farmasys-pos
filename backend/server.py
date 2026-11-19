@@ -113,19 +113,7 @@ class SimpleJWT:
         return payload
 
 
-# Iniciar servidor WebSocket RFC 6455 para el Asistente Visual y Marco Verde en el POS
-try:
-    pos_guide_hub.start_websocket_server()
-except Exception as e:
-    print(f"Warning starting pos_guide_hub WebSocket: {e}")
-
-# Iniciar Servidor WebSocket Asistente IA en Puerto 8765 (Venta Guiada: búsqueda -> lote -> cobro)
-try:
-    import servidor_asistente_ws
-    servidor_asistente_ws.start_in_background()
-    print("[Asistente IA] Servidor WebSocket 8765 activo para Venta Guiada.")
-except Exception as e:
-    print(f"Warning starting pos_guide_hub WebSocket: {e}")
+# [Farma Desactivada]: Asistente virtual y WebSockets 8085/8765 deshabilitados por solicitud del usuario.
 
 db = DatabaseManager(DB_PATH)
 whatsapp_engine = WhatsAppBusinessService(db)
@@ -486,6 +474,18 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "patients": patients})
                 return
 
+            if path == "/api/patient/orders":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                telefono = query.get("telefono", [""])[0]
+                cliente_nombre = query.get("nombre", [""])[0]
+                orders = db.get_patient_orders(
+                    farmacia_id=farmacia_id,
+                    telefono=telefono,
+                    cliente_nombre=cliente_nombre,
+                )
+                self._send_json(200, {"ok": True, "orders": orders})
+                return
+
             if path == "/api/patient/vital-signs":
                 current_user = self._get_authenticated_user()
                 if not current_user:
@@ -516,7 +516,10 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/ai/hub":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
-                hub = ai_engine.get_full_ai_hub_overview(farmacia_id=farmacia_id)
+                try:
+                    hub = ai_engine.get_full_ai_hub_overview(farmacia_id=farmacia_id)
+                except Exception:
+                    hub = {"ok": True, "low_stock": [], "top_sellers": [], "chronic_10d": [], "kits": []}
                 self._send_json(200, hub)
                 return
 
@@ -1225,6 +1228,34 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, ocr_result)
                 return
 
+            if path == "/api/pos/caja/salida":
+                farmacia_id = safe_farmacia_id(body, 1)
+                concepto = str(body.get("concepto", "")).strip()
+                monto = float(body.get("monto_dop", 0.0) or 0.0)
+                categoria = str(body.get("categoria", "GASTO_MENOR"))
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.register_caja_expense(farmacia_id, concepto, monto, categoria=categoria, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
+            if path == "/api/pos/caja/salida/delete":
+                farmacia_id = safe_farmacia_id(body, 1)
+                exp_id = int(body.get("expense_id", 0))
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.delete_caja_expense(farmacia_id, exp_id, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
+            if path == "/api/pos/caja/fondo":
+                farmacia_id = safe_farmacia_id(body, 1)
+                f_dop = float(body.get("fondo_inicial_dop", 0.0) or 0.0)
+                f_usd = float(body.get("fondo_inicial_usd", 0.0) or 0.0)
+                t_usd = float(body.get("tasa_cambio_usd", 60.0) or 60.0)
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.save_caja_opening_config(farmacia_id, f_dop, f_usd, t_usd, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
             if path == "/api/pos/caja/corte":
                 farmacia_id = safe_farmacia_id(body, 1)
                 actor_role = str(body.get("actor_role", "")).upper()
@@ -1454,12 +1485,31 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
                 return
 
+            if path == "/api/delivery/login-repartidor":
+                farmacia_id = safe_farmacia_id(body, 1)
+                username = str(body.get("username", "")).strip()
+                clave = str(body.get("clave_acceso", "")).strip()
+                res = db.authenticate_courier(farmacia_id, username, clave)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/delivery/asignar-repartidor":
+                farmacia_id = safe_farmacia_id(body, 1)
+                order_code = str(body.get("codigo_orden", "")).strip()
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                rep_tel = str(body.get("repartidor_telefono", "")).strip()
+                rep_veh = str(body.get("repartidor_vehiculo", "")).strip()
+                res = db.assign_courier_to_order(farmacia_id, order_code, rep_nombre, rep_tel, rep_veh)
+                self._send_json(200, res)
+                return
+
             if path == "/api/delivery/iniciar-entrega":
                 farmacia_id = safe_farmacia_id(body, 1)
                 order_code = str(body.get("codigo_orden", "")).strip()
                 lat = float(body.get("latitud", 18.4746))
                 lng = float(body.get("longitud", -69.9328))
-                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado="EN_CAMINO")
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado="EN_CAMINO", repartidor_nombre=rep_nombre)
                 self._send_json(200, res)
                 return
 
@@ -1471,7 +1521,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 estado = str(body.get("estado", "EN_CAMINO"))
                 eta = body.get("eta_minutos")
                 eta_val = int(eta) if eta is not None else None
-                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado=estado, eta_minutos=eta_val)
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado=estado, eta_minutos=eta_val, repartidor_nombre=rep_nombre)
                 self._send_json(200, res)
                 return
 
@@ -1594,6 +1645,15 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "receta_imagen_url": public_url})
                 return
 
+            if path == "/api/sales/annul":
+                farmacia_id = safe_farmacia_id(body, 1)
+                tx_id = int(body.get("transaccion_id", 0))
+                motivo = str(body.get("motivo", "Devolución / Anulación rápida en mostrador"))
+                usuario = str(body.get("usuario", "Cajero Mostrador"))
+                res = db.annul_pos_transaction(farmacia_id, tx_id, motivo=motivo, usuario=usuario)
+                self._send_json(200, res)
+                return
+
             if path == "/api/sales":
                 order_record = db.process_sale(body)
                 whatsapp_dispatches = []
@@ -1623,7 +1683,7 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                                     ?, ?, ?, ?, ?,
                                     ?, ?, ?, ?,
                                     ?, ?,
-                                    'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'LISTO_PARA_ENTREGA',
+                                    str(body.get("repartidor_nombre", "")).strip() or 'Por asignar', str(body.get("repartidor_telefono", "")).strip() or '', str(body.get("repartidor_vehiculo", "")).strip() or 'Delivery Farmacia', 'LISTO_PARA_ENTREGA',
                                     18.4746, -69.9328, ?, ?,
                                     18.4746, -69.9328, 0.0, 15,
                                     ?, ?

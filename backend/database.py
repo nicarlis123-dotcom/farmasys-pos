@@ -158,6 +158,14 @@ class DatabaseManager:
 
 
     def _ensure_service_columns(self, conn: sqlite3.Connection) -> None:
+        # Asegurar columna pago_mixto_json en transacciones para ventas con pago combinado
+        try:
+            tx_cols = [col[1] for col in conn.execute("PRAGMA table_info(transacciones)").fetchall()]
+            if tx_cols and "pago_mixto_json" not in tx_cols:
+                conn.execute("ALTER TABLE transacciones ADD COLUMN pago_mixto_json TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         # Asegurar columna ultimo_acceso para el registro de uso e inactividad
         for tbl in ("personal_farmacia", "pacientes_usuarios", "pacientes", "farmacias", "farmacias_directorio"):
             try:
@@ -355,6 +363,11 @@ class DatabaseManager:
             for col in ("pago_tarjeta_activo", "envio_domicilio_activo", "seguro_medico_activo"):
                 try:
                     conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} INTEGER NOT NULL DEFAULT 1;")
+                except Exception:
+                    pass
+            for col_f in ("tarifa_envio_rd", "envio_gratis_desde_rd"):
+                try:
+                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col_f} REAL NOT NULL DEFAULT 0.0;")
                 except Exception:
                     pass
 
@@ -1080,6 +1093,34 @@ class DatabaseManager:
 
                 """
 
+                CREATE TABLE IF NOT EXISTS farmacias_directorio (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uuid_farmacia TEXT UNIQUE NOT NULL,
+                    codigo TEXT UNIQUE NOT NULL,
+                    nombre TEXT NOT NULL,
+                    eslogan TEXT NOT NULL DEFAULT 'FarmaSys - Sistema POS',
+                    ciudad_sector TEXT NOT NULL,
+                    telefono TEXT NOT NULL DEFAULT '809-555-1234',
+                    direccion TEXT NOT NULL,
+                    telefono_whatsapp TEXT NOT NULL,
+                    wa_activo INTEGER NOT NULL DEFAULT 1,
+                    mensaje_factura TEXT NOT NULL DEFAULT '¡Gracias por su compra en FarmaSys!',
+                    usuario_admin TEXT NOT NULL DEFAULT 'admin',
+                    clave_hash TEXT NOT NULL,
+                    pista_clave_demo TEXT DEFAULT '',
+                    rnc TEXT NOT NULL DEFAULT '1-31-99887-2',
+                    banco_nombre TEXT NOT NULL DEFAULT 'Banco Popular / Banreservas',
+                    banco_cuenta TEXT NOT NULL DEFAULT 'Popular: 789-451230-9 | Banreservas: 960-112233-4',
+                    horario TEXT NOT NULL DEFAULT 'Lun-Dom 7:00 AM - 11:00 PM',
+                    db_filename TEXT NOT NULL DEFAULT '',
+                    activa INTEGER NOT NULL DEFAULT 1,
+                    fecha_creacion TEXT NOT NULL,
+                    pago_tarjeta_activo INTEGER NOT NULL DEFAULT 1,
+                    envio_domicilio_activo INTEGER NOT NULL DEFAULT 1,
+                    seguro_medico_activo INTEGER NOT NULL DEFAULT 1,
+                    ultimo_acceso TEXT DEFAULT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS farmacias (
 
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1508,26 +1549,8 @@ class DatabaseManager:
     def _base_catalog_templates(today: datetime) -> List[tuple]:
         return []
     def _enforce_clean_state(self) -> None:
-        """Purga cualquier farmacia de prueba residual, mercancias demo y bases huerfanas."""
-        try:
-            import glob
-            with self._get_connection() as mconn:
-                test_codes = "('DAVALSI-PIANTINI', 'DAVALSI-NACO', 'FARMACIA-SANTIAGO', 'TEST-01', 'DAVALSI-BV', 'FARMASYS-DEMO-01')"
-                mconn.execute(f"DELETE FROM farmacias WHERE codigo IN {test_codes}")
-                mconn.execute(f"DELETE FROM farmacias_directorio WHERE codigo IN {test_codes}")
-                mconn.execute("DELETE FROM productos WHERE nombre_comercial LIKE '%Desodorante%' OR nombre_comercial LIKE '%Lima%' OR codigo_barras LIKE '7460101009%'")
-                mconn.execute("DELETE FROM personal_farmacia WHERE username IN ('carmen.pos', 'admin.naco', 'admin.santiago')")
-                mconn.commit()
-
-                cnt = mconn.execute("SELECT COUNT(*) FROM farmacias_directorio WHERE activa = 1").fetchone()[0]
-                if cnt == 0:
-                    for f in glob.glob(os.path.join(self.tenants_dir, "*.db")):
-                        try:
-                            os.remove(f)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+        """Desactivado en producción: garantiza que ninguna farmacia ni medicamento real sea borrado al reiniciar."""
+        pass
 
     def _seed_initial_data(self) -> None:
         pass
@@ -1644,11 +1667,7 @@ class DatabaseManager:
                 # 1. ¿Es el usuario Administrador de la farmacia?
                 admin_user_name = str(row["usuario_admin"] or "admin").strip().lower()
                 if username_clean in ("admin", admin_user_name):
-                    is_admin_match = (
-                        row["clave_hash"] == hashed or
-                        (row["pista_clave_demo"] and row["pista_clave_demo"].strip() == clave_clean) or
-                        clave_clean in ("123456", "davalsi2026", "davalsi", "admin", "1234")
-                    )
+                    is_admin_match = (row["clave_hash"] == hashed)
                     if not is_admin_match:
                         raise ValueError(f"Clave incorrecta para el usuario administrador '{username_clean}'.")
 
@@ -1683,11 +1702,7 @@ class DatabaseManager:
                 if not staff_row:
                     raise ValueError(f"El usuario '{username_clean}' no existe en esta sucursal. Debe ser registrado previamente dentro del sistema por el Administrador.")
 
-                user_match = (
-                    staff_row["clave_hash"] == hashed or
-                    (staff_row["pista_clave"] and staff_row["pista_clave"].strip() == clave_clean) or
-                    clave_clean in ("123456", "davalsi2026", "davalsi", "admin", "1234", "regente123", "cajero123")
-                )
+                user_match = (staff_row["clave_hash"] == hashed)
                 if not user_match:
                     raise ValueError(f"Clave incorrecta para el usuario '{username_clean}'.")
 
@@ -1709,11 +1724,7 @@ class DatabaseManager:
                 return d
 
             # Si NO especificó usuario (login solo con clave general de la farmacia):
-            is_admin_match = (
-                row["clave_hash"] == hashed or
-                (row["pista_clave_demo"] and row["pista_clave_demo"].strip() == clave_clean) or
-                clave_clean in ("123456", "davalsi2026", "davalsi", "admin", "1234")
-            )
+            is_admin_match = (row["clave_hash"] == hashed)
             if is_admin_match:
                 d = dict(row)
                 d.pop("clave_hash", None)
@@ -1811,45 +1822,43 @@ class DatabaseManager:
 
         db_filename = ""
 
-        if os.path.isfile(self.master_db_path):
+        with self._get_connection() as mconn:
 
-            with self._get_connection() as mconn:
+            cur = mconn.execute(
 
-                cur = mconn.execute(
+                """
 
-                    """
+                INSERT INTO farmacias_directorio (
 
-                    INSERT INTO farmacias_directorio (
+                    uuid_farmacia, codigo, nombre, eslogan, ciudad_sector,
 
-                        uuid_farmacia, codigo, nombre, eslogan, ciudad_sector,
+                    telefono, direccion, telefono_whatsapp, wa_activo, mensaje_factura,
 
-                        telefono, direccion, telefono_whatsapp, wa_activo, mensaje_factura,
+                    usuario_admin, clave_hash, pista_clave_demo, rnc, banco_nombre, banco_cuenta,
 
-                        usuario_admin, clave_hash, pista_clave_demo, rnc, banco_nombre, banco_cuenta,
+                    db_filename, activa, fecha_creacion
 
-                        db_filename, activa, fecha_creacion
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, '¡Gracias por su compra en FarmaSys!', ?, ?, ?, ?, ?, ?, '', 1, ?)
 
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, '¡Gracias por su compra en FarmaSys!', ?, ?, ?, ?, ?, ?, '', 1, ?)
+                """,
 
-                    """,
+                (
 
-                    (
+                    new_uuid, codigo, nombre, eslogan, ciudad_sector, telefono,
 
-                        new_uuid, codigo, nombre, eslogan, ciudad_sector, telefono,
+                    direccion or ciudad_sector, telefono_wa, usuario_admin,
 
-                        direccion or ciudad_sector, telefono_wa, usuario_admin,
-
-                        hash_password(clave_acceso), clave_acceso, rnc, banco_nombre, banco_cuenta, now_str
-
-                    )
+                    hash_password(clave_acceso), clave_acceso, rnc, banco_nombre, banco_cuenta, now_str
 
                 )
 
-                new_farm_id = cur.lastrowid
+            )
 
-                db_filename = f"farmacia_{new_farm_id}_{code_slug}.db"
+            new_farm_id = cur.lastrowid
 
-                mconn.execute("UPDATE farmacias_directorio SET db_filename = ? WHERE id = ?", (db_filename, new_farm_id))
+            db_filename = f"farmacia_{new_farm_id}_{code_slug}.db"
+
+            mconn.execute("UPDATE farmacias_directorio SET db_filename = ? WHERE id = ?", (db_filename, new_farm_id))
 
 
 
@@ -2128,9 +2137,11 @@ class DatabaseManager:
 
 
 
+        raw_rol = str(data.get("rol", "VENDEDOR")).strip().upper()
+        rol_val = "REPARTIDOR" if raw_rol in ("REPARTIDOR", "DELIVERY") else "VENDEDOR"
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        with self._get_connection() as conn:
+        with self._get_connection(farmacia_id=int(farmacia_id)) as conn:
 
             cur = conn.execute(
 
@@ -2140,11 +2151,11 @@ class DatabaseManager:
 
                     farmacia_id, username, nombre_completo, rol, clave_hash, pista_clave, fecha_creacion
 
-                ) VALUES (?, ?, ?, 'VENDEDOR', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
 
                 """,
 
-                (int(farmacia_id), username, nombre_completo, hash_password(clave), clave, now_str),
+                (int(farmacia_id), username, nombre_completo, rol_val, hash_password(clave), clave, now_str),
 
             )
 
@@ -2189,6 +2200,26 @@ class DatabaseManager:
                 "puede_ver_reportes": True,
                 "puede_configurar": True,
                 "puede_gestionar_personal": True
+            }
+        elif r in ("REPARTIDOR", "DELIVERY"):
+            return {
+                "rol": "REPARTIDOR",
+                "titulo": "Repartidor / Delivery",
+                "icono": "🛵",
+                "puede_vender": False,
+                "puede_consultar_precios": True,
+                "puede_modificar_precios": False,
+                "puede_controlar_psicotropicos": False,
+                "puede_gestionar_inventario": False,
+                "puede_gestionar_alertas_clinicas": False,
+                "puede_validar_recetas": False,
+                "puede_arqueo_caja": False,
+                "puede_abrir_gaveta_manual": False,
+                "puede_revisar_quejas": False,
+                "puede_ver_reportes": False,
+                "puede_configurar": False,
+                "puede_gestionar_personal": False,
+                "puede_entregar_delivery": True,
             }
         elif r in ("REGENTE", "REGENTE_FARMACEUTICO"):
             return {
@@ -2598,10 +2629,10 @@ class DatabaseManager:
             except Exception:
                 pass
 
-        # 3. Cuentas de Sucursales / Farmacias registradas en el Directorio
+        # 3. Información exclusiva de la farmacia actual (aislada por farmacia_id)
         with self._get_connection() as mconn:
             try:
-                far_rows = mconn.execute("SELECT * FROM farmacias_directorio ORDER BY id DESC").fetchall()
+                far_rows = mconn.execute("SELECT * FROM farmacias_directorio WHERE id = ? ORDER BY id DESC", (fid,)).fetchall()
                 for f in far_rows:
                     f_dict = dict(f)
                     inact = self.format_inactivity_info(f_dict.get("ultimo_acceso"), f_dict.get("fecha_creacion"))
@@ -2940,6 +2971,8 @@ class DatabaseManager:
             d["envio_domicilio_activo"] = bool(d.get("envio_domicilio_activo", 1))
 
             d["seguro_medico_activo"] = bool(d.get("seguro_medico_activo", 1))
+            d["tarifa_envio_rd"] = round(float(d.get("tarifa_envio_rd") or 0.0), 2)
+            d["envio_gratis_desde_rd"] = round(float(d.get("envio_gratis_desde_rd") or 0.0), 2)
 
             return d
 
@@ -2969,6 +3002,14 @@ class DatabaseManager:
         envio_domicilio_val = 1 if cfg.get("envio_domicilio_activo", current.get("envio_domicilio_activo", True)) else 0
 
         seguro_medico_val = 1 if cfg.get("seguro_medico_activo", current.get("seguro_medico_activo", True)) else 0
+        try:
+            tarifa_envio_val = max(0.0, round(float(cfg.get("tarifa_envio_rd", current.get("tarifa_envio_rd", 0.0)) or 0.0), 2))
+        except (ValueError, TypeError):
+            tarifa_envio_val = 0.0
+        try:
+            envio_gratis_val = max(0.0, round(float(cfg.get("envio_gratis_desde_rd", current.get("envio_gratis_desde_rd", 0.0)) or 0.0), 2))
+        except (ValueError, TypeError):
+            envio_gratis_val = 0.0
 
 
 
@@ -3034,7 +3075,8 @@ class DatabaseManager:
 
                         twilio_account_sid = ?, twilio_auth_token = ?, public_base_url = ?, horario = ?,
 
-                        pago_tarjeta_activo = ?, envio_domicilio_activo = ?, seguro_medico_activo = ?
+                        pago_tarjeta_activo = ?, envio_domicilio_activo = ?, seguro_medico_activo = ?,
+                        tarifa_envio_rd = ?, envio_gratis_desde_rd = ?
 
                     WHERE id = ?
 
@@ -3055,6 +3097,7 @@ class DatabaseManager:
                         tw_sid_val, tw_tok_val, pub_url_val, horario_val,
 
                         pago_tarjeta_val, envio_domicilio_val, seguro_medico_val,
+                        tarifa_envio_val, envio_gratis_val,
 
                         fid,
 
@@ -3384,6 +3427,23 @@ class DatabaseManager:
             rows = conn.execute(query, params).fetchall()
 
             products = [self._enrich_product(r) for r in rows]
+            try:
+                self._ensure_fefo_lots_table(conn)
+                lot_rows = conn.execute(
+                    "SELECT producto_id, numero_lote, fecha_vencimiento, cantidad_disponible FROM inventario_lotes WHERE farmacia_id = ? AND cantidad_disponible > 0 ORDER BY fecha_vencimiento ASC, id ASC",
+                    (fid,),
+                ).fetchall()
+                lots_map = {}
+                for lr in lot_rows:
+                    lots_map.setdefault(lr["producto_id"], []).append({
+                        "numero_lote": lr["numero_lote"],
+                        "fecha_vencimiento": lr["fecha_vencimiento"],
+                        "cantidad_disponible": lr["cantidad_disponible"],
+                    })
+                for p_item in products:
+                    p_item["lotes_activos"] = lots_map.get(p_item["id"], [])
+            except Exception:
+                pass
 
 
 
@@ -3827,6 +3887,190 @@ class DatabaseManager:
 
 
 
+
+    def _ensure_fefo_lots_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventario_lotes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            farmacia_id INTEGER NOT NULL DEFAULT 1,
+            producto_id INTEGER NOT NULL,
+            codigo_barras TEXT NOT NULL DEFAULT '',
+            numero_lote TEXT NOT NULL,
+            fecha_vencimiento TEXT NOT NULL,
+            cantidad_disponible INTEGER NOT NULL DEFAULT 0,
+            dias_para_vencer INTEGER NOT NULL DEFAULT 365,
+            ubicacion_anaquel TEXT DEFAULT '',
+            fecha_registro TEXT NOT NULL
+        )
+        """)
+
+    def _get_fefo_active_lot(self, conn: sqlite3.Connection, farmacia_id: int, producto_id: int) -> Optional[tuple]:
+        self._ensure_fefo_lots_table(conn)
+        row = conn.execute(
+            """
+            SELECT numero_lote, fecha_vencimiento
+            FROM inventario_lotes
+            WHERE farmacia_id = ? AND producto_id = ? AND cantidad_disponible > 0
+            ORDER BY fecha_vencimiento ASC, id ASC
+            LIMIT 1
+            """,
+            (int(farmacia_id), int(producto_id)),
+        ).fetchone()
+        if row:
+            return (row["numero_lote"], row["fecha_vencimiento"])
+        return None
+
+    def _add_or_update_fefo_lot(
+        self,
+        conn: sqlite3.Connection,
+        farmacia_id: int,
+        prod_row: sqlite3.Row,
+        numero_lote: str,
+        fecha_vencimiento: str,
+        cantidad_sumar: int,
+        ubicacion: str = "",
+    ) -> tuple:
+        self._ensure_fefo_lots_table(conn)
+        fid = int(farmacia_id)
+        pid = int(prod_row["id"])
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lote_clean = str(numero_lote or prod_row["lote"] or "LOTE-GENERAL").strip()
+        vence_clean = str(fecha_vencimiento or prod_row["fecha_vencimiento"] or "2028-12-31").strip()
+        ubic_clean = str(ubicacion or prod_row["ubicacion_anaquel"] or "").strip()
+
+        # Si aún no hay lotes registrados en inventario_lotes y existía stock previo, preservar el lote previo
+        existing_count = conn.execute(
+            "SELECT COUNT(*) FROM inventario_lotes WHERE farmacia_id = ? AND producto_id = ?",
+            (fid, pid),
+        ).fetchone()[0]
+        prev_stock = int(prod_row["stock_total_unidades"] or 0)
+        if existing_count == 0 and prev_stock > 0:
+            conn.execute(
+                """
+                INSERT INTO inventario_lotes (
+                    farmacia_id, producto_id, codigo_barras, numero_lote, fecha_vencimiento,
+                    cantidad_disponible, ubicacion_anaquel, fecha_registro
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fid, pid, str(prod_row["codigo_barras"] or ""),
+                    str(prod_row["lote"] or "LOTE-INICIAL"),
+                    str(prod_row["fecha_vencimiento"] or "2028-12-31"),
+                    prev_stock, ubic_clean, now_str
+                ),
+            )
+
+        # Sumar al lote si coincide exactamente lote + fecha_vencimiento, o crear lote independiente
+        match = conn.execute(
+            """
+            SELECT id, cantidad_disponible FROM inventario_lotes
+            WHERE farmacia_id = ? AND producto_id = ? AND UPPER(numero_lote) = UPPER(?) AND fecha_vencimiento = ?
+            LIMIT 1
+            """,
+            (fid, pid, lote_clean, vence_clean),
+        ).fetchone()
+        if match:
+            conn.execute(
+                "UPDATE inventario_lotes SET cantidad_disponible = cantidad_disponible + ?, ubicacion_anaquel = ? WHERE id = ?",
+                (int(cantidad_sumar), ubic_clean, match["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO inventario_lotes (
+                    farmacia_id, producto_id, codigo_barras, numero_lote, fecha_vencimiento,
+                    cantidad_disponible, ubicacion_anaquel, fecha_registro
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (fid, pid, str(prod_row["codigo_barras"] or ""), lote_clean, vence_clean, int(cantidad_sumar), ubic_clean, now_str),
+            )
+
+        fefo = self._get_fefo_active_lot(conn, fid, pid)
+        return fefo if fefo else (lote_clean, vence_clean)
+
+    def _deduct_fefo_lots(self, conn: sqlite3.Connection, farmacia_id: int, prod_id: int, unidades_descontar: int) -> None:
+        self._ensure_fefo_lots_table(conn)
+        fid = int(farmacia_id)
+        pid = int(prod_id)
+        rem = int(unidades_descontar)
+        if rem <= 0:
+            return
+        lots = conn.execute(
+            """
+            SELECT id, cantidad_disponible
+            FROM inventario_lotes
+            WHERE farmacia_id = ? AND producto_id = ? AND cantidad_disponible > 0
+            ORDER BY fecha_vencimiento ASC, id ASC
+            """,
+            (fid, pid),
+        ).fetchall()
+        for lot in lots:
+            if rem <= 0:
+                break
+            avail = int(lot["cantidad_disponible"] or 0)
+            take = min(avail, rem)
+            conn.execute(
+                "UPDATE inventario_lotes SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?",
+                (take, lot["id"]),
+            )
+            rem -= take
+        fefo = self._get_fefo_active_lot(conn, fid, pid)
+        if fefo:
+            conn.execute(
+                "UPDATE productos SET lote = ?, fecha_vencimiento = ? WHERE id = ? AND farmacia_id = ?",
+                (fefo[0], fefo[1], pid, fid),
+            )
+
+    def _restore_fefo_lots(self, conn: sqlite3.Connection, farmacia_id: int, prod_id: int, unidades_devolver: int) -> None:
+        """Reintegra unidades devueltas/anuladas a inventario_lotes y recalcula el lote activo FEFO."""
+        self._ensure_fefo_lots_table(conn)
+        fid = int(farmacia_id)
+        pid = int(prod_id)
+        qty = int(unidades_devolver)
+        if qty <= 0:
+            return
+        lot = conn.execute(
+            """
+            SELECT id FROM inventario_lotes
+            WHERE farmacia_id = ? AND producto_id = ?
+            ORDER BY fecha_vencimiento ASC, id ASC
+            LIMIT 1
+            """,
+            (fid, pid),
+        ).fetchone()
+        if lot:
+            conn.execute(
+                "UPDATE inventario_lotes SET cantidad_disponible = cantidad_disponible + ? WHERE id = ?",
+                (qty, lot["id"]),
+            )
+        else:
+            p_row = conn.execute(
+                "SELECT codigo_barras, lote, fecha_vencimiento, ubicacion_anaquel FROM productos WHERE id = ? AND farmacia_id = ?",
+                (pid, fid),
+            ).fetchone()
+            if p_row:
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    """
+                    INSERT INTO inventario_lotes (
+                        farmacia_id, producto_id, codigo_barras, numero_lote, fecha_vencimiento,
+                        cantidad_disponible, ubicacion_anaquel, fecha_registro
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fid, pid, str(p_row["codigo_barras"] or ""),
+                        str(p_row["lote"] or "LOTE-GENERAL"),
+                        str(p_row["fecha_vencimiento"] or "2028-12-31"),
+                        qty, str(p_row["ubicacion_anaquel"] or ""), now_str
+                    ),
+                )
+        fefo = self._get_fefo_active_lot(conn, fid, pid)
+        if fefo:
+            conn.execute(
+                "UPDATE productos SET lote = ?, fecha_vencimiento = ? WHERE id = ? AND farmacia_id = ?",
+                (fefo[0], fefo[1], pid, fid),
+            )
+
     def replenish_stock(
 
         self,
@@ -4001,6 +4245,13 @@ class DatabaseManager:
 
 
 
+            if modo_upper == "SUMAR" and cambio_unidades > 0:
+                fefo_lote, fefo_vence = self._add_or_update_fefo_lot(
+                    conn, int(farmacia_id), row, nuevo_lote, nueva_fecha_venc, cambio_unidades, nueva_ubic
+                )
+            else:
+                fefo_lote, fefo_vence = nuevo_lote, nueva_fecha_venc
+
             conn.execute(
 
                 """
@@ -4021,7 +4272,7 @@ class DatabaseManager:
 
                 """,
 
-                (stock_nuevo, nuevo_lote, nueva_fecha_venc, nuevo_precio, nueva_ubic, int(producto_id), int(farmacia_id)),
+                (stock_nuevo, fefo_lote, fefo_vence, nuevo_precio, nueva_ubic, int(producto_id), int(farmacia_id)),
 
             )
 
@@ -4227,6 +4478,22 @@ class DatabaseManager:
 
         cfg_farm = self.get_pharmacy_config(farmacia_id)
 
+        pago_mixto = payload.get("pago_mixto") or {}
+        pago_mixto_json = ""
+        if metodo_pago == "MIXTO" and isinstance(pago_mixto, dict):
+            sec_m = str(pago_mixto.get("segundo_metodo", "TARJETA")).upper()
+            if sec_m == "TARJETA" and not cfg_farm.get("pago_tarjeta_activo", True):
+                raise ValueError("El pago con tarjeta se encuentra temporalmente bloqueado por configuración del sistema POS.")
+            ef_amt = round(float(pago_mixto.get("efectivo_dop", 0) or 0), 2)
+            sec_amt = round(float(pago_mixto.get("segundo_monto_dop", 0) or 0), 2)
+            pago_mixto_json = json.dumps({
+                "efectivo_dop": ef_amt,
+                "segundo_metodo": sec_m,
+                "segundo_monto_dop": sec_amt
+            })
+            sec_short = "TARJETA" if sec_m == "TARJETA" else "DEPOSITO"
+            metodo_pago = f"MIXTO (EFECTIVO + {sec_short})"
+
         if metodo_pago == "TARJETA" and not cfg_farm.get("pago_tarjeta_activo", True):
 
             raise ValueError("El pago con tarjeta se encuentra temporalmente bloqueado por configuración del sistema POS.")
@@ -4349,6 +4616,10 @@ class DatabaseManager:
                             "UPDATE productos SET stock_total_unidades = ? WHERE id = ?",
                             (c_stock_despues, c_dict["id"])
                         )
+                        try:
+                            self._deduct_fefo_lots(conn, farmacia_id, c_dict["id"], c_u_desc)
+                        except Exception:
+                            pass
                         comp_desglose_parts.append(f"{c_cant}x {c_pres} {c_dict['nombre_comercial']}")
                     
                     desglose_txt = " + ".join(comp_desglose_parts)
@@ -4433,6 +4704,10 @@ class DatabaseManager:
                     "UPDATE productos SET stock_total_unidades = ? WHERE id = ?",
                     (stock_despues, prod_id),
                 )
+                try:
+                    self._deduct_fefo_lots(conn, farmacia_id, prod_id, unidades_descontar)
+                except Exception:
+                    pass
 
                 frec_diaria = str(item.get("frecuencia_diaria", item.get("posologia", "1 cada 24h"))).strip()
                 dias_tx = int(item.get("dias_tratamiento", item.get("duracion_dias", 30 if "cronico" in str(item).lower() else 0)))
@@ -4474,13 +4749,64 @@ class DatabaseManager:
 
             cobertura_seguro = round(float(payload.get("cobertura_seguro_rd", 0.0)), 2)
 
-            total_orden = max(0.0, round(subtotal_orden - cobertura_seguro, 2))
+            # Descuento manual rápido en caja (por % o monto RD$)
+            desc_manual = payload.get("descuento_manual") or {}
+            descuento_manual_rd = 0.0
+            descuento_manual_label = ""
+            if isinstance(desc_manual, dict):
+                d_tipo = str(desc_manual.get("tipo", "PCT")).upper()
+                try:
+                    d_val = float(desc_manual.get("valor", 0) or 0)
+                except (ValueError, TypeError):
+                    d_val = 0.0
+                if d_val > 0:
+                    if d_tipo == "PCT":
+                        pct_clamped = min(100.0, max(0.0, d_val))
+                        descuento_manual_rd = round(subtotal_orden * (pct_clamped / 100.0), 2)
+                        descuento_manual_label = f"Descuento Manual Caja ({pct_clamped:g}%)"
+                    else:
+                        descuento_manual_rd = round(min(subtotal_orden, max(0.0, d_val)), 2)
+                        descuento_manual_label = f"Descuento Manual Caja (RD$ {descuento_manual_rd:.2f})"
+
+            costo_envio_rd = 0.0
+            es_domicilio_app = (
+                canal == "APP_PACIENTE"
+                and (
+                    str(payload.get("modalidad_entrega", "")).upper() == "DOMICILIO"
+                    or "[ENVÍO A DOMICILIO]" in str(cliente_direccion or "")
+                )
+            )
+            if es_domicilio_app:
+                try:
+                    env_row = conn.execute(
+                        "SELECT tarifa_envio_rd, envio_gratis_desde_rd FROM farmacias WHERE id = ?",
+                        (farmacia_id,),
+                    ).fetchone()
+                    if env_row:
+                        t_env = max(0.0, float(env_row["tarifa_envio_rd"] or 0.0))
+                        g_desde = max(0.0, float(env_row["envio_gratis_desde_rd"] or 0.0))
+                        if t_env > 0 and (g_desde <= 0 or subtotal_orden < g_desde):
+                            costo_envio_rd = round(t_env, 2)
+                except Exception:
+                    costo_envio_rd = 0.0
+
+            total_orden = max(0.0, round(subtotal_orden - cobertura_seguro - descuento_manual_rd + costo_envio_rd, 2))
 
 
 
             next_seq = conn.execute("SELECT COALESCE(MAX(id), 1000) + 1001 FROM transacciones").fetchone()[0]
 
             codigo_orden = f"DAV-{next_seq}"
+
+            ncf_tipo = str(payload.get("ncf_tipo", "B02")).upper().strip()
+            if ncf_tipo not in ("B01", "B02"):
+                ncf_tipo = "B02"
+            ncf_rnc = str(payload.get("ncf_rnc", "")).strip()
+            ncf_razon = str(payload.get("ncf_razon_social", "")).strip()
+            if ncf_tipo == "B01" and not ncf_rnc:
+                raise ValueError("Para emitir Comprobante B01 (Crédito Fiscal) debe ingresar el RNC o Cédula.")
+            ncf_code = f"{ncf_tipo}{int(next_seq):08d}"
+            numero_comprobante_val = f"{ncf_code} | RNC: {ncf_rnc}" if (ncf_tipo == "B01" and ncf_rnc) else ncf_code
 
             now = datetime.now()
 
@@ -4550,6 +4876,26 @@ class DatabaseManager:
             )
 
             transaccion_id = cur.lastrowid
+            if pago_mixto_json:
+                try:
+                    conn.execute("UPDATE transacciones SET pago_mixto_json = ? WHERE id = ?", (pago_mixto_json, transaccion_id))
+                except Exception:
+                    pass
+            try:
+                conn.execute("UPDATE transacciones SET numero_comprobante = ? WHERE id = ?", (numero_comprobante_val, transaccion_id))
+                if ncf_tipo == "B01" and ncf_razon:
+                    conn.execute("UPDATE transacciones SET notas_farmaceutico = TRIM(COALESCE(notas_farmaceutico, '') || ' ' || ?) WHERE id = ?", (f"[Razón Social Fiscal: {ncf_razon}]", transaccion_id))
+            except Exception:
+                pass
+
+            if descuento_manual_rd > 0:
+                try:
+                    conn.execute(
+                        "UPDATE transacciones SET descuento_bonificacion_monto = COALESCE(descuento_bonificacion_monto, 0) + ?, plan_bonificacion_aplicado = CASE WHEN COALESCE(plan_bonificacion_aplicado, '') = '' THEN ? ELSE plan_bonificacion_aplicado || ' + ' || ? END WHERE id = ?",
+                        (descuento_manual_rd, descuento_manual_label, descuento_manual_label, transaccion_id)
+                    )
+                except Exception:
+                    pass
 
 
 
@@ -4678,12 +5024,17 @@ class DatabaseManager:
 
                 "metodo_pago": metodo_pago,
 
+                "numero_comprobante": numero_comprobante_val,
+                "ncf_tipo": ncf_tipo,
                 "referencia_pago": referencia_pago,
 
                 "seguro_ars": seguro_ars,
 
                 "cobertura_seguro_rd": cobertura_seguro,
 
+                "pago_mixto_json": pago_mixto_json,
+                "descuento_bonificacion_monto": descuento_manual_rd,
+                "plan_bonificacion_aplicado": descuento_manual_label,
                 "subtotal": subtotal_orden,
 
                 "total": total_orden,
@@ -4901,6 +5252,160 @@ class DatabaseManager:
             return tx_dict
 
 
+
+    def annul_pos_transaction(
+        self, farmacia_id: int, transaccion_id: int, motivo: str = "", usuario: str = "Cajero"
+    ) -> Dict[str, Any]:
+        """
+        Anula/devuelve una venta POS y reintegra automáticamente todas las unidades mínimas al inventario.
+        """
+        fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+        tid = int(transaccion_id)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        motivo_clean = str(motivo or "Devolución / Anulación rápida en mostrador").strip()
+        usuario_clean = str(usuario or "Cajero").strip()
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            tx = conn.execute(
+                "SELECT * FROM transacciones WHERE id = ? AND farmacia_id = ?",
+                (tid, fid),
+            ).fetchone()
+            if not tx:
+                raise ValueError("Transacción no encontrada en esta farmacia.")
+
+            estado_actual = str(tx["estado_pedido"] or "").upper()
+            if estado_actual in ("ANULADO", "CANCELADO"):
+                raise ValueError(f"La orden {tx['codigo_orden']} ya se encuentra anulada.")
+
+            detalles = conn.execute(
+                "SELECT * FROM detalle_transacciones WHERE transaccion_id = ?",
+                (tid,),
+            ).fetchall()
+
+            total_unidades_reintegradas = 0
+            for det in detalles:
+                prod_id = det["producto_id"]
+                unid_desc = int(det["unidades_minimas_descontadas"] or 0)
+                if prod_id and int(prod_id) > 0 and unid_desc > 0:
+                    p_row = conn.execute(
+                        "SELECT id, stock_total_unidades FROM productos WHERE id = ? AND farmacia_id = ?",
+                        (int(prod_id), fid),
+                    ).fetchone()
+                    if p_row:
+                        stock_antes = int(p_row["stock_total_unidades"] or 0)
+                        stock_despues = stock_antes + unid_desc
+                        conn.execute(
+                            "UPDATE productos SET stock_total_unidades = ? WHERE id = ?",
+                            (stock_despues, int(prod_id)),
+                        )
+                        try:
+                            self._restore_fefo_lots(conn, fid, int(prod_id), unid_desc)
+                        except Exception:
+                            pass
+                        conn.execute(
+                            """
+                            INSERT INTO movimientos_inventario (
+                                farmacia_id, fecha_hora, producto_id, tipo_movimiento,
+                                presentacion_operada, cantidad_presentacion, cambio_unidades_minimas,
+                                stock_anterior, stock_resultante, referencia_orden, usuario
+                            ) VALUES (?, ?, ?, 'DEVOLUCION_ANULACION', ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                fid,
+                                now_str,
+                                int(prod_id),
+                                str(det["presentacion"] or "UNIDAD"),
+                                int(det["cantidad_presentacion"] or 1),
+                                unid_desc,
+                                stock_antes,
+                                stock_despues,
+                                tx["codigo_orden"],
+                                usuario_clean,
+                            ),
+                        )
+                        total_unidades_reintegradas += unid_desc
+
+            nota_nueva = f"[ANULADA {now_str} por {usuario_clean}: {motivo_clean}]"
+            nota_prev = str(tx["notas_farmaceutico"] or "").strip()
+            nota_final = f"{nota_prev} {nota_nueva}".strip()
+
+            conn.execute(
+                "UPDATE transacciones SET estado_pedido = 'ANULADO', notas_farmaceutico = ? WHERE id = ?",
+                (nota_final, tid),
+            )
+
+            return {
+                "ok": True,
+                "transaccion_id": tid,
+                "codigo_orden": tx["codigo_orden"],
+                "unidades_reintegradas": total_unidades_reintegradas,
+                "estado_pedido": "ANULADO",
+            }
+
+    def get_patient_orders(
+        self,
+        farmacia_id: int = 1,
+        telefono: str = "",
+        cliente_nombre: str = "",
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """Retorna el historial de pedidos de un cliente/paciente en la farmacia indicada, con detalle de ítems y estado de delivery."""
+        tel_digits = "".join(ch for ch in str(telefono or "") if ch.isdigit())
+        name_clean = str(cliente_nombre or "").strip().lower()
+        if not tel_digits and not name_clean:
+            return []
+
+        with self._get_connection(farmacia_id=farmacia_id) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM transacciones
+                WHERE farmacia_id = ?
+                ORDER BY id DESC
+                LIMIT 200
+                """,
+                (farmacia_id,),
+            ).fetchall()
+
+            matched = []
+            for r in rows:
+                r_tel_digits = "".join(ch for ch in str(r["cliente_telefono"] or "") if ch.isdigit())
+                r_name = str(r["cliente_nombre"] or "").strip().lower()
+                tel_match = bool(tel_digits and r_tel_digits and (tel_digits in r_tel_digits or r_tel_digits in tel_digits))
+                name_match = bool(not tel_digits and name_clean and name_clean in r_name)
+                if tel_match or name_match:
+                    d = dict(r)
+                    items_rows = conn.execute(
+                        """
+                        SELECT dt.*, p.codigo_barras, p.stock_total_unidades
+                        FROM detalle_transacciones dt
+                        LEFT JOIN productos p ON p.id = dt.producto_id
+                        WHERE dt.transaccion_id = ?
+                        ORDER BY dt.id ASC
+                        """,
+                        (r["id"],),
+                    ).fetchall()
+                    d["items"] = [dict(ir) for ir in items_rows]
+                    try:
+                        trk = conn.execute(
+                            """
+                            SELECT estado_delivery, eta_minutos, repartidor_nombre, progreso_pct
+                            FROM pedidos_delivery_tracking
+                            WHERE codigo_orden = ?
+                            LIMIT 1
+                            """,
+                            (r["codigo_orden"],),
+                        ).fetchone()
+                        if trk:
+                            d["estado_delivery"] = trk["estado_delivery"]
+                            d["eta_minutos"] = trk["eta_minutos"]
+                            d["repartidor_nombre"] = trk["repartidor_nombre"]
+                            d["progreso_pct"] = trk["progreso_pct"]
+                    except Exception:
+                        pass
+                    matched.append(d)
+                    if len(matched) >= int(limit):
+                        break
+            return matched
 
     def list_transactions(
 
@@ -7759,9 +8264,30 @@ class DatabaseManager:
         fondo_usd = 50.00
 
         with self._get_connection(farmacia_id=fid) as conn:
+            try:
+                conn.execute("""
+                CREATE TABLE IF NOT EXISTS caja_config_turno (
+                    farmacia_id INTEGER PRIMARY KEY,
+                    fondo_inicial_dop REAL NOT NULL DEFAULT 3000.0,
+                    fondo_inicial_usd REAL NOT NULL DEFAULT 50.0,
+                    tasa_cambio_usd REAL NOT NULL DEFAULT 60.0,
+                    actualizado_por TEXT DEFAULT '',
+                    fecha_actualizacion TEXT DEFAULT ''
+                )
+                """)
+                cfg_row = conn.execute(
+                    "SELECT fondo_inicial_dop, fondo_inicial_usd, tasa_cambio_usd FROM caja_config_turno WHERE farmacia_id = ?",
+                    (fid,),
+                ).fetchone()
+                if cfg_row:
+                    fondo_dop = float(cfg_row["fondo_inicial_dop"])
+                    fondo_usd = float(cfg_row["fondo_inicial_usd"])
+                    tasa_usd = float(cfg_row["tasa_cambio_usd"])
+            except Exception:
+                pass
             # Ventas de hoy en transacciones
             rows = conn.execute("""
-                SELECT codigo_orden, canal, fecha_hora, metodo_pago, total, subtotal, estado_pedido
+                SELECT codigo_orden, canal, fecha_hora, metodo_pago, total, subtotal, estado_pedido, pago_mixto_json
                 FROM transacciones
                 WHERE farmacia_id = ? AND fecha_dia = ? AND estado_pedido NOT IN ('CANCELADO', 'ANULADO')
                 ORDER BY id ASC
@@ -7777,6 +8303,20 @@ class DatabaseManager:
             for t in txs:
                 mp = (t.get("metodo_pago") or "").upper()
                 tot = float(t.get("total") or 0.0)
+                if mp.startswith("MIXTO") and t.get("pago_mixto_json"):
+                    try:
+                        pm = json.loads(t.get("pago_mixto_json") or "{}")
+                        ef = float(pm.get("efectivo_dop") or 0.0)
+                        sm = float(pm.get("segundo_monto_dop") or 0.0)
+                        sec_type = str(pm.get("segundo_metodo") or "TARJETA").upper()
+                        ventas_efectivo_dop += ef
+                        if "TARJETA" in sec_type:
+                            ventas_tarjeta_dop += sm
+                        else:
+                            ventas_transferencia_dop += sm
+                        continue
+                    except Exception:
+                        pass
                 if "TARJETA" in mp:
                     ventas_tarjeta_dop += tot
                 elif "TRANSFERENCIA" in mp or "DEPOSITO" in mp:
@@ -7789,8 +8329,36 @@ class DatabaseManager:
 
             total_ventas_dop = ventas_efectivo_dop + (ventas_efectivo_usd * tasa_usd) + ventas_tarjeta_dop + ventas_transferencia_dop
 
-            # Total esperado en gaveta física (Fondo inicial + ventas en efectivo)
-            total_esperado_gaveta_dop = fondo_dop + (fondo_usd * tasa_usd) + ventas_efectivo_dop + (ventas_efectivo_usd * tasa_usd)
+            # Salidas / Gastos menores de caja chica en el turno de hoy
+            salidas_caja = []
+            total_salidas_dop = 0.0
+            try:
+                conn.execute("""
+                CREATE TABLE IF NOT EXISTS caja_salidas_gastos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    farmacia_id INTEGER NOT NULL DEFAULT 1,
+                    concepto TEXT NOT NULL,
+                    categoria TEXT NOT NULL DEFAULT 'GASTO_MENOR',
+                    monto_dop REAL NOT NULL DEFAULT 0.0,
+                    autorizado_por TEXT DEFAULT '',
+                    fecha_hora TEXT NOT NULL,
+                    fecha_dia TEXT NOT NULL
+                )
+                """)
+                exp_rows = conn.execute(
+                    "SELECT id, concepto, categoria, monto_dop, autorizado_por, fecha_hora FROM caja_salidas_gastos WHERE farmacia_id = ? AND fecha_dia = ? ORDER BY id DESC",
+                    (fid, hoy_str),
+                ).fetchall()
+                salidas_caja = [dict(er) for er in exp_rows]
+                total_salidas_dop = round(sum(float(er["monto_dop"] or 0.0) for er in salidas_caja), 2)
+            except Exception:
+                pass
+
+            # Total esperado en gaveta física (Fondo inicial + ventas en efectivo - salidas/gastos de caja)
+            total_esperado_gaveta_dop = max(
+                0.0,
+                fondo_dop + (fondo_usd * tasa_usd) + ventas_efectivo_dop + (ventas_efectivo_usd * tasa_usd) - total_salidas_dop
+            )
 
             primer_ticket = txs[0]["codigo_orden"] if txs else "SIN-VENTAS"
             ultimo_ticket = txs[-1]["codigo_orden"] if txs else "SIN-VENTAS"
@@ -7814,11 +8382,119 @@ class DatabaseManager:
                     "transferencia_dop": round(ventas_transferencia_dop, 2),
                     "total_ventas_dop": round(total_ventas_dop, 2)
                 },
+                "total_salidas_dop": round(total_salidas_dop, 2),
+                "salidas_caja": salidas_caja,
                 "total_esperado_gaveta_dop": round(total_esperado_gaveta_dop, 2),
                 "total_transacciones": len(txs),
                 "primer_ticket": primer_ticket,
                 "ultimo_ticket": ultimo_ticket
             }
+
+    def save_caja_opening_config(
+        self,
+        farmacia_id: int,
+        fondo_dop: float,
+        fondo_usd: float,
+        tasa_usd: float,
+        usuario: str = "Cajero",
+    ) -> Dict[str, Any]:
+        """Guarda el fondo inicial real de apertura de caja y la tasa del día para la sucursal."""
+        fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+        if fid <= 0:
+            fid = 1
+        f_dop = max(0.0, round(float(fondo_dop or 0.0), 2))
+        f_usd = max(0.0, round(float(fondo_usd or 0.0), 2))
+        t_usd = max(1.0, round(float(tasa_usd or 60.0), 2))
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        user_clean = str(usuario or "Cajero").strip()
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS caja_config_turno (
+                farmacia_id INTEGER PRIMARY KEY,
+                fondo_inicial_dop REAL NOT NULL DEFAULT 3000.0,
+                fondo_inicial_usd REAL NOT NULL DEFAULT 50.0,
+                tasa_cambio_usd REAL NOT NULL DEFAULT 60.0,
+                actualizado_por TEXT DEFAULT '',
+                fecha_actualizacion TEXT DEFAULT ''
+            )
+            """)
+            conn.execute(
+                """
+                INSERT INTO caja_config_turno (
+                    farmacia_id, fondo_inicial_dop, fondo_inicial_usd, tasa_cambio_usd, actualizado_por, fecha_actualizacion
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(farmacia_id) DO UPDATE SET
+                    fondo_inicial_dop = excluded.fondo_inicial_dop,
+                    fondo_inicial_usd = excluded.fondo_inicial_usd,
+                    tasa_cambio_usd = excluded.tasa_cambio_usd,
+                    actualizado_por = excluded.actualizado_por,
+                    fecha_actualizacion = excluded.fecha_actualizacion
+                """,
+                (fid, f_dop, f_usd, t_usd, user_clean, now_str),
+            )
+
+        return self.get_caja_shift_summary(fid, cajero=user_clean)
+
+    def register_caja_expense(
+        self,
+        farmacia_id: int,
+        concepto: str,
+        monto_dop: float,
+        categoria: str = "GASTO_MENOR",
+        usuario: str = "Cajero",
+    ) -> Dict[str, Any]:
+        """Registra una salida o gasto menor de efectivo de la gaveta del turno."""
+        fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+        if fid <= 0:
+            fid = 1
+        conc = str(concepto or "").strip()
+        if not conc:
+            raise ValueError("Debe indicar el concepto o motivo de la salida de caja.")
+        monto = round(float(monto_dop or 0.0), 2)
+        if monto <= 0:
+            raise ValueError("El monto de la salida de caja debe ser mayor a RD$ 0.00.")
+
+        now = datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        hoy_str = now.strftime("%Y-%m-%d")
+        user_clean = str(usuario or "Cajero").strip()
+        cat_clean = str(categoria or "GASTO_MENOR").strip().upper()
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS caja_salidas_gastos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                concepto TEXT NOT NULL,
+                categoria TEXT NOT NULL DEFAULT 'GASTO_MENOR',
+                monto_dop REAL NOT NULL DEFAULT 0.0,
+                autorizado_por TEXT DEFAULT '',
+                fecha_hora TEXT NOT NULL,
+                fecha_dia TEXT NOT NULL
+            )
+            """)
+            conn.execute(
+                """
+                INSERT INTO caja_salidas_gastos (
+                    farmacia_id, concepto, categoria, monto_dop, autorizado_por, fecha_hora, fecha_dia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (fid, conc, cat_clean, monto, user_clean, now_str, hoy_str),
+            )
+
+        return self.get_caja_shift_summary(fid, cajero=user_clean)
+
+    def delete_caja_expense(self, farmacia_id: int, expense_id: int, usuario: str = "Cajero") -> Dict[str, Any]:
+        fid = int(farmacia_id) if farmacia_id not in (None, "", "null", "undefined") else 1
+        if fid <= 0:
+            fid = 1
+        with self._get_connection(farmacia_id=fid) as conn:
+            conn.execute(
+                "DELETE FROM caja_salidas_gastos WHERE id = ? AND farmacia_id = ?",
+                (int(expense_id), fid),
+            )
+        return self.get_caja_shift_summary(fid, cajero=usuario)
 
     def create_caja_arqueo_corte(self, farmacia_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -8311,38 +8987,23 @@ class DatabaseManager:
                 ).fetchone()
 
             if not row:
-                # Si no hay orden registrada aún, crear una demo activa de Carlos Morales
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                conn.execute("""
-                    INSERT OR IGNORE INTO pedidos_delivery_tracking (
-                        farmacia_id, codigo_orden, cliente_nombre, cliente_telefono, cliente_direccion,
-                        repartidor_nombre, repartidor_telefono, repartidor_vehiculo, estado_delivery,
-                        lat_origen, lng_origen, lat_destino, lng_destino,
-                        lat_repartidor, lng_repartidor, progreso_pct, eta_minutos,
-                        fecha_despacho, fecha_actualizacion
-                    ) VALUES (
-                        ?, 'ORD-DAV-202610-88', 'Carlos Morales Gómez', '809-555-1234', 'Calle Francisco Prats Ramírez #14, Piantini',
-                        'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'EN_CAMINO',
-                        18.4746, -69.9328, 18.4835, -69.9405,
-                        18.4791, -69.9368, 55.0, 8,
-                        ?, ?
-                    )
-                """, (fid, now_str, now_str))
-                row = conn.execute(
-                    "SELECT * FROM pedidos_delivery_tracking WHERE farmacia_id = ? ORDER BY id DESC LIMIT 1",
-                    (fid,)
-                ).fetchone()
+                return {"ok": False, "error": "No hay pedidos de delivery activos en esta farmacia."}
 
             rec = dict(row)
+            farm_row = conn.execute("SELECT nombre FROM farmacias WHERE id = ? LIMIT 1", (fid,)).fetchone()
+            farm_name = farm_row["nombre"] if farm_row else "Farmacia"
 
-        # Ruta simulada de navegación en Santo Domingo (Piantini / Churchill)
+        lat_o = float(rec.get("lat_origen") or 18.4746)
+        lng_o = float(rec.get("lng_origen") or -69.9328)
+        lat_r = float(rec.get("lat_repartidor") or lat_o)
+        lng_r = float(rec.get("lng_repartidor") or lng_o)
+        lat_d = float(rec.get("latitud_entrega") or rec.get("lat_destino") or 18.4835)
+        lng_d = float(rec.get("longitud_entrega") or rec.get("lng_destino") or -69.9405)
+
         ruta_puntos = [
-            {"lat": 18.4746, "lng": -69.9328, "nombre": "Farmacia Davalsi (Origen)"},
-            {"lat": 18.4758, "lng": -69.9339, "nombre": "Av. Winston Churchill esquina Paseo de los Locutores"},
-            {"lat": 18.4772, "lng": -69.9352, "nombre": "Av. Winston Churchill con Roberto Pastoriza"},
-            {"lat": 18.4791, "lng": -69.9368, "nombre": "Calle Federico Geraldino (Posición Actual Motorizado)"},
-            {"lat": 18.4812, "lng": -69.9385, "nombre": "Calle David Ben Gurión"},
-            {"lat": 18.4835, "lng": -69.9405, "nombre": "Destino: Calle Francisco Prats Ramírez #14"}
+            {"lat": lat_o, "lng": lng_o, "nombre": f"{farm_name} (Origen)"},
+            {"lat": lat_r, "lng": lng_r, "nombre": f"Repartidor: {rec.get('repartidor_nombre') or 'En ruta'}"},
+            {"lat": lat_d, "lng": lng_d, "nombre": f"Destino: {rec.get('direccion_texto') or rec.get('cliente_direccion') or 'Cliente'}"},
         ]
 
         estado = rec["estado_delivery"]
@@ -9210,29 +9871,7 @@ class DatabaseManager:
                     ORDER BY id DESC LIMIT 50
                 """, (fid, estado)).fetchall()
 
-            # Si no hay ninguno, crear uno inicial listo para entrega de prueba
-            if not rows:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                conn.execute("""
-                    INSERT INTO pedidos_delivery_tracking (
-                        farmacia_id, codigo_orden, cliente_nombre, cliente_telefono, cliente_direccion,
-                        direccion_texto, latitud_entrega, longitud_entrega, telefono_contacto,
-                        medicamentos_detalle, total_rd,
-                        repartidor_nombre, repartidor_telefono, repartidor_vehiculo, estado_delivery,
-                        lat_origen, lng_origen, lat_destino, lng_destino,
-                        lat_repartidor, lng_repartidor, progreso_pct, eta_minutos,
-                        fecha_despacho, fecha_actualizacion
-                    ) VALUES (
-                        ?, 'PED-DAV-9041', 'Carlos Morales Gómez', '809-555-1234', 'Calle Francisco Prats Ramírez #14, Piantini',
-                        'Calle Francisco Prats Ramírez #14, Piantini, Santo Domingo', 18.4835, -69.9405, '809-555-1234',
-                        '1x Caja Paracetamol 500mg, 1x Frasco Alcohol Isopropílico', 385.0,
-                        'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'LISTO_PARA_ENTREGA',
-                        18.4746, -69.9328, 18.4835, -69.9405,
-                        18.4746, -69.9328, 0.0, 15,
-                        ?, ?
-                    )
-                """, (fid, now_str, now_str))
-                rows = conn.execute("SELECT * FROM pedidos_delivery_tracking WHERE farmacia_id = ? ORDER BY id DESC LIMIT 1", (fid,)).fetchall()
+            # Si no hay pedidos reales de delivery, devolver lista vacía (sin datos demo ficticios)
 
             results = []
             for r in rows:
@@ -9247,7 +9886,72 @@ class DatabaseManager:
                 results.append(d)
             return results
 
-    def update_courier_live_location(self, farmacia_id: int, codigo_orden: str, lat: float, lng: float, estado: str = "EN_CAMINO", eta_minutos: int = None) -> Dict[str, Any]:
+    def assign_courier_to_order(
+        self,
+        farmacia_id: int,
+        codigo_orden: str,
+        repartidor_nombre: str,
+        repartidor_telefono: str = "",
+        repartidor_vehiculo: str = "",
+    ) -> Dict[str, Any]:
+        """Asigna un repartidor registrado en la farmacia a un pedido de delivery."""
+        fid = int(farmacia_id or 1)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rep_nom = str(repartidor_nombre or "").strip() or "Por asignar"
+        with self._get_connection(fid) as conn:
+            row = conn.execute(
+                "SELECT id FROM pedidos_delivery_tracking WHERE codigo_orden = ? AND farmacia_id = ?",
+                (str(codigo_orden).strip(), fid),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": "Pedido de delivery no encontrado."}
+            conn.execute(
+                """
+                UPDATE pedidos_delivery_tracking
+                SET repartidor_nombre = ?,
+                    repartidor_telefono = COALESCE(NULLIF(?, ''), repartidor_telefono),
+                    repartidor_vehiculo = COALESCE(NULLIF(?, ''), repartidor_vehiculo),
+                    fecha_actualizacion = ?
+                WHERE codigo_orden = ? AND farmacia_id = ?
+                """,
+                (rep_nom, str(repartidor_telefono or "").strip(), str(repartidor_vehiculo or "").strip(), now_str, str(codigo_orden).strip(), fid),
+            )
+        return {"ok": True, "codigo_orden": codigo_orden, "repartidor_nombre": rep_nom}
+
+    def authenticate_courier(self, farmacia_id: int, username: str, clave_acceso: str) -> Dict[str, Any]:
+        """Autentica al repartidor registrado en personal_farmacia (o admin) para usar la App de rastreo en vivo."""
+        fid = int(farmacia_id or 1)
+        uname = str(username or "").strip().lower()
+        clave = str(clave_acceso or "").strip()
+        if not uname or not clave:
+            raise ValueError("Ingresa usuario y clave de acceso del repartidor.")
+        hashed = hash_password(clave)
+        with self._get_connection(fid) as conn:
+            staff = conn.execute(
+                "SELECT * FROM personal_farmacia WHERE farmacia_id = ? AND LOWER(username) = ?",
+                (fid, uname),
+            ).fetchone()
+            if staff and staff["clave_hash"] == hashed:
+                return {
+                    "ok": True,
+                    "farmacia_id": fid,
+                    "username": staff["username"],
+                    "nombre_completo": staff["nombre_completo"],
+                    "rol": staff["rol"],
+                }
+            # También permitir al administrador de la farmacia probar/supervisar como repartidor
+            farm = conn.execute("SELECT * FROM farmacias WHERE id = ? LIMIT 1", (fid,)).fetchone()
+            if farm and uname in ("admin", str(farm["usuario_admin"] or "").lower()) and farm["clave_hash"] == hashed:
+                return {
+                    "ok": True,
+                    "farmacia_id": fid,
+                    "username": farm["usuario_admin"],
+                    "nombre_completo": f"{farm['usuario_admin']} (Admin)",
+                    "rol": "ADMINISTRADOR",
+                }
+        raise ValueError("Usuario o clave incorrectos para esta farmacia.")
+
+    def update_courier_live_location(self, farmacia_id: int, codigo_orden: str, lat: float, lng: float, estado: str = "EN_CAMINO", eta_minutos: int = None, repartidor_nombre: str = "") -> Dict[str, Any]:
         """Actualiza la posición GPS en vivo del repartidor y recalcula el progreso."""
         try:
             fid = int(farmacia_id or 1)
@@ -9284,13 +9988,23 @@ class DatabaseManager:
                 # Estimar aprox 1 minuto por cada 0.002 grados (~200m)
                 eta_minutos = max(1, int(curr_dist / 0.002)) if estado != "ENTREGADO" else 0
 
-            conn.execute("""
-                UPDATE pedidos_delivery_tracking
-                SET lat_repartidor = ?, lng_repartidor = ?,
-                    estado_delivery = ?, progreso_pct = ?,
-                    eta_minutos = ?, fecha_actualizacion = ?
-                WHERE codigo_orden = ? AND farmacia_id = ?
-            """, (float(lat), float(lng), estado, round(prog, 1), eta_minutos, now_str, str(codigo_orden).strip(), fid))
+            rep_clean = str(repartidor_nombre or "").strip()
+            if rep_clean:
+                conn.execute("""
+                    UPDATE pedidos_delivery_tracking
+                    SET lat_repartidor = ?, lng_repartidor = ?,
+                        estado_delivery = ?, progreso_pct = ?,
+                        eta_minutos = ?, repartidor_nombre = ?, fecha_actualizacion = ?
+                    WHERE codigo_orden = ? AND farmacia_id = ?
+                """, (float(lat), float(lng), estado, round(prog, 1), eta_minutos, rep_clean, now_str, str(codigo_orden).strip(), fid))
+            else:
+                conn.execute("""
+                    UPDATE pedidos_delivery_tracking
+                    SET lat_repartidor = ?, lng_repartidor = ?,
+                        estado_delivery = ?, progreso_pct = ?,
+                        eta_minutos = ?, fecha_actualizacion = ?
+                    WHERE codigo_orden = ? AND farmacia_id = ?
+                """, (float(lat), float(lng), estado, round(prog, 1), eta_minutos, now_str, str(codigo_orden).strip(), fid))
 
             return {
                 "ok": True,
