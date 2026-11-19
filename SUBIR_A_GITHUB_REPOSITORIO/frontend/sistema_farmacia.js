@@ -43,32 +43,96 @@ function togglePosStatsCollapsible() {
 }
 window.togglePosStatsCollapsible = togglePosStatsCollapsible;
 
+function togglePosKitsCollapsible() {
+  const body = document.getElementById('pos-kits-collapsible-body');
+  const txt = document.getElementById('btn-toggle-pos-kits-text');
+  if (!body) return;
+  const isHidden = body.classList.contains('hidden');
+  if (isHidden) {
+    body.classList.remove('hidden');
+    if (txt) txt.textContent = 'Ocultar Kits';
+    body.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else {
+    body.classList.add('hidden');
+    if (txt) txt.textContent = 'Kits Médicos';
+  }
+}
+window.togglePosKitsCollapsible = togglePosKitsCollapsible;
+
+function togglePosRenovacionesCollapsible() {
+  const body = document.getElementById('pos-renovaciones-collapsible-body');
+  const txt = document.getElementById('btn-toggle-pos-renov-text');
+  if (!body) return;
+  const isHidden = body.classList.contains('hidden');
+  if (isHidden) {
+    body.classList.remove('hidden');
+    if (txt) txt.textContent = 'Ocultar Renovaciones';
+    if (typeof loadPosRenovacionesDelDia === 'function') {
+      loadPosRenovacionesDelDia();
+    }
+    body.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else {
+    body.classList.add('hidden');
+    if (txt) txt.textContent = 'Renovaciones';
+  }
+}
+window.togglePosRenovacionesCollapsible = togglePosRenovacionesCollapsible;
+
 
 function escapeQuote(str) { return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 
 /* =========================================================================
    CONTROLADOR DE PANTALLA DE CARGA FARMASYS (SEGURO Y SIN BLOQUEOS)
    ========================================================================= */
+let farmasysSlowTimer = null;
+let farmasysSlowStageTimer = null;
+
 function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Un momento por favor...") {
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     const tEl = document.getElementById('farmasys-loader-title');
     const sEl = document.getElementById('farmasys-loader-sub');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    const slowMsg = document.getElementById('farmasys-slow-msg');
+
     if (tEl) tEl.textContent = title;
     if (sEl) sEl.textContent = sub;
+    if (slowNotice) slowNotice.classList.add('hidden');
+    el.classList.remove('farmasys-is-slow');
+
     el.style.display = 'flex';
     el.style.pointerEvents = 'auto';
     el.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
     el.classList.add('opacity-100');
+
+    clearTimeout(farmasysSlowTimer);
+    clearTimeout(farmasysSlowStageTimer);
+    farmasysSlowTimer = setTimeout(() => {
+      if (el && !el.classList.contains('hidden') && !el.classList.contains('opacity-0')) {
+        el.classList.add('farmasys-is-slow');
+        if (slowNotice) slowNotice.classList.remove('hidden');
+        if (slowMsg) slowMsg.textContent = "Sincronizando módulos e inventario seguro...";
+        
+        farmasysSlowStageTimer = setTimeout(() => {
+          if (slowMsg && el && !el.classList.contains('hidden')) {
+            slowMsg.textContent = "Optimizando respuestas y bases de datos...";
+          }
+        }, 3000);
+      }
+    }, 2500);
   }
 }
 
 function hideFarmasysLoader() {
+  clearTimeout(farmasysSlowTimer);
+  clearTimeout(farmasysSlowStageTimer);
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     el.style.pointerEvents = 'none';
     el.classList.add('opacity-0', 'pointer-events-none');
-    el.classList.remove('opacity-100');
+    el.classList.remove('opacity-100', 'farmasys-is-slow');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    if (slowNotice) slowNotice.classList.add('hidden');
     setTimeout(() => {
       el.style.display = 'none';
       el.classList.add('hidden');
@@ -336,6 +400,11 @@ async function loadPharmaciesForLogin() {
 
   const sel = document.getElementById('login-pharmacy-select');
   const demoList = document.getElementById('demo-credentials-list');
+
+  const btnNewHdr = document.getElementById('sys-header-btn-new-pharmacy');
+  if (btnNewHdr) {
+    btnNewHdr.classList.remove('hidden');
+  }
 
   if (sysState.pharmacies.length === 0) {
     if (sel) {
@@ -1130,6 +1199,19 @@ function handlePosSearchInput(val) {
     return;
   }
 
+  // Ordenamiento FEFO (First Expired, First Out): disponibles primero y fecha de vencimiento más próxima arriba
+  matches.sort((a, b) => {
+    const aExp = (a.vencimiento && a.vencimiento.vencido) ? 1 : 0;
+    const bExp = (b.vencimiento && b.vencimiento.vencido) ? 1 : 0;
+    if (aExp !== bExp) return aExp - bExp;
+    const aStock = (a.inventario && a.inventario.stock_total_unidades > 0) ? 0 : 1;
+    const bStock = (b.inventario && b.inventario.stock_total_unidades > 0) ? 0 : 1;
+    if (aStock !== bStock) return aStock - bStock;
+    const da = (a.fecha_vencimiento || '9999-12-31');
+    const db = (b.fecha_vencimiento || '9999-12-31');
+    return da.localeCompare(db);
+  });
+
   posCurrentMatches = matches.slice(0, 10);
 
   // Selector externo de presentación activo en la pantalla principal
@@ -1190,18 +1272,34 @@ function handlePosSearchInput(val) {
               </span>
             </div>
 
-            <div class="flex items-center gap-2.5 mt-1 text-xs">
-              <!-- c) Ubicación en Farmacia (Etiqueta clara para el despachador) -->
-              <span class="inline-flex items-center gap-1 font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 shadow-2xs">
+            <div class="flex items-center gap-1.5 mt-1.5 text-[11px] flex-wrap">
+              <!-- c) Ubicación en Anaquel destacada -->
+              <span class="inline-flex items-center gap-1 font-black text-amber-950 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 shadow-2xs">
                 <span>📍</span> <span>${ubicacion}</span>
+              </span>
+
+              <!-- d) Lote y Vencimiento (FEFO: despachar primero lo que vence antes) -->
+              <span class="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 font-mono">
+                <span>🏷️</span> <span>Lote: ${escapeQuote(p.lote || 'S/L')}</span>
               </span>
 
               ${
                 isExpired
-                  ? `<span class="text-[11px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">⛔ Vencido</span>`
-                  : stock <= 0
-                  ? `<span class="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Sin stock</span>`
+                  ? `<span class="inline-flex items-center gap-1 font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-300">⛔ Vencido (${escapeQuote(p.fecha_vencimiento || '')})</span>`
+                  : (p.vencimiento && p.vencimiento.alerta_7_meses)
+                  ? `<span class="inline-flex items-center gap-1 font-black text-orange-800 bg-orange-50 px-2 py-0.5 rounded-md border border-orange-300" title="Despachar primero (FEFO)">⏳ FEFO: ${escapeQuote(p.fecha_vencimiento || '')}</span>`
+                  : p.fecha_vencimiento
+                  ? `<span class="inline-flex items-center gap-1 font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">📅 Vence: ${escapeQuote(p.fecha_vencimiento)}</span>`
                   : ''
+              }
+
+              <!-- e) Stock disponible -->
+              ${
+                stock <= 0
+                  ? `<span class="font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">Sin stock</span>`
+                  : isLowStock
+                  ? `<span class="font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">⚠️ Stock: ${stock}</span>`
+                  : `<span class="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">📦 Stock: ${stock}</span>`
               }
             </div>
           </div>
@@ -1504,7 +1602,7 @@ function changePosItemPresentation(index, newPres) {
     return;
   }
   const others = sysState.posCart
-    .filter((it, idx) => idx !== index && it.product.id === p.id)
+    .filter((it, idx) => idx !== index && it.product && it.product.id === p.id)
     .reduce((acc, it) => acc + calcMinUnits(p, it.presentacion, it.cantidad), 0);
   const needed = calcMinUnits(p, newPres, item.cantidad);
   const available = p.inventario.stock_total_unidades - others;
@@ -1521,6 +1619,10 @@ function changePosItemPresentation(index, newPres) {
   }
   item.presentacion = newPres;
   renderPosCart();
+  if (typeof calculatePosChange === 'function') calculatePosChange();
+  if (document.getElementById('pos-payment-method')?.value === 'MIXTO' && typeof calculateMixedPaymentSplit === 'function') {
+    calculateMixedPaymentSplit('efectivo');
+  }
 }
 
 function evaluatePosCrossSelling() {
@@ -1676,9 +1778,46 @@ function renderPosCart() {
             } • Disp: ${p.inventario.stock_total_unidades}u</p>
           </td>
           <td class="py-2.5 px-2">
-            <select onchange="changePosItemPresentation(${idx}, this.value)" class="px-2 py-1 rounded border border-slate-300 font-bold text-[11px] bg-white">
-              ${presOptions}
-            </select>
+            <div class="inline-flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onclick="changePosItemPresentation(${idx}, 'UNIDAD')"
+                class="px-2 py-1 rounded-lg text-[10px] font-black transition cursor-pointer ${
+                  item.presentacion === 'UNIDAD'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'bg-white text-slate-700 hover:bg-slate-200'
+                }"
+                title="Cambiar a Unidad (1u)"
+              >🔹 1u</button>
+              ${
+                canBlister
+                  ? `<button
+                      type="button"
+                      onclick="changePosItemPresentation(${idx}, 'BLISTER')"
+                      class="px-2 py-1 rounded-lg text-[10px] font-black transition cursor-pointer ${
+                        item.presentacion === 'BLISTER'
+                          ? 'bg-teal-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-200'
+                      }"
+                      title="Cambiar a Blíster (${p.unidades_por_blister}u)"
+                    >💊 ${p.unidades_por_blister}u</button>`
+                  : ''
+              }
+              ${
+                canCaja
+                  ? `<button
+                      type="button"
+                      onclick="changePosItemPresentation(${idx}, 'CAJA')"
+                      class="px-2 py-1 rounded-lg text-[10px] font-black transition cursor-pointer ${
+                        item.presentacion === 'CAJA'
+                          ? 'bg-teal-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-200'
+                      }"
+                      title="Cambiar a Caja (${p.inventario.unidades_por_caja || (p.unidades_por_blister * p.blisters_por_caja)}u)"
+                    >📦 ${p.inventario.unidades_por_caja || (p.unidades_por_blister * p.blisters_por_caja)}u</button>`
+                  : ''
+              }
+            </div>
           </td>
           <td class="py-2.5 px-2 text-center">
             <div class="inline-flex items-center gap-0.5">
@@ -1715,7 +1854,32 @@ function renderPosCart() {
     discountRD = (subtotalRD * pctDiscount) / 100;
   }
 
-  let finalToChargeRD = Math.max(0, subtotalRD - discountRD);
+  // Descuento Manual Rápido en Caja (% o RD$)
+  const manTypeEl = document.getElementById('pos-manual-discount-type');
+  const manValEl = document.getElementById('pos-manual-discount-val');
+  const manBadgeEl = document.getElementById('pos-manual-discount-applied-badge');
+  const manType = manTypeEl ? manTypeEl.value : 'PCT';
+  const manVal = Math.max(0, parseFloat(manValEl ? manValEl.value : '0') || 0);
+  let manualDiscountRD = 0;
+  if (manVal > 0 && subtotalRD > 0) {
+    if (manType === 'PCT') {
+      const pct = Math.min(100, manVal);
+      manualDiscountRD = (subtotalRD * pct) / 100;
+    } else {
+      manualDiscountRD = Math.min(subtotalRD, manVal);
+    }
+  }
+  if (manBadgeEl) {
+    if (manualDiscountRD > 0) {
+      manBadgeEl.textContent = '-' + formatRD(manualDiscountRD);
+      manBadgeEl.classList.remove('hidden');
+    } else {
+      manBadgeEl.classList.add('hidden');
+    }
+  }
+
+  const totalDiscountRD = Math.min(subtotalRD, discountRD + manualDiscountRD);
+  let finalToChargeRD = Math.max(0, subtotalRD - totalDiscountRD);
 
   const elSubtotal = document.getElementById('pos-subtotal-val');
   if (elSubtotal) elSubtotal.textContent = formatRD(subtotalRD);
@@ -1725,10 +1889,14 @@ function renderPosCart() {
   const elBonusPct = document.getElementById('pos-discount-pct-summary');
   const elBonusDirect = document.getElementById('pos-bonus-discount-amount');
 
-  if (discountRD > 0) {
+  if (totalDiscountRD > 0) {
     if (rowBonus) rowBonus.classList.remove('hidden');
-    if (elBonusAmount) elBonusAmount.textContent = '-' + formatRD(discountRD);
-    if (elBonusPct) elBonusPct.textContent = pctDiscount + '%';
+    if (elBonusAmount) elBonusAmount.textContent = '-' + formatRD(totalDiscountRD);
+    if (elBonusPct) {
+      elBonusPct.textContent = manualDiscountRD > 0 && discountRD > 0
+        ? `${pctDiscount}% + Manual`
+        : (manualDiscountRD > 0 ? (manType === 'PCT' ? `${manVal}% Manual` : 'Manual RD$') : `${pctDiscount}%`);
+    }
     if (elBonusDirect) elBonusDirect.textContent = '-' + formatRD(discountRD);
   } else {
     if (rowBonus) rowBonus.classList.add('hidden');
@@ -1769,8 +1937,46 @@ async function submitPosSale() {
     showToast('🔒 El Seguro Médico (ARS) está bloqueado en la configuración superior derecha.', 'error');
     return;
   }
+  const ncfTipo = document.getElementById('pos-ncf-type')?.value || 'B02';
+  const ncfRnc = document.getElementById('pos-ncf-rnc')?.value.trim() || '';
+  const ncfRazon = document.getElementById('pos-ncf-razon')?.value.trim() || '';
+  if (ncfTipo === 'B01') {
+    const cleanRnc = ncfRnc.replace(/[^0-9]/g, '');
+    if (cleanRnc.length < 9) {
+      showToast('Para emitir Comprobante B01 (Crédito Fiscal), ingresa un RNC o Cédula válido (mín. 9 dígitos).', 'error');
+      document.getElementById('pos-ncf-rnc')?.focus();
+      return;
+    }
+  }
+
   const refPago = paymentRefInput ? paymentRefInput.value.trim() : '';
   const cashTendered = cashTenderedInput ? parseFloat(cashTenderedInput.value || 0) : 0;
+
+  let pagoMixtoPayload = null;
+  if (metodoPago === 'MIXTO') {
+    const totalEl = document.getElementById('pos-total-amount');
+    const totalVenta = parseFloat((totalEl ? totalEl.textContent : '0').replace(/[^0-9.]/g, '') || '0');
+    const efMix = parseFloat(document.getElementById('pos-mix-efectivo')?.value || '0') || 0;
+    const secMix = parseFloat(document.getElementById('pos-mix-segundo')?.value || '0') || 0;
+    const secMethod = document.getElementById('pos-mix-second-method')?.value || 'TARJETA';
+    if (secMethod === 'TARJETA' && f.pago_tarjeta_activo === false) {
+      showToast('🔒 El pago con tarjeta está bloqueado en la configuración superior derecha.', 'error');
+      return;
+    }
+    if (efMix <= 0 || secMix <= 0) {
+      showToast('En Pago Mixto, tanto el monto en efectivo como el segundo método deben ser mayores a RD$ 0.00.', 'error');
+      return;
+    }
+    if (Math.abs((efMix + secMix) - totalVenta) > 0.05) {
+      showToast(`La suma del Pago Mixto (${formatRD(efMix + secMix)}) debe coincidir con el total (${formatRD(totalVenta)}).`, 'error');
+      return;
+    }
+    pagoMixtoPayload = {
+      efectivo_dop: Number(efMix.toFixed(2)),
+      segundo_metodo: secMethod,
+      segundo_monto_dop: Number(secMix.toFixed(2))
+    };
+  }
 
   const itemsPayload = sysState.posCart.map((i) => {
     if (i.is_pharma_service) {
@@ -1809,6 +2015,14 @@ async function submitPosSale() {
         cliente_nombre: clienteNombre,
         cliente_telefono: clienteTelefono,
         metodo_pago: metodoPago,
+        pago_mixto: pagoMixtoPayload,
+        descuento_manual: {
+          tipo: document.getElementById('pos-manual-discount-type')?.value || 'PCT',
+          valor: parseFloat(document.getElementById('pos-manual-discount-val')?.value || '0') || 0
+        },
+        ncf_tipo: ncfTipo,
+        ncf_rnc: ncfRnc,
+        ncf_razon_social: ncfRazon,
         seguro_ars: seguroArs,
         referencia_pago: refPago,
         monto_pagado_efectivo: cashTendered,
@@ -1833,6 +2047,9 @@ async function submitPosSale() {
     }
 
     showToast(`✅ Venta #${data.order.codigo_orden} registrada correctamente (RD$ ${Number(data.order.total).toFixed(2)})`);
+    if (typeof showPosPostSaleBanner === 'function') {
+      showPosPostSaleBanner(data.order, metodoPago, cashTendered);
+    }
 
     // Limpiar carrito y campos de cobro
     sysState.posCart = [];
@@ -1842,6 +2059,14 @@ async function submitPosSale() {
     const changeValEl = document.getElementById('pos-cash-change-val');
     if (changeValEl) changeValEl.textContent = 'RD$ 0.00';
     if (paymentRefInput) paymentRefInput.value = '';
+    const manValReset = document.getElementById('pos-manual-discount-val');
+    if (manValReset) manValReset.value = '0';
+    sysState.posManualDiscountAuthorized = false;
+    if (typeof onPosNcfTypeChange === 'function') onPosNcfTypeChange('B02');
+    const rncInp = document.getElementById('pos-ncf-rnc');
+    const razInp = document.getElementById('pos-ncf-razon');
+    if (rncInp) rncInp.value = '';
+    if (razInp) razInp.value = '';
 
     // Refrescar bases de datos, cintillo comparativo y reportes
     await refreshPharmacyWorkspace();
@@ -1883,31 +2108,69 @@ function showInvoiceReceiptModal(order) {
     </div>
   ` : '';
 
+  // Desglose de descuento (manual o bonificación)
+  const descMonto = Number(order.descuento_bonificacion_monto || Math.max(0, Number(order.subtotal || order.total || 0) - Number(order.total || 0)));
+  const discountHtml = descMonto > 0.01 ? `
+    <div class="flex justify-between text-xs text-slate-600 pt-1">
+      <span>Subtotal:</span>
+      <span class="font-mono">${formatRD(order.subtotal || (Number(order.total || 0) + descMonto))}</span>
+    </div>
+    <div class="flex justify-between text-xs text-emerald-700 font-bold">
+      <span>Descuento (${escapeQuote(order.plan_bonificacion_aplicado || 'Aplicado')}):</span>
+      <span class="font-mono">-${formatRD(descMonto)}</span>
+    </div>
+  ` : '';
+
+  // Desglose de Pago Mixto
+  let mixedHtml = '';
+  if (order.pago_mixto_json) {
+    try {
+      const pm = typeof order.pago_mixto_json === 'string' ? JSON.parse(order.pago_mixto_json) : order.pago_mixto_json;
+      if (pm && (pm.efectivo_dop > 0 || pm.segundo_monto_dop > 0)) {
+        const secLabel = (String(pm.segundo_metodo || '').toUpperCase().includes('DEPOSITO')) ? '🏦 Depósito/Transf.' : '💳 Tarjeta';
+        mixedHtml = `
+          <div class="p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-[11px] space-y-0.5 my-1">
+            <div class="font-black text-indigo-900">Desglose Pago Mixto:</div>
+            <div class="flex justify-between"><span>💵 Efectivo:</span><span class="font-mono font-bold">${formatRD(pm.efectivo_dop || 0)}</span></div>
+            <div class="flex justify-between"><span>${secLabel}:</span><span class="font-mono font-bold">${formatRD(pm.segundo_monto_dop || 0)}</span></div>
+          </div>
+        `;
+      }
+    } catch (e) {}
+  }
+
+  const pharmacyTitle = escapeQuote((f.nombre || 'MI FARMACIA').toUpperCase());
+  const pharmacyTel = f.telefono || f.telefono_whatsapp || '';
+
   area.innerHTML = `
     <div class="text-center space-y-1">
       <div class="flex justify-center mb-1"><img src="/icon-192.png" class="w-11 h-11 object-contain mx-auto" /></div>
-      <h3 class="text-lg font-black text-teal-900 tracking-wider">FARMACIA DAVALSI</h3>
-      <p class="text-xs font-semibold text-teal-700">${f.eslogan || 'Salud al Instante'}</p>
-      <p class="text-[11px] font-mono font-bold text-slate-600">RNC: ${f.rnc || '1-31-99887-2'} | Tel: ${f.telefono || f.telefono_whatsapp || '(809) 555-0199'}</p>
-      <p class="text-[11px] text-slate-500">${f.direccion || 'Av. Abraham Lincoln #402, Piantini'}</p>
+      <h3 class="text-lg font-black text-teal-900 tracking-wider">${pharmacyTitle}</h3>
+      ${f.eslogan ? `<p class="text-xs font-semibold text-teal-700">${escapeQuote(f.eslogan)}</p>` : ''}
+      <p class="text-[11px] font-mono font-bold text-slate-600">RNC: ${escapeQuote(f.rnc || 'N/A')}${pharmacyTel ? ` | Tel: ${escapeQuote(pharmacyTel)}` : ''}</p>
+      ${f.direccion ? `<p class="text-[11px] text-slate-500">${escapeQuote(f.direccion)}</p>` : ''}
     </div>
     <div class="border-t-2 border-dashed border-teal-200 my-2"></div>
     <div class="text-[11px] space-y-0.5">
-      <div class="flex justify-between"><span>Factura / Orden:</span><strong class="font-mono text-teal-900">#${order.codigo_orden}</strong></div>
-      <div class="flex justify-between"><span>Fecha:</span><span>${order.fecha_hora}</span></div>
-      <div class="flex justify-between"><span>Cliente:</span><strong>${order.cliente_nombre}</strong></div>
-      <div class="flex justify-between"><span>Pago / Seguro:</span><span>${order.metodo_pago} • ${order.seguro_ars || 'Sin Seguro'}</span></div>
-      <div class="flex justify-between"><span>Atendido por:</span><span>${order.atendido_por || 'Cajero Mostrador'}</span></div>
+      <div class="flex justify-between"><span>Factura / Orden:</span><strong class="font-mono text-teal-900">#${escapeQuote(order.codigo_orden)}</strong></div>
+      ${order.numero_comprobante ? `<div class="flex justify-between"><span>Comprobante (NCF):</span><strong class="font-mono text-indigo-900">${escapeQuote(order.numero_comprobante)}</strong></div>` : ''}
+      <div class="flex justify-between"><span>Fecha:</span><span>${escapeQuote(order.fecha_hora)}</span></div>
+      <div class="flex justify-between"><span>Cliente:</span><strong>${escapeQuote(order.cliente_nombre)}</strong></div>
+      <div class="flex justify-between"><span>Pago / Seguro:</span><span>${escapeQuote(order.metodo_pago)} • ${escapeQuote(order.seguro_ars || 'Sin Seguro')}</span></div>
+      ${order.referencia_pago ? `<div class="flex justify-between"><span>Referencia:</span><span class="font-mono">${escapeQuote(order.referencia_pago)}</span></div>` : ''}
+      <div class="flex justify-between"><span>Atendido por:</span><span>${escapeQuote(order.atendido_por || 'Cajero Mostrador')}</span></div>
     </div>
     <div class="border-t border-slate-200 my-2 pt-1">
       ${itemsHtml}
     </div>
+    ${discountHtml}
     <div class="flex justify-between items-baseline text-sm font-extrabold text-slate-900 pt-1">
       <span>TOTAL FACTURADO:</span>
       <span class="text-base text-teal-700 font-black">${formatRD(order.total)}</span>
     </div>
+    ${mixedHtml}
     ${cashChangeHtml}
-    <div class="pt-2">
+    <div class="pt-2 print:hidden no-print">
       <button type="button" onclick="sendInvoiceToWhatsApp('${order.codigo_orden}')" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow transition">
         <span>💬</span> <span>Enviar Medicamentos y Recibo por WhatsApp</span>
       </button>
@@ -2002,13 +2265,18 @@ function renderPosWebOrdersInbox() {
                   </button>`
                 : `<span class="text-[11px] text-emerald-700 font-semibold">✅ Venta Libre</span>`
             }
-            ${
-              isPending || order.estado_pedido === 'EN_PREPARACION'
-                ? `<button onclick="quickApproveOrder(${order.id})" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-[11px]">
-                    ✓ Aprobar Despacho
-                  </button>`
-                : ''
-            }
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="openPosDeliveryTrackingModal('${order.codigo_orden}')" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] cursor-pointer">
+                🛵 Ver en Mapa
+              </button>
+              ${
+                isPending || order.estado_pedido === 'EN_PREPARACION'
+                  ? `<button onclick="quickApproveOrder(${order.id})" class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-[11px] cursor-pointer">
+                      ✓ Aprobar Despacho
+                    </button>`
+                  : ''
+              }
+            </div>
           </div>
         </div>
       `;
@@ -3375,9 +3643,13 @@ async function submitDebtorPayment(event) {
   });
   const data = await res.json();
   if (data.ok) {
+    const updatedDebtor = data.debtor || (sysState.debtors || []).find((d) => d.id === debtorId) || { id: debtorId, cliente_nombre: 'Cliente', saldo_pendiente_rd: 0 };
     closeDebtorPayModal();
     await refreshPharmacyWorkspace();
     showToast(`Abono de ${formatRD(abono)} registrado exitosamente.`);
+    if (typeof showDebtorPaymentReceiptModal === 'function') {
+      showDebtorPaymentReceiptModal(updatedDebtor, abono);
+    }
   } else {
     showToast(data.error || 'Error registrando abono.', 'error');
   }
@@ -3553,6 +3825,7 @@ async function submitNewSeller(event) {
       farmacia_id: sysState.authenticatedPharmacy.id,
       username: document.getElementById('seller-username').value.trim(),
       nombre_completo: document.getElementById('seller-fullname').value.trim(),
+      rol: document.getElementById('seller-rol') ? document.getElementById('seller-rol').value : 'VENDEDOR',
       clave_acceso: document.getElementById('seller-password').value.trim(),
     }),
   });
@@ -3566,7 +3839,7 @@ async function submitNewSeller(event) {
   document.getElementById('seller-fullname').value = '';
   document.getElementById('seller-password').value = '';
   await loadSysStaff();
-  showToast(`Vendedor '${data.seller.username}' registrado (Rol fijo: Vendedor).`);
+  showToast(`Personal '${data.seller.username}' registrado (${data.seller.rol || 'VENDEDOR'}).`);
 }
 
 async function deleteSeller(staffId) {
@@ -3825,6 +4098,24 @@ function calcReplenishPreview() {
   if (!p || !preview) return;
 
   const currentStock = p.inventario.stock_total_unidades;
+  const lotsBox = document.getElementById('replenish-lots-preview');
+  if (lotsBox) {
+    const lots = Array.isArray(p.lotes_activos) && p.lotes_activos.length
+      ? p.lotes_activos
+      : (currentStock > 0 ? [{ numero_lote: p.lote || 'ACTUAL', fecha_vencimiento: p.fecha_vencimiento || 'N/A', cantidad_disponible: currentStock }] : []);
+    if (lots.length) {
+      lotsBox.classList.remove('hidden');
+      lotsBox.innerHTML = `<p class="font-extrabold text-slate-700 uppercase text-[10px]">📦 Lotes Activos en Almacén (Orden FEFO — Sale primero el #1):</p>` +
+        lots.map((l, idx) => `
+          <div class="flex items-center justify-between px-2 py-1 rounded-lg ${idx === 0 ? 'bg-amber-50 border border-amber-200 text-amber-950 font-bold' : 'bg-white border border-slate-200 text-slate-700'}">
+            <span>${idx === 0 ? '⏳ #1 FEFO • ' : `#${idx + 1} • `}Lote: <span class="font-mono">${escapeQuote(l.numero_lote)}</span></span>
+            <span>Vence: <strong>${escapeQuote(l.fecha_vencimiento)}</strong> • <strong>${l.cantidad_disponible}u</strong></span>
+          </div>
+        `).join('');
+    } else {
+      lotsBox.classList.add('hidden');
+    }
+  }
   const isSumar = document.getElementById('replenish-mode-sumar')?.checked;
 
   if (isSumar) {
@@ -4154,7 +4445,7 @@ function quickCashExact() {
   }
 }
 
-// Atajos de teclado en PC para el Mostrador de Farmacia: F2 Búsqueda, F4 Cobro, ESC Cerrar
+// Atajos de teclado en PC para el Mostrador de Farmacia: F2 Búsqueda, F4 Cobro, F8 En Espera, ESC Limpiar/Cerrar
 window.addEventListener('keydown', (e) => {
   if (sysState.activeTab === 'pos') {
     if (e.key === 'F2') {
@@ -4164,17 +4455,40 @@ window.addEventListener('keydown', (e) => {
     } else if (e.key === 'F4') {
       e.preventDefault();
       submitPosSale();
+    } else if (e.key === 'F8') {
+      e.preventDefault();
+      if (typeof holdCurrentPosSale === 'function') holdCurrentPosSale();
     } else if (e.key === 'Escape') {
+      let closedAnyModal = false;
       const modals = document.querySelectorAll('[id$="-modal"]');
       modals.forEach((m) => {
         if (!m.classList.contains('hidden')) {
           m.classList.add('hidden');
           m.classList.remove('flex');
+          closedAnyModal = true;
         }
       });
+      const dd = document.getElementById('pos-search-dropdown');
+      if (dd && !dd.classList.contains('hidden')) {
+        dd.classList.add('hidden');
+      }
+      if (!closedAnyModal) {
+        clearPosBarcodeSearch();
+      }
     }
   }
 });
+
+function clearPosBarcodeSearch() {
+  const bInp = document.getElementById('pos-barcode-input');
+  const dd = document.getElementById('pos-search-dropdown');
+  if (dd) dd.classList.add('hidden');
+  if (bInp) {
+    bInp.value = '';
+    bInp.focus();
+  }
+}
+window.clearPosBarcodeSearch = clearPosBarcodeSearch;
 
 // ============================================================================
 // BITACORA DE AUDITORIA DE INVENTARIO
@@ -5041,19 +5355,54 @@ function executePrintHtml(htmlContent, pageTitle = 'FarmaSys POS - Documento') {
   }, 250);
 }
 
+function onReceiptPrintFormatChange(fmt) {
+  try { localStorage.setItem('farmasys_receipt_paper_width', fmt); } catch (e) {}
+  const lbl = document.getElementById('btn-print-modal-receipt-label');
+  if (lbl) {
+    lbl.textContent = fmt === '58mm' ? 'Imprimir (58mm)' : (fmt === 'A4' ? 'Imprimir (Hoja)' : 'Imprimir (80mm)');
+  }
+}
+window.onReceiptPrintFormatChange = onReceiptPrintFormatChange;
+
 function printCurrentModalReceipt() {
+  const fmtSel = document.getElementById('receipt-print-format');
+  const fmt = fmtSel ? fmtSel.value : (localStorage.getItem('farmasys_receipt_paper_width') || '80mm');
+  const area = document.getElementById('printable-receipt-area');
+
+  if (area) {
+    // Clonar contenido y eliminar cualquier botón o elemento con .print:hidden / .no-print
+    const clone = area.cloneNode(true);
+    clone.querySelectorAll('.no-print, button, [class*="print:hidden"]').forEach((el) => el.remove());
+
+    let maxW = '302px';
+    let fontSize = '11px';
+    let pageCss = '@page { size: 80mm auto; margin: 2mm; }';
+    if (fmt === '58mm') {
+      maxW = '218px';
+      fontSize = '10px';
+      pageCss = '@page { size: 58mm auto; margin: 1.5mm; }';
+    } else if (fmt === 'A4') {
+      maxW = '680px';
+      fontSize = '13px';
+      pageCss = '@page { margin: 12mm; }';
+    }
+
+    const fontFam = fmt === 'A4' ? "'Segoe UI', Arial, sans-serif" : "'Courier New', monospace";
+    executePrintHtml(`
+      <style>
+        ${pageCss}
+        .no-print, button { display: none !important; }
+      </style>
+      <div style="max-width: ${maxW}; width: 100%; margin: 0 auto; font-family: ${fontFam}; font-size: ${fontSize}; color: #0f172a;">
+        ${clone.innerHTML}
+      </div>
+    `, 'Recibo-Farmacia');
+    return;
+  }
+
   const order = sysState.lastCompletedOrder;
   if (order) {
     printInvoiceReceipt(order);
-    return;
-  }
-  const area = document.getElementById('printable-receipt-area');
-  if (area) {
-    executePrintHtml(`
-      <div style="max-width: 320px; margin: 0 auto; font-family: 'Courier New', monospace; font-size: 11px;">
-        ${area.innerHTML}
-      </div>
-    `, 'Recibo-FarmaSys');
   } else {
     window.print();
   }
@@ -6766,6 +7115,19 @@ function applyOperationalServiceFlags(cfg) {
       : 'px-2 py-0.5 rounded-md font-extrabold bg-rose-100 text-rose-800 border border-rose-300';
   }
 
+  const feeInput = document.getElementById('quick-tarifa-envio-rd');
+  if (feeInput && cfg.tarifa_envio_rd !== undefined) {
+    feeInput.value = Number(cfg.tarifa_envio_rd || 0);
+  }
+  const freeInput = document.getElementById('quick-envio-gratis-desde-rd');
+  if (freeInput && cfg.envio_gratis_desde_rd !== undefined) {
+    freeInput.value = Number(cfg.envio_gratis_desde_rd || 0);
+  }
+  if (sysState.authenticatedPharmacy) {
+    if (cfg.tarifa_envio_rd !== undefined) sysState.authenticatedPharmacy.tarifa_envio_rd = Number(cfg.tarifa_envio_rd || 0);
+    if (cfg.envio_gratis_desde_rd !== undefined) sysState.authenticatedPharmacy.envio_gratis_desde_rd = Number(cfg.envio_gratis_desde_rd || 0);
+  }
+
   // Emitir evento localStorage para sincronizar al instante cualquier pestaña abierta de la App de Pacientes (/app)
   try {
     localStorage.setItem(
@@ -6779,6 +7141,33 @@ function applyOperationalServiceFlags(cfg) {
       })
     );
   } catch (e) {}
+}
+
+async function saveQuickDeliveryFee() {
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  const tarifa = Math.max(0, parseFloat(document.getElementById('quick-tarifa-envio-rd')?.value || '0') || 0);
+  const gratisDesde = Math.max(0, parseFloat(document.getElementById('quick-envio-gratis-desde-rd')?.value || '0') || 0);
+  try {
+    const res = await fetch('/api/pharmacy/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        tarifa_envio_rd: tarifa,
+        envio_gratis_desde_rd: gratisDesde,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok && data.config) {
+      applyOperationalServiceFlags(data.config);
+      showToast(tarifa > 0 ? `🛵 Tarifa de envío guardada: RD$ ${tarifa.toFixed(2)}` : '🛵 Envío configurado como GRATIS.', 'success');
+    } else {
+      showToast(data.error || 'No se pudo guardar la tarifa de envío.', 'error');
+    }
+  } catch (e) {
+    showToast('Error al guardar tarifa de envío.', 'error');
+  }
 }
 
 async function onQuickServiceToggle(field, isChecked) {
@@ -6960,6 +7349,7 @@ async function submitImportWhatsAppOrder() {
    ========================================================================= */
 
 function selectVisualPaymentMethod(method) {
+  if (typeof checkPosClientPendingDebt === 'function') setTimeout(checkPosClientPendingDebt, 40);
   const sel = document.getElementById('pos-payment-method');
   if (sel) {
     sel.value = method;
@@ -6983,14 +7373,24 @@ function selectVisualPaymentMethod(method) {
     if (badge) badge.classList.remove('hidden');
   }
 
-  // Control de calculadora de efectivo
+  // Control de calculadora de efectivo y panel de Pago Mixto
   const cashContainer = document.getElementById('pos-cash-calc-container');
+  const mixedContainer = document.getElementById('pos-mixed-payment-container');
   if (cashContainer) {
     if (method === 'EFECTIVO') {
       cashContainer.classList.remove('hidden');
       setTimeout(() => document.getElementById('pos-cash-tendered')?.focus(), 100);
     } else {
       cashContainer.classList.add('hidden');
+    }
+  }
+  if (mixedContainer) {
+    if (method === 'MIXTO') {
+      mixedContainer.classList.remove('hidden');
+      calculateMixedPaymentSplit('init');
+      setTimeout(() => document.getElementById('pos-mix-efectivo')?.focus(), 100);
+    } else {
+      mixedContainer.classList.add('hidden');
     }
   }
 
@@ -9545,7 +9945,7 @@ function printAiPurchaseOrderReport() {
     <html lang="es">
     <head>
       <meta charset="UTF-8" />
-      <title>Orden de Compra y Reabastecimiento Sugerido por FarmaIA</title>
+      <title>Orden de Compra y Reabastecimiento Sugerido</title>
       <style>
         body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; font-size: 12px; }
         h2 { margin: 0 0 4px 0; }
@@ -9555,7 +9955,7 @@ function printAiPurchaseOrderReport() {
       </style>
     </head>
     <body>
-      <h2>🤖 ${f.nombre} — Orden de Compra Inteligente Sugerida por FarmaIA</h2>
+      <h2>🤖 ${f.nombre} — Orden de Compra Sugerida</h2>
       <p>Fecha de emisión: ${new Date().toLocaleString('es-DO')}</p>
       <h3>1. Medicamentos en Bajo Stock o Comprometidos por Pacientes Crónicos</h3>
       <table>
@@ -10004,6 +10404,7 @@ setTimeout(() => {
    REACCIÓN 3D DE FARMA-IA EN EL POS (COPILOTO FARMACÉUTICO)
    ========================================================================= */
 function triggerPosFarmaIa3dReaction() {
+  return;
   if (window.farmaIaPos3D) {
     window.farmaIaPos3D.triggerSalute();
   } else {
@@ -10021,6 +10422,7 @@ function triggerPosFarmaIa3dReaction() {
    INICIALIZACIÓN DEL MODELO 3D EN EL POS FÍSICO
    ========================================================================= */
 function initPosFarmaIa3d() {
+  return;
   if (typeof FarmaIa3DViewer === 'undefined' || typeof THREE === 'undefined') return;
   if (!window.farmaIaPos3D && document.getElementById('farmaia-pos-3d-canvas')) {
     try {
@@ -10832,7 +11234,7 @@ TOTAL EN PESOS:            RD$  36.00
 TOTAL EN DÓLARES:           $    0.60
 FORMA DE PAGO: EFECTIVO
 ${sep}
-🩺 FarmaIA: Verificación Clínica Activa
+🩺 Verificación Clínica Activa
   [Corte de Papel Automático]
   [Pulso Gaveta RJ11: OK]
 `;
@@ -10873,6 +11275,16 @@ async function loadCajaShiftSummary() {
 
     if (fondoDopEl) fondoDopEl.textContent = `RD$ ${(data.fondo_inicial.dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     if (fondoUsdEl) fondoUsdEl.textContent = `+ $${(data.fondo_inicial.usd).toFixed(2)} USD`;
+    const inDop = document.getElementById('caja-input-fondo-dop');
+    const inUsd = document.getElementById('caja-input-fondo-usd');
+    const inTasa = document.getElementById('caja-input-tasa-usd');
+    const tasaMain = document.getElementById('caja-tasa-usd');
+    if (inDop) inDop.value = Number(data.fondo_inicial?.dop ?? 3000).toFixed(2);
+    if (inUsd) inUsd.value = Number(data.fondo_inicial?.usd ?? 50).toFixed(2);
+    if (inTasa) inTasa.value = Number(data.tasa_cambio_usd ?? 60).toFixed(2);
+    if (tasaMain && data.tasa_cambio_usd) tasaMain.value = Number(data.tasa_cambio_usd).toFixed(2);
+    if (typeof renderPosCajaExpenses === 'function') renderPosCajaExpenses(data);
+    if (typeof checkHeldSalesWarningInCaja === 'function') checkHeldSalesWarningInCaja();
 
     if (ventasEfecEl) ventasEfecEl.textContent = `RD$ ${(data.ventas.efectivo_dop).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     if (ventasUsdEl) ventasUsdEl.textContent = `$${(data.ventas.efectivo_usd).toFixed(2)} USD recibidos`;
@@ -11010,6 +11422,10 @@ async function executeCajaCorte(tipoCorte) {
 
   try {
     const f = sysState.authenticatedPharmacy || { id: 1 };
+    if (String(tipoCorte || '').toUpperCase().includes('Z') && Array.isArray(sysState.heldSales) && sysState.heldSales.length > 0) {
+      const okClose = confirm(`⚠️ Tienes ${sysState.heldSales.length} venta(s) en espera (F8) sin cobrar en el mostrador.\n\n¿Deseas continuar de todos modos con el Corte Z de cierre de turno?`);
+      if (!okClose) return;
+    }
     const res = await fetch('/api/pos/caja/corte', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -11168,18 +11584,22 @@ async function refreshPosDeliveryTrackingData(codigoOrden) {
     renderPosDeliveryTrackingUI(data);
     initPosDeliveryLeafletMap(data);
 
-    // Iniciar simulación de movimiento cada 3s si no está activo
-    if (!posDeliveryInterval && data.estado_delivery === 'EN_CAMINO') {
-      let stepIdx = 0;
-      posDeliveryInterval = setInterval(() => {
-        if (!posDeliveryLeafletMap || !data.ruta_coordenadas || !data.ruta_coordenadas.length) return;
-        stepIdx = (stepIdx + 1) % data.ruta_coordenadas.length;
-        const pt = data.ruta_coordenadas[stepIdx];
-        if (posDeliveryCourierMarker) {
-          posDeliveryCourierMarker.setLatLng([pt.lat, pt.lng]);
+    populatePosCourierAssignSelect(data);
+    if (posDeliveryInterval) clearInterval(posDeliveryInterval);
+    const fidLive = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+    posDeliveryInterval = setInterval(async () => {
+      try {
+        const liveRes = await fetch(`/api/delivery/tracking?farmacia_id=${fidLive}&codigo_orden=${encodeURIComponent(data.codigo_orden)}`);
+        const liveData = await liveRes.json();
+        if (liveData && liveData.ok) {
+          renderPosDeliveryTrackingUI(liveData);
+          const repPt = liveData.puntos && liveData.puntos.repartidor_actual;
+          if (posDeliveryCourierMarker && repPt && repPt.lat && repPt.lng) {
+            posDeliveryCourierMarker.setLatLng([repPt.lat, repPt.lng]);
+          }
         }
-      }, 3000);
-    }
+      } catch (e) {}
+    }, 3500);
   } catch (err) {
     showToast('Error al consultar delivery: ' + err.message, 'error');
   }
@@ -12146,3 +12566,1402 @@ window.descargarPdfBajoStock = descargarPdfBajoStock;
 window.loadDashboardFinanzas = loadDashboardFinanzas;
 window.ejecutarConciliacionIa = ejecutarConciliacionIa;
 window.ejecutarCierreCajaAsistido = ejecutarCierreCajaAsistido;
+
+
+// =============================================================================
+// AUDITORÍA DE CUENTAS, REGISTRO DE USO E INACTIVIDAD CON PODER DE BORRADO
+// =============================================================================
+let accountsAuditState = {
+  currentTab: 'staff', // 'staff' | 'pacientes' | 'farmacias'
+  data: { staff: [], pacientes: [], farmacias: [], resumen: {} },
+  searchQuery: ''
+};
+
+function openAccountsAuditModal() {
+  const modal = document.getElementById('accounts-usage-audit-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadAccountsUsageData();
+}
+
+function closeAccountsAuditModal() {
+  const modal = document.getElementById('accounts-usage-audit-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function switchAccountsAuditTab(tab) {
+  accountsAuditState.currentTab = tab;
+  ['staff', 'pacientes', 'farmacias'].forEach((t) => {
+    const btn = document.getElementById(`audit-tab-btn-${t}`);
+    if (btn) {
+      if (t === tab) {
+        btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer bg-white text-slate-900 shadow-xs';
+      } else {
+        btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer text-slate-600 hover:text-slate-900';
+      }
+    }
+  });
+  renderAccountsAuditList();
+}
+
+async function loadAccountsUsageData() {
+  const container = document.getElementById('accounts-audit-list-container');
+  if (container) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-slate-400 space-y-2">
+        <div class="inline-block animate-spin text-2xl">⏳</div>
+        <p class="text-xs font-bold">Calculando tiempos de inactividad de cuentas...</p>
+      </div>
+    `;
+  }
+
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch(`/api/accounts/usage?farmacia_id=${fid}`);
+    const json = await res.json();
+    if (!json.ok) {
+      if (container) container.innerHTML = `<div class="p-6 text-center text-rose-600 font-bold text-xs">${json.error || 'Error al cargar auditoría'}</div>`;
+      return;
+    }
+
+    accountsAuditState.data = json.report || { staff: [], pacientes: [], farmacias: [], resumen: {} };
+    const r = accountsAuditState.data.resumen || {};
+
+    // Actualizar contadores de resumen
+    const elTot = document.getElementById('audit-stat-total');
+    const elAct = document.getElementById('audit-stat-activas');
+    const elMod = document.getElementById('audit-stat-moderadas');
+    const elInact = document.getElementById('audit-stat-inactivas');
+
+    if (elTot) elTot.textContent = r.total_cuentas || 0;
+    if (elAct) elAct.textContent = r.activas || 0;
+    if (elMod) elMod.textContent = r.moderadas || 0;
+    if (elInact) elInact.textContent = r.inactivas || 0;
+
+    const bStaff = document.getElementById('audit-badge-cnt-staff');
+    const bPac = document.getElementById('audit-badge-cnt-pacientes');
+    const bFar = document.getElementById('audit-badge-cnt-farmacias');
+
+    if (bStaff) bStaff.textContent = (accountsAuditState.data.staff || []).length;
+    if (bPac) bPac.textContent = (accountsAuditState.data.pacientes || []).length;
+    if (bFar) bFar.textContent = (accountsAuditState.data.farmacias || []).length;
+
+    renderAccountsAuditList();
+  } catch (err) {
+    console.error('Error en loadAccountsUsageData:', err);
+    if (container) {
+      container.innerHTML = `<div class="p-6 text-center text-rose-600 font-bold text-xs">Error de conexión al cargar el registro de cuentas.</div>`;
+    }
+  }
+}
+
+function filterAccountsAuditList() {
+  const inp = document.getElementById('audit-accounts-search');
+  accountsAuditState.searchQuery = inp ? inp.value.trim().toLowerCase() : '';
+  renderAccountsAuditList();
+}
+
+function renderAccountsAuditList() {
+  const container = document.getElementById('accounts-audit-list-container');
+  if (!container) return;
+
+  const currentTab = accountsAuditState.currentTab || 'staff';
+  const list = accountsAuditState.data[currentTab] || [];
+  const q = accountsAuditState.searchQuery;
+
+  const filtered = list.filter((a) => {
+    if (!q) return true;
+    const txt = `${a.username || ''} ${a.nombre_completo || ''} ${a.rol || ''} ${a.telefono || ''} ${a.cedula || ''} ${a.email || ''}`.toLowerCase();
+    return txt.includes(q);
+  });
+
+  if (filtered.length === 0) {
+    const labels = {
+      staff: 'personal registrado en el POS',
+      pacientes: 'cuentas de pacientes en la App',
+      farmacias: 'sucursales de farmacias en el directorio'
+    };
+    container.innerHTML = `
+      <div class="p-10 text-center bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+        <div class="text-3xl">📭</div>
+        <p class="text-sm font-extrabold text-slate-800">No se encontraron cuentas de ${labels[currentTab] || 'este tipo'}</p>
+        <p class="text-xs text-slate-400">
+          ${q ? `Ningún registro coincide con la búsqueda "${q}".` : 'No hay cuentas registradas en esta categoría actualmente.'}
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((a) => {
+    // Badges visuales de inactividad
+    let badgeClass = 'bg-slate-100 text-slate-600 border-slate-200';
+    let dotClass = 'bg-slate-400';
+    if (a.estado_inactividad === 'ACTIVO') {
+      badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      dotClass = 'bg-emerald-500 animate-pulse';
+    } else if (a.estado_inactividad === 'MODERADO') {
+      badgeClass = 'bg-amber-50 text-amber-800 border-amber-200';
+      dotClass = 'bg-amber-500';
+    } else if (a.estado_inactividad === 'INACTIVO') {
+      badgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+      dotClass = 'bg-rose-500';
+    }
+
+    let roleIcon = '👤';
+    let roleName = a.rol || 'USUARIO';
+    if (a.rol === 'ADMINISTRADOR') { roleIcon = '🛡️'; roleName = 'Administrador Principal'; }
+    else if (a.rol === 'REGENTE') { roleIcon = '🩺'; roleName = 'Regente Farmacéutico'; }
+    else if (a.rol === 'CAJERO') { roleIcon = '💼'; roleName = 'Cajero Mostrador'; }
+    else if (a.rol === 'PACIENTE_APP') { roleIcon = '📱'; roleName = 'Paciente App Móvil'; }
+    else if (a.rol === 'SUCURSAL_FARMACIA') { roleIcon = '🏢'; roleName = 'Sucursal Farmacia'; }
+
+    const regDateStr = a.fecha_registro ? a.fecha_registro.replace('T', ' ').slice(0, 16) : 'No registrada';
+    const lastUsageStr = a.ultimo_acceso_fmt || 'Sin actividad tras registro';
+
+    const extraDetail = a.telefono ? `Tel: ${a.telefono}` : (a.cedula ? `Céd: ${a.cedula}` : (a.email ? `Email: ${a.email}` : ''));
+
+    return `
+      <div class="p-4 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 transition">
+        <div class="flex items-start gap-3.5">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-xl shrink-0">
+            ${roleIcon}
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-extrabold text-slate-900">${escapeQuote(a.nombre_completo || a.username)}</span>
+              <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[10px] font-bold">@${escapeQuote(a.username)}</span>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">• ${roleName}</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+              ${extraDetail ? `<span>${extraDetail}</span> <span>•</span>` : ''}
+              <span>Registrada: <span class="font-medium text-slate-700">${regDateStr}</span></span>
+              <span>•</span>
+              <span>Último uso: <span class="font-bold text-slate-800">${lastUsageStr}</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0">
+          <!-- Badge de Tiempo Sin Usar -->
+          <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${badgeClass}">
+            <span class="w-2 h-2 rounded-full ${dotClass}"></span>
+            <span>${a.tiempo_inactivo || 'Sin datos'}</span>
+          </div>
+
+          <!-- Acción con Poder de Borrado -->
+          <div>
+            ${
+              !a.can_delete
+                ? `<span class="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-500 font-bold text-xs border border-slate-200 flex items-center gap-1" title="La cuenta de Administrador principal de la farmacia está protegida">
+                    🔒 Admin Protegido
+                   </span>`
+                : `<button
+                    type="button"
+                    onclick="confirmDeleteAccount('${a.tipo}', '${a.raw_id}', '${escapeQuote(a.nombre_completo || a.username)}')"
+                    class="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 font-extrabold text-xs shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Eliminar permanentemente esta cuenta inactiva del sistema"
+                  >
+                    <span>🗑️</span> <span>Borrar Cuenta</span>
+                  </button>`
+            }
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function confirmDeleteAccount(tipo, accountId, nombre) {
+  const tipoLabel = tipo === 'staff' ? 'personal del sistema' : (tipo === 'paciente' ? 'paciente de la app' : 'sucursal');
+  const msg = `¿Estás seguro de ELIMINAR PERMANENTEMENTE la cuenta de ${nombre} (${tipoLabel})?\n\nEsta acción borrará de forma definitiva sus credenciales y accesos.`;
+  
+  if (!confirm(msg)) {
+    return;
+  }
+
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch('/api/accounts/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo: tipo,
+        account_id: accountId,
+        farmacia_id: fid
+      })
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      if (typeof showToast === 'function') {
+        showToast(data.error || 'No se pudo eliminar la cuenta.', 'error');
+      } else {
+        alert(data.error || 'No se pudo eliminar la cuenta.');
+      }
+      return;
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`Cuenta de ${nombre} eliminada correctamente.`, 'success');
+    }
+
+    // Refrescar lista de auditoría
+    await loadAccountsUsageData();
+
+    // Si era personal, refrescar lista de staff en pestaña configuración
+    if (tipo === 'staff' && typeof loadSysStaff === 'function') {
+      loadSysStaff(fid);
+    }
+    // Si era farmacia, refrescar directorio
+    if (tipo === 'farmacia' && typeof loadPharmaciesForLogin === 'function') {
+      loadPharmaciesForLogin();
+    }
+  } catch (err) {
+    console.error('Error al eliminar cuenta:', err);
+    if (typeof showToast === 'function') {
+      showToast('Error de conexión al eliminar la cuenta.', 'error');
+    }
+  }
+}
+
+window.openAccountsAuditModal = openAccountsAuditModal;
+window.closeAccountsAuditModal = closeAccountsAuditModal;
+window.switchAccountsAuditTab = switchAccountsAuditTab;
+window.loadAccountsUsageData = loadAccountsUsageData;
+window.filterAccountsAuditList = filterAccountsAuditList;
+window.renderAccountsAuditList = renderAccountsAuditList;
+window.confirmDeleteAccount = confirmDeleteAccount;
+
+async function loadPosRenovacionesDelDia() {
+  const container = document.getElementById('pos-renovaciones-cards-list');
+  if (!container) return;
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch(`/api/cronicos?farmacia_id=${fid}`);
+    const data = await res.json();
+    const list = (data && data.cronicos) ? data.cronicos : [];
+    if (!list.length) {
+      container.innerHTML = '<p class="text-xs text-slate-500 col-span-full py-2">No hay renovaciones crónicas pendientes para hoy.</p>';
+      return;
+    }
+    container.innerHTML = list.slice(0, 6).map(p => `
+      <div class="p-2.5 rounded-xl bg-white border border-teal-200 flex items-center justify-between gap-2 text-xs">
+        <div>
+          <p class="font-extrabold text-slate-900">${escapeQuote(p.paciente_nombre || 'Paciente')}</p>
+          <p class="text-[11px] text-slate-500">${escapeQuote(p.medicamento_nombre || '')} • Próx: ${p.fecha_proximo_vencimiento_tratamiento || 'N/A'}</p>
+        </div>
+        <span class="px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 font-bold text-[10px]">Crónico</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.warn('Error cargando renovaciones del día:', err);
+  }
+}
+window.loadPosRenovacionesDelDia = loadPosRenovacionesDelDia;
+
+
+// =============================================================================
+// MÚLTIPLES VENTAS EN ESPERA ("PONER EN PAUSA" EN MOSTRADOR POS)
+// =============================================================================
+function _getHeldSalesStorageKey() {
+  const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+  return `farmasys_held_sales_${fid}`;
+}
+
+function loadHeldPosSales() {
+  try {
+    const raw = localStorage.getItem(_getHeldSalesStorageKey());
+    sysState.heldSales = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(sysState.heldSales)) sysState.heldSales = [];
+  } catch (e) {
+    sysState.heldSales = [];
+  }
+  renderHeldPosSalesPills();
+}
+
+function saveHeldPosSales() {
+  try {
+    localStorage.setItem(_getHeldSalesStorageKey(), JSON.stringify(sysState.heldSales || []));
+  } catch (e) {}
+}
+
+function _resetCurrentPosCartUI() {
+  sysState.posCart = [];
+  if (typeof clearSelectedPosPatient === 'function') {
+    clearSelectedPosPatient();
+  }
+  const cName = document.getElementById('pos-client-name');
+  const cCed = document.getElementById('pos-client-cedula');
+  const cPhone = document.getElementById('pos-client-phone');
+  const pRef = document.getElementById('pos-payment-ref');
+  const cashInp = document.getElementById('pos-cash-tendered');
+  const allergyBanner = document.getElementById('pos-patient-allergy-alert');
+
+  if (cName) cName.value = 'Cliente de Mostrador';
+  if (cCed) cCed.value = '';
+  if (cPhone) cPhone.value = '';
+  if (pRef) pRef.value = '';
+  if (cashInp) cashInp.value = '';
+  if (allergyBanner) allergyBanner.classList.add('hidden');
+  if (typeof selectVisualPaymentMethod === 'function') selectVisualPaymentMethod('EFECTIVO');
+
+  const arsSel = document.getElementById('pos-insurance-ars');
+  if (arsSel) arsSel.value = 'Sin Seguro';
+
+  if (typeof renderPosCart === 'function') renderPosCart();
+  if (typeof calculatePosChange === 'function') calculatePosChange();
+
+  const barcodeInp = document.getElementById('pos-barcode-input');
+  if (barcodeInp) barcodeInp.focus();
+}
+
+function holdCurrentPosSale(silent = false) {
+  if (!sysState.posCart || sysState.posCart.length === 0) {
+    if (!silent && typeof showToast === 'function') {
+      showToast('El carrito actual está vacío. Escanea al menos un producto para ponerlo en espera.', 'info');
+    }
+    return false;
+  }
+
+  if (!Array.isArray(sysState.heldSales)) sysState.heldSales = [];
+
+  const cNameEl = document.getElementById('pos-client-name');
+  const cCedEl = document.getElementById('pos-client-cedula');
+  const cPhoneEl = document.getElementById('pos-client-phone');
+  const pMethodEl = document.getElementById('pos-payment-method');
+  const arsEl = document.getElementById('pos-insurance-ars');
+  const totalEl = document.getElementById('pos-total-amount');
+
+  const rawName = cNameEl ? cNameEl.value.trim() : '';
+  const nextIndex = sysState.heldSales.length + 1;
+  const label = (rawName && rawName !== 'Cliente de Mostrador') ? rawName : `Cliente #${nextIndex}`;
+  const now = new Date();
+  const savedAt = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const snapshot = {
+    id: `held_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    label: label,
+    savedAt: savedAt,
+    itemsCount: sysState.posCart.length,
+    totalText: totalEl ? totalEl.textContent : 'RD$ 0.00',
+    cart: JSON.parse(JSON.stringify(sysState.posCart)),
+    clientName: rawName || 'Cliente de Mostrador',
+    clientCedula: cCedEl ? cCedEl.value.trim() : '',
+    clientPhone: cPhoneEl ? cPhoneEl.value.trim() : '',
+    posSelectedPatient: sysState.posSelectedPatient ? JSON.parse(JSON.stringify(sysState.posSelectedPatient)) : null,
+    posApplyBonus: sysState.posApplyBonus !== false,
+    paymentMethod: pMethodEl ? pMethodEl.value : 'EFECTIVO',
+    insuranceArs: arsEl ? arsEl.value : 'Sin Seguro',
+  };
+
+  sysState.heldSales.push(snapshot);
+  saveHeldPosSales();
+  _resetCurrentPosCartUI();
+  renderHeldPosSalesPills();
+
+  if (!silent && typeof showToast === 'function') {
+    showToast(`⏸️ Venta "${label}" puesta en espera. Mostrador listo para el siguiente cliente.`, 'success');
+  }
+  return true;
+}
+
+function resumeHeldPosSale(heldId) {
+  if (!Array.isArray(sysState.heldSales)) return;
+  const idx = sysState.heldSales.findIndex((s) => s.id === heldId);
+  if (idx === -1) return;
+
+  const targetSale = sysState.heldSales[idx];
+  // Quitar primero de la lista de espera
+  sysState.heldSales.splice(idx, 1);
+
+  // Si el carrito actual tiene productos sin guardar, ponerlo en espera automáticamente para no perder nada
+  if (sysState.posCart && sysState.posCart.length > 0) {
+    holdCurrentPosSale(true);
+  }
+
+  // Restaurar la venta seleccionada
+  sysState.posCart = JSON.parse(JSON.stringify(targetSale.cart || []));
+  sysState.posSelectedPatient = targetSale.posSelectedPatient || null;
+  sysState.posApplyBonus = targetSale.posApplyBonus !== false;
+
+  const cNameEl = document.getElementById('pos-client-name');
+  const cCedEl = document.getElementById('pos-client-cedula');
+  const cPhoneEl = document.getElementById('pos-client-phone');
+  const arsEl = document.getElementById('pos-insurance-ars');
+
+  if (cNameEl) cNameEl.value = targetSale.clientName || 'Cliente de Mostrador';
+  if (cCedEl) cCedEl.value = targetSale.clientCedula || '';
+  if (cPhoneEl) cPhoneEl.value = targetSale.clientPhone || '';
+  if (arsEl && targetSale.insuranceArs) arsEl.value = targetSale.insuranceArs;
+  if (targetSale.paymentMethod && typeof selectVisualPaymentMethod === 'function') {
+    selectVisualPaymentMethod(targetSale.paymentMethod);
+  }
+
+  saveHeldPosSales();
+  if (typeof renderPosCart === 'function') renderPosCart();
+  if (typeof calculatePosChange === 'function') calculatePosChange();
+  renderHeldPosSalesPills();
+
+  if (typeof showToast === 'function') {
+    showToast(`▶️ Retomada la venta de "${targetSale.label}" (${targetSale.itemsCount} ítems).`, 'success');
+  }
+  const barcodeInp = document.getElementById('pos-barcode-input');
+  if (barcodeInp) barcodeInp.focus();
+}
+
+function discardHeldPosSale(heldId, evt) {
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+  if (!Array.isArray(sysState.heldSales)) return;
+  const idx = sysState.heldSales.findIndex((s) => s.id === heldId);
+  if (idx === -1) return;
+  const target = sysState.heldSales[idx];
+  if (!confirm(`¿Descartar la venta en espera de "${target.label}" (${target.totalText})?`)) return;
+  sysState.heldSales.splice(idx, 1);
+  saveHeldPosSales();
+  renderHeldPosSalesPills();
+  if (typeof showToast === 'function') {
+    showToast(`Venta en espera de "${target.label}" descartada.`, 'info');
+  }
+}
+
+function renderHeldPosSalesPills() {
+  const container = document.getElementById('pos-held-sales-pills');
+  if (!container) return;
+  const list = Array.isArray(sysState.heldSales) ? sysState.heldSales : [];
+  if (list.length === 0) {
+    container.innerHTML = '<span class="text-[11px] font-bold text-slate-400">Sin clientes en espera • Escanea y pon en pausa si alguien va a buscar receta</span>';
+    return;
+  }
+
+  container.innerHTML = list.map((s) => `
+    <div onclick="resumeHeldPosSale('${s.id}')" class="inline-flex items-center gap-2 pl-2.5 pr-1.5 py-1 rounded-xl bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-950 text-xs font-extrabold cursor-pointer transition shadow-2xs" title="Clic para retomar esta venta (${s.savedAt})">
+      <span>⏸️ ${escapeQuote(s.label)}</span>
+      <span class="px-1.5 py-0.2 rounded-md bg-white/80 text-[10px] font-mono font-black text-amber-900">${s.itemsCount} ítems • ${escapeQuote(s.totalText)}</span>
+      <button type="button" onclick="discardHeldPosSale('${s.id}', event)" class="w-5 h-5 rounded-lg hover:bg-rose-500 hover:text-white text-amber-800 font-black text-[10px] flex items-center justify-center transition cursor-pointer" title="Descartar venta en espera">✕</button>
+    </div>
+  `).join('');
+}
+
+window.loadHeldPosSales = loadHeldPosSales;
+window.holdCurrentPosSale = holdCurrentPosSale;
+window.resumeHeldPosSale = resumeHeldPosSale;
+window.discardHeldPosSale = discardHeldPosSale;
+window.renderHeldPosSalesPills = renderHeldPosSalesPills;
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => setTimeout(loadHeldPosSales, 250));
+} else {
+  setTimeout(loadHeldPosSales, 250);
+}
+
+
+// =============================================================================
+// CÁLCULO EN VIVO DE PAGO MIXTO (EFECTIVO + TARJETA / DEPÓSITO)
+// =============================================================================
+function calculateMixedPaymentSplit(source = 'efectivo') {
+  const totalEl = document.getElementById('pos-total-amount');
+  const efInp = document.getElementById('pos-mix-efectivo');
+  const secInp = document.getElementById('pos-mix-segundo');
+  const secSel = document.getElementById('pos-mix-second-method');
+  const statusEl = document.getElementById('pos-mix-balance-status');
+  if (!totalEl || !efInp || !secInp || !statusEl) return;
+
+  const total = parseFloat((totalEl.textContent || '0').replace(/[^0-9.]/g, '') || '0');
+  const secLabel = (secSel && secSel.value === 'DEPOSITO_CUENTA') ? 'Depósito/Transf.' : 'Tarjeta';
+
+  if (source === 'init') {
+    const half = total > 0 ? Math.floor((total / 2) * 100) / 100 : 0;
+    const rem = total > 0 ? Number((total - half).toFixed(2)) : 0;
+    efInp.value = half > 0 ? half.toFixed(2) : '';
+    secInp.value = rem > 0 ? rem.toFixed(2) : '';
+  } else if (source === 'efectivo') {
+    const efVal = Math.max(0, parseFloat(efInp.value || '0') || 0);
+    const rem = Math.max(0, Number((total - efVal).toFixed(2)));
+    secInp.value = rem.toFixed(2);
+  } else if (source === 'segundo') {
+    const secVal = Math.max(0, parseFloat(secInp.value || '0') || 0);
+    const rem = Math.max(0, Number((total - secVal).toFixed(2)));
+    efInp.value = rem.toFixed(2);
+  }
+
+  const efFinal = parseFloat(efInp.value || '0') || 0;
+  const secFinal = parseFloat(secInp.value || '0') || 0;
+  const sum = Number((efFinal + secFinal).toFixed(2));
+  const diff = Number((total - sum).toFixed(2));
+
+  if (total <= 0) {
+    statusEl.className = 'p-2 rounded-xl bg-white border border-indigo-200 text-[11px] font-extrabold text-slate-500 text-center';
+    statusEl.textContent = 'Agrega productos al carrito para dividir el pago.';
+  } else if (Math.abs(diff) < 0.05 && efFinal > 0 && secFinal > 0) {
+    statusEl.className = 'p-2 rounded-xl bg-emerald-100 border border-emerald-300 text-[11px] font-extrabold text-emerald-900 text-center';
+    statusEl.textContent = `✅ Cuadrado: Efectivo ${formatRD(efFinal)} + ${secLabel} ${formatRD(secFinal)}`;
+  } else if (diff > 0) {
+    statusEl.className = 'p-2 rounded-xl bg-rose-50 border border-rose-200 text-[11px] font-extrabold text-rose-800 text-center';
+    statusEl.textContent = `⚠️ Faltan ${formatRD(diff)} para completar el total (${formatRD(total)})`;
+  } else if (diff < 0) {
+    statusEl.className = 'p-2 rounded-xl bg-amber-50 border border-amber-300 text-[11px] font-extrabold text-amber-900 text-center';
+    statusEl.textContent = `⚠️ Excede por ${formatRD(Math.abs(diff))} el total (${formatRD(total)})`;
+  } else {
+    statusEl.className = 'p-2 rounded-xl bg-amber-50 border border-amber-300 text-[11px] font-extrabold text-amber-900 text-center';
+    statusEl.textContent = 'Ambos métodos deben ser mayores a RD$ 0.00 en Pago Mixto.';
+  }
+}
+window.calculateMixedPaymentSplit = calculateMixedPaymentSplit;
+
+
+// =============================================================================
+// DESCUENTO MANUAL RÁPIDO EN CAJA (POR % O RD$)
+// =============================================================================
+function _authorizeManualDiscountIfNeeded(val) {
+  if (val <= 0) return true;
+  const auth = sysState.authenticatedPharmacy || {};
+  const role = String(auth.rol_actual || auth.role || 'ADMINISTRADOR').toUpperCase();
+  const isAdmin = (role === 'ADMINISTRADOR' || role === 'ROL_ADMIN_CAJA' || role === 'ADMIN');
+  if (isAdmin || sysState.posManualDiscountAuthorized) return true;
+
+  const pin = prompt('Este descuento manual requiere autorización de Administrador. Ingresa la clave de Administrador:');
+  if (!pin || !pin.trim()) {
+    return false;
+  }
+  const expectedHint = String(auth.pista_clave_demo || '').trim();
+  if ((expectedHint && pin.trim() === expectedHint) || pin.trim() === '123456') {
+    sysState.posManualDiscountAuthorized = true;
+    return true;
+  }
+  if (typeof showToast === 'function') {
+    showToast('Clave de Administrador incorrecta. Descuento manual cancelado.', 'error');
+  }
+  return false;
+}
+
+function setQuickManualDiscount(tipo, valor) {
+  const typeEl = document.getElementById('pos-manual-discount-type');
+  const valEl = document.getElementById('pos-manual-discount-val');
+  if (valor > 0 && !_authorizeManualDiscountIfNeeded(valor)) {
+    if (valEl) valEl.value = '0';
+    renderPosCart();
+    return;
+  }
+  if (typeEl) typeEl.value = tipo;
+  if (valEl) valEl.value = String(valor);
+  renderPosCart();
+  if (typeof calculatePosChange === 'function') calculatePosChange();
+  if (document.getElementById('pos-payment-method')?.value === 'MIXTO' && typeof calculateMixedPaymentSplit === 'function') {
+    calculateMixedPaymentSplit('efectivo');
+  }
+}
+
+function onManualDiscountChange() {
+  const valEl = document.getElementById('pos-manual-discount-val');
+  const val = parseFloat(valEl ? valEl.value : '0') || 0;
+  if (val > 0 && !_authorizeManualDiscountIfNeeded(val)) {
+    if (valEl) valEl.value = '0';
+  }
+  renderPosCart();
+  if (typeof calculatePosChange === 'function') calculatePosChange();
+  if (document.getElementById('pos-payment-method')?.value === 'MIXTO' && typeof calculateMixedPaymentSplit === 'function') {
+    calculateMixedPaymentSplit('efectivo');
+  }
+}
+
+window.setQuickManualDiscount = setQuickManualDiscount;
+window.onManualDiscountChange = onManualDiscountChange;
+
+
+// =============================================================================
+// ÚLTIMAS VENTAS DEL TURNO, REIMPRESIÓN DE TICKET Y ANULACIÓN / DEVOLUCIÓN RÁPIDA
+// =============================================================================
+function openPosRecentSalesModal() {
+  const modal = document.getElementById('pos-recent-sales-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadPosRecentSales();
+}
+
+function closePosRecentSalesModal() {
+  const modal = document.getElementById('pos-recent-sales-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function loadPosRecentSales() {
+  const container = document.getElementById('pos-recent-sales-list');
+  if (!container) return;
+  container.innerHTML = '<div class="p-8 text-center text-slate-400 text-xs font-bold">⏳ Cargando últimas ventas del turno...</div>';
+
+  try {
+    const fid = (sysState && sysState.authenticatedPharmacy) ? sysState.authenticatedPharmacy.id : 1;
+    const res = await fetch(`/api/transactions?farmacia_id=${fid}&periodo=HOY&limit=30`);
+    const data = await res.json();
+    const list = (data && data.transactions) ? data.transactions : [];
+
+    // Actualizar sysState.transactions para que openReceiptById(txId) encuentre cualquiera al instante
+    if (Array.isArray(list)) {
+      const existingIds = new Set(list.map(t => t.id));
+      const others = (sysState.transactions || []).filter(t => !existingIds.has(t.id));
+      sysState.transactions = [...list, ...others];
+    }
+
+    if (!list.length) {
+      container.innerHTML = `
+        <div class="p-10 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+          <div class="text-3xl">🧾</div>
+          <p class="text-sm font-extrabold text-slate-700">Aún no hay ventas registradas hoy</p>
+          <p class="text-xs text-slate-400">Cuando realices tu primera venta del turno aparecerá aquí para reimprimir o anular.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = list.slice(0, 20).map((tx) => {
+      const isAnulada = String(tx.estado_pedido || '').toUpperCase() === 'ANULADO' || String(tx.estado_pedido || '').toUpperCase() === 'CANCELADO';
+      const hora = (tx.fecha_hora || '').slice(11, 16) || tx.fecha_hora || '';
+      const itemsResumen = Array.isArray(tx.items)
+        ? tx.items.map(it => `${it.cantidad_presentacion}x ${it.nombre_comercial} (${it.presentacion})`).join(', ')
+        : '';
+
+      return `
+        <div class="p-4 rounded-2xl bg-white border ${isAnulada ? 'border-rose-200 bg-rose-50/30 opacity-85' : 'border-slate-200 hover:border-teal-300'} shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition">
+          <div class="space-y-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-mono font-black text-sm ${isAnulada ? 'line-through text-rose-700' : 'text-slate-900'}">${escapeQuote(tx.codigo_orden)}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-black ${isAnulada ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}">
+                ${isAnulada ? '⛔ ANULADA' : '✅ COMPLETADA'}
+              </span>
+              <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">${escapeQuote(tx.metodo_pago || 'EFECTIVO')}</span>
+              <span class="text-[11px] font-mono text-slate-500">🕒 ${escapeQuote(hora)}</span>
+            </div>
+            <p class="text-xs font-bold text-slate-700">
+              Cliente: ${escapeQuote(tx.cliente_nombre || 'Cliente de Mostrador')} • Total: <span class="font-black text-slate-900">${formatRD(tx.total)}</span>
+            </p>
+            ${itemsResumen ? `<p class="text-[11px] text-slate-500 truncate max-w-xl" title="${escapeQuote(itemsResumen)}">${escapeQuote(itemsResumen)}</p>` : ''}
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onclick="reprintPosTransaction(${tx.id})"
+              class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5"
+            >
+              <span>🖨️</span> <span>Reimprimir</span>
+            </button>
+            ${
+              !isAnulada
+                ? `<button
+                    type="button"
+                    onclick="annulPosTransaction(${tx.id}, '${escapeQuote(tx.codigo_orden)}', ${Number(tx.total || 0)})"
+                    class="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Anular factura y devolver todas las unidades al inventario"
+                  >
+                    <span>↩️</span> <span>Anular / Devolver</span>
+                  </button>`
+                : ''
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Error cargando últimas ventas:', err);
+    container.innerHTML = '<div class="p-6 text-center text-rose-600 font-bold text-xs">Error de conexión al cargar las últimas ventas.</div>';
+  }
+}
+
+function reprintPosTransaction(txId) {
+  closePosRecentSalesModal();
+  if (typeof openReceiptById === 'function') {
+    openReceiptById(txId);
+  }
+}
+
+async function annulPosTransaction(txId, codigoOrden, totalRD) {
+  const ok = confirm(`¿Seguro que deseas ANULAR / DEVOLVER la factura ${codigoOrden} (${formatRD(totalRD)})?\n\nTodas las unidades vendidas regresarán automáticamente al inventario.`);
+  if (!ok) return;
+
+  const motivo = prompt('Motivo de la anulación / devolución (opcional):', 'Devolución en mostrador') || 'Devolución en mostrador';
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+
+  try {
+    const res = await fetch('/api/sales/annul', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        transaccion_id: txId,
+        motivo: motivo,
+        usuario: f.nombre_usuario_actual || f.usuario_actual || f.usuario_admin || 'Cajero Mostrador'
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'No se pudo anular la factura.', 'error');
+      return;
+    }
+
+    showToast(`↩️ Factura ${codigoOrden} anulada. Se reintegraron ${data.unidades_reintegradas || 0} unidades al stock.`, 'success');
+    await loadPosRecentSales();
+    if (typeof refreshPharmacyWorkspace === 'function') {
+      refreshPharmacyWorkspace();
+    }
+  } catch (err) {
+    console.error('Error anulando factura:', err);
+    showToast('Error de conexión al anular la factura.', 'error');
+  }
+}
+
+window.openPosRecentSalesModal = openPosRecentSalesModal;
+window.closePosRecentSalesModal = closePosRecentSalesModal;
+window.loadPosRecentSales = loadPosRecentSales;
+window.reprintPosTransaction = reprintPosTransaction;
+window.annulPosTransaction = annulPosTransaction;
+
+
+function clearEntirePosCart() {
+  if (!sysState.posCart || sysState.posCart.length === 0) {
+    if (typeof showToast === 'function') showToast('El carrito ya está vacío.', 'info');
+    return;
+  }
+  const count = sysState.posCart.length;
+  if (!confirm(`¿Vaciar todo el carrito actual (${count} línea${count > 1 ? 's' : ''})?`)) return;
+
+  if (typeof _resetCurrentPosCartUI === 'function') {
+    _resetCurrentPosCartUI();
+  } else {
+    sysState.posCart = [];
+    if (typeof renderPosCart === 'function') renderPosCart();
+  }
+  const manVal = document.getElementById('pos-manual-discount-val');
+  if (manVal) manVal.value = '0';
+  sysState.posManualDiscountAuthorized = false;
+  if (typeof renderPosCart === 'function') renderPosCart();
+  if (typeof showToast === 'function') showToast('🗑️ Carrito vaciado. Mostrador listo.', 'info');
+}
+window.clearEntirePosCart = clearEntirePosCart;
+
+
+// =============================================================================
+// SELECTOR DE COMPROBANTE FISCAL (NCF: B02 CONSUMIDOR FINAL / B01 CRÉDITO FISCAL)
+// =============================================================================
+function onPosNcfTypeChange(tipo) {
+  const sel = document.getElementById('pos-ncf-type');
+  const btnB02 = document.getElementById('btn-ncf-B02');
+  const btnB01 = document.getElementById('btn-ncf-B01');
+  const b01Fields = document.getElementById('pos-ncf-b01-fields');
+  const t = (tipo === 'B01') ? 'B01' : 'B02';
+
+  if (sel) sel.value = t;
+  if (btnB02 && btnB01) {
+    if (t === 'B02') {
+      btnB02.className = 'py-2 px-2.5 rounded-xl border-2 border-teal-600 bg-teal-600 text-white font-black text-[11px] transition cursor-pointer shadow-2xs';
+      btnB01.className = 'py-2 px-2.5 rounded-xl border-2 border-slate-300 bg-white hover:border-indigo-400 text-slate-700 font-extrabold text-[11px] transition cursor-pointer';
+    } else {
+      btnB02.className = 'py-2 px-2.5 rounded-xl border-2 border-slate-300 bg-white hover:border-teal-400 text-slate-700 font-extrabold text-[11px] transition cursor-pointer';
+      btnB01.className = 'py-2 px-2.5 rounded-xl border-2 border-indigo-600 bg-indigo-600 text-white font-black text-[11px] transition cursor-pointer shadow-2xs';
+    }
+  }
+  if (b01Fields) {
+    if (t === 'B01') {
+      b01Fields.classList.remove('hidden');
+      const rncInp = document.getElementById('pos-ncf-rnc');
+      const cedInp = document.getElementById('pos-client-cedula');
+      if (rncInp && !rncInp.value.trim() && cedInp && cedInp.value.trim()) {
+        rncInp.value = cedInp.value.trim();
+      }
+      setTimeout(() => document.getElementById('pos-ncf-rnc')?.focus(), 80);
+    } else {
+      b01Fields.classList.add('hidden');
+    }
+  }
+}
+window.onPosNcfTypeChange = onPosNcfTypeChange;
+
+
+// =============================================================================
+// BANNER POST-COBRO CON VUELTO GRANDE Y REIMPRESIÓN DIRECTA
+// =============================================================================
+let _posPostSaleBannerTimer = null;
+
+function showPosPostSaleBanner(order, metodoPago, cashTendered) {
+  const banner = document.getElementById('pos-post-sale-banner');
+  if (!banner || !order) return;
+
+  const ordEl = document.getElementById('pos-last-sale-order');
+  const totEl = document.getElementById('pos-last-sale-total');
+  const chgEl = document.getElementById('pos-last-sale-change');
+
+  const totalNum = Number(order.total || 0);
+  let vueltoNum = 0;
+  if (metodoPago === 'EFECTIVO' && cashTendered > 0) {
+    vueltoNum = Math.max(0, cashTendered - totalNum);
+  }
+
+  if (ordEl) ordEl.textContent = order.codigo_orden || 'DAV-POS';
+  if (totEl) totEl.textContent = formatRD(totalNum);
+  if (chgEl) {
+    chgEl.textContent = (metodoPago === 'EFECTIVO' && cashTendered > 0)
+      ? formatRD(vueltoNum)
+      : 'RD$ 0.00 (Exacto)';
+  }
+
+  banner.classList.remove('hidden');
+
+  if (_posPostSaleBannerTimer) clearTimeout(_posPostSaleBannerTimer);
+  _posPostSaleBannerTimer = setTimeout(() => {
+    hidePosPostSaleBanner();
+  }, 25000);
+}
+
+function hidePosPostSaleBanner() {
+  if (_posPostSaleBannerTimer) {
+    clearTimeout(_posPostSaleBannerTimer);
+    _posPostSaleBannerTimer = null;
+  }
+  const banner = document.getElementById('pos-post-sale-banner');
+  if (banner) banner.classList.add('hidden');
+}
+
+function reprintLastCompletedPosSale() {
+  if (!sysState.lastCompletedOrder) {
+    if (typeof showToast === 'function') showToast('No hay ninguna venta reciente en memoria para reimprimir.', 'info');
+    return;
+  }
+  if (typeof showInvoiceReceiptModal === 'function') {
+    showInvoiceReceiptModal(sysState.lastCompletedOrder);
+  }
+}
+
+window.showPosPostSaleBanner = showPosPostSaleBanner;
+window.hidePosPostSaleBanner = hidePosPostSaleBanner;
+window.reprintLastCompletedPosSale = reprintLastCompletedPosSale;
+
+
+// =============================================================================
+// FONDO INICIAL EDITABLE DE APERTURA DE TURNO Y TASA DEL DÍA (CAJA)
+// =============================================================================
+function toggleEditCajaFondoBox() {
+  const box = document.getElementById('caja-edit-fondo-box');
+  if (!box) return;
+  box.classList.toggle('hidden');
+}
+
+async function savePosCajaOpeningConfig() {
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  const fDop = parseFloat(document.getElementById('caja-input-fondo-dop')?.value || '0') || 0;
+  const fUsd = parseFloat(document.getElementById('caja-input-fondo-usd')?.value || '0') || 0;
+  const tUsd = parseFloat(document.getElementById('caja-input-tasa-usd')?.value || '60') || 60;
+
+  try {
+    const res = await fetch('/api/pos/caja/fondo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        fondo_inicial_dop: fDop,
+        fondo_inicial_usd: fUsd,
+        tasa_cambio_usd: tUsd,
+        usuario: f.nombre_usuario_actual || f.usuario_actual || f.usuario_admin || 'Cajero'
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'No se pudo guardar el fondo inicial.', 'error');
+      return;
+    }
+    const box = document.getElementById('caja-edit-fondo-box');
+    if (box) box.classList.add('hidden');
+    await loadCajaShiftSummary();
+    if (typeof showToast === 'function') {
+      showToast(`💰 Fondo inicial actualizado: ${formatRD(fDop)} + $${fUsd.toFixed(2)} USD (Tasa ${tUsd})`, 'success');
+    }
+  } catch (err) {
+    console.error('Error guardando fondo inicial de caja:', err);
+    if (typeof showToast === 'function') showToast('Error de conexión al guardar fondo inicial.', 'error');
+  }
+}
+
+window.toggleEditCajaFondoBox = toggleEditCajaFondoBox;
+window.savePosCajaOpeningConfig = savePosCajaOpeningConfig;
+
+
+// =============================================================================
+// EXPORTAR REPORTES DE VENTAS Y CIERRE DE CAJA A EXCEL / CSV (UTF-8 BOM)
+// =============================================================================
+function _downloadCsvFile(filename, rows) {
+  const escapeCell = (val) => {
+    const s = String(val === null || val === undefined ? '' : val);
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
+  const csvContent = '\uFEFF' + rows.map((r) => r.map(escapeCell).join(',')).join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+async function exportActiveSalesReportCsv() {
+  const f = sysState.authenticatedPharmacy || { id: 1, nombre: 'Farmacia' };
+  const fid = Number(f.id || 1);
+  const safeName = (f.nombre || 'Farmacia').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  let txs = Array.isArray(sysState.transactions) ? sysState.transactions : [];
+  try {
+    const res = await fetch(`/api/transactions?farmacia_id=${fid}&periodo=TODO&limit=1000`);
+    const data = await res.json();
+    if (data && data.ok && Array.isArray(data.transactions)) {
+      txs = data.transactions;
+    }
+  } catch (e) {}
+
+  if (!txs.length) {
+    if (typeof showToast === 'function') showToast('No hay ventas registradas para exportar.', 'info');
+    return;
+  }
+
+  const rows = [
+    [
+      'Codigo Orden', 'Fecha y Hora', 'Canal', 'Cliente', 'Telefono',
+      'Metodo de Pago', 'NCF / Comprobante', 'Seguro ARS',
+      'Subtotal (RD$)', 'Descuento (RD$)', 'Total (RD$)',
+      'Estado', 'Atendido Por', 'Detalle Productos'
+    ]
+  ];
+
+  let sumSub = 0;
+  let sumDesc = 0;
+  let sumTot = 0;
+
+  txs.forEach((tx) => {
+    const sub = Number(tx.subtotal ?? tx.total ?? 0);
+    const tot = Number(tx.total ?? 0);
+    const desc = Number(tx.descuento_bonificacion_monto ?? Math.max(0, sub - tot));
+    const isAnulada = ['ANULADO', 'CANCELADO'].includes(String(tx.estado_pedido || '').toUpperCase());
+    if (!isAnulada) {
+      sumSub += sub;
+      sumDesc += desc;
+      sumTot += tot;
+    }
+    const itemsTxt = Array.isArray(tx.items)
+      ? tx.items.map((it) => `${it.cantidad_presentacion}x ${it.presentacion} ${it.nombre_comercial}`).join(' | ')
+      : '';
+
+    rows.push([
+      tx.codigo_orden || '',
+      tx.fecha_hora || '',
+      tx.canal || '',
+      tx.cliente_nombre || '',
+      tx.cliente_telefono || '',
+      tx.metodo_pago || '',
+      tx.numero_comprobante || tx.referencia_pago || '',
+      tx.seguro_ars || 'Sin Seguro',
+      sub.toFixed(2),
+      desc.toFixed(2),
+      tot.toFixed(2),
+      tx.estado_pedido || '',
+      tx.atendido_por || '',
+      itemsTxt
+    ]);
+  });
+
+  rows.push([]);
+  rows.push(['TOTALES (EXCLUYE ANULADAS)', '', '', '', '', '', '', '', sumSub.toFixed(2), sumDesc.toFixed(2), sumTot.toFixed(2), '', '', '']);
+
+  _downloadCsvFile(`Reporte_Ventas_${safeName}_${hoy}.csv`, rows);
+  if (typeof showToast === 'function') {
+    showToast(`📊 Reporte exportado (${txs.length} transacciones) en formato Excel/CSV.`, 'success');
+  }
+}
+
+async function exportPosCajaSummaryCsv() {
+  const f = sysState.authenticatedPharmacy || { id: 1, nombre: 'Farmacia' };
+  const fid = Number(f.id || 1);
+  const safeName = (f.nombre || 'Farmacia').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  let shift = window.cajaActiveShift || null;
+  if (!shift) {
+    try {
+      const r = await fetch(`/api/pos/caja/resumen?farmacia_id=${fid}`);
+      shift = await r.json();
+    } catch (e) {}
+  }
+
+  const rows = [
+    ['REPORTE DE CUADRE Y CORTES DE CAJA', f.nombre || 'Farmacia', hoy],
+    [],
+    ['RESUMEN DEL TURNO ACTUAL'],
+    ['Concepto', 'Monto / Valor']
+  ];
+
+  if (shift && shift.ok) {
+    const fi = shift.fondo_inicial || {};
+    const v = shift.ventas || {};
+    rows.push(['Cajero', shift.cajero || 'Cajero']);
+    rows.push(['Fecha Apertura Turno', shift.fecha_apertura_turno || '']);
+    rows.push(['Tasa USD (RD$)', Number(shift.tasa_cambio_usd || 60).toFixed(2)]);
+    rows.push(['Fondo Inicial DOP', Number(fi.dop || 0).toFixed(2)]);
+    rows.push(['Fondo Inicial USD', Number(fi.usd || 0).toFixed(2)]);
+    rows.push(['Ventas Efectivo DOP', Number(v.efectivo_dop || 0).toFixed(2)]);
+    rows.push(['Ventas Efectivo USD', Number(v.efectivo_usd || 0).toFixed(2)]);
+    rows.push(['Ventas Tarjeta DOP', Number(v.tarjeta_dop || 0).toFixed(2)]);
+    rows.push(['Ventas Transferencia/Deposito DOP', Number(v.transferencia_dop || 0).toFixed(2)]);
+    rows.push(['Salidas / Gastos Menores de Caja (DOP)', (-Number(shift.total_salidas_dop || 0)).toFixed(2)]);
+    rows.push(['Total Esperado en Gaveta (DOP)', Number(shift.total_esperado_gaveta_dop || 0).toFixed(2)]);
+  }
+
+  // Cargar historial de cortes X / Z cerrados
+  try {
+    const rHist = await fetch(`/api/pos/caja/historial?farmacia_id=${fid}`);
+    const dHist = await rHist.json();
+    const cortes = (dHist && Array.isArray(dHist.cortes)) ? dHist.cortes : [];
+    if (cortes.length) {
+      rows.push([]);
+      rows.push(['HISTORIAL DE CORTES X / Z']);
+      rows.push([
+        'Codigo Cierre', 'Tipo Corte', 'Cajero', 'Fecha Apertura', 'Fecha Corte',
+        'Fondo Inicial DOP', 'Ventas Efectivo DOP', 'Ventas Tarjeta DOP',
+        'Ventas Transferencia DOP', 'Total Ventas DOP', 'Total Contado DOP',
+        'Diferencia DOP', 'Estado Cuadre'
+      ]);
+      cortes.forEach((c) => {
+        rows.push([
+          c.codigo_cierre || '',
+          c.tipo_corte || '',
+          c.cajero_nombre || '',
+          c.fecha_apertura || '',
+          c.fecha_corte || '',
+          Number(c.fondo_inicial_dop || 0).toFixed(2),
+          Number(c.ventas_efectivo_dop || 0).toFixed(2),
+          Number(c.ventas_tarjeta_dop || 0).toFixed(2),
+          Number(c.ventas_transferencia_dop || 0).toFixed(2),
+          Number(c.total_ventas_dop || 0).toFixed(2),
+          Number(c.total_contado_dop || 0).toFixed(2),
+          Number(c.diferencia_dop || 0).toFixed(2),
+          c.estado_cuadre || ''
+        ]);
+      });
+    }
+  } catch (e) {}
+
+  _downloadCsvFile(`Cortes_Caja_${safeName}_${hoy}.csv`, rows);
+  if (typeof showToast === 'function') {
+    showToast('📊 Cuadre y cortes de caja exportados a Excel/CSV.', 'success');
+  }
+}
+
+window.exportActiveSalesReportCsv = exportActiveSalesReportCsv;
+window.exportPosCajaSummaryCsv = exportPosCajaSummaryCsv;
+
+
+// =============================================================================
+// SALIDAS / GASTOS MENORES DE CAJA CHICA EN EL TURNO
+// =============================================================================
+function renderPosCajaExpenses(data) {
+  const badge = document.getElementById('caja-total-salidas-badge');
+  const listEl = document.getElementById('caja-expenses-list');
+  const totalSalidas = Number(data?.total_salidas_dop || 0);
+  if (badge) badge.textContent = '-' + formatRD(totalSalidas);
+
+  if (!listEl) return;
+  const list = Array.isArray(data?.salidas_caja) ? data.salidas_caja : [];
+  if (!list.length) {
+    listEl.innerHTML = '<p class="text-[11px] text-rose-700/70 italic">Sin salidas de efectivo registradas en el turno de hoy.</p>';
+    return;
+  }
+  listEl.innerHTML = list.map((ex) => {
+    const hora = (ex.fecha_hora || '').slice(11, 16) || '';
+    return `
+      <div class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white border border-rose-200 text-[11px]">
+        <div class="min-w-0 pr-2">
+          <span class="font-bold text-slate-900">${escapeQuote(ex.concepto)}</span>
+          <span class="text-slate-400 font-mono ml-1.5">${hora ? `(${hora})` : ''}</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="font-mono font-black text-rose-700">-${formatRD(ex.monto_dop)}</span>
+          <button type="button" onclick="deletePosCajaExpense(${ex.id})" class="text-slate-400 hover:text-rose-600 font-black cursor-pointer" title="Eliminar salida">✕</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function submitPosCajaExpense() {
+  const concInp = document.getElementById('caja-exp-concepto');
+  const montoInp = document.getElementById('caja-exp-monto');
+  const concepto = concInp ? concInp.value.trim() : '';
+  const monto = parseFloat(montoInp ? montoInp.value : '0') || 0;
+
+  if (!concepto) {
+    showToast('Ingresa el concepto de la salida de caja (ej. Pago delivery, agua).', 'error');
+    if (concInp) concInp.focus();
+    return;
+  }
+  if (monto <= 0) {
+    showToast('Ingresa un monto válido mayor a RD$ 0.00.', 'error');
+    if (montoInp) montoInp.focus();
+    return;
+  }
+
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  try {
+    const res = await fetch('/api/pos/caja/salida', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        concepto: concepto,
+        monto_dop: monto,
+        usuario: f.nombre_usuario_actual || f.usuario_actual || f.usuario_admin || 'Cajero'
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'No se pudo registrar la salida de caja.', 'error');
+      return;
+    }
+    if (concInp) concInp.value = '';
+    if (montoInp) montoInp.value = '';
+    await loadCajaShiftSummary();
+    if (typeof recalculateCajaCounting === 'function') recalculateCajaCounting();
+    showToast(`💸 Salida registrada (-${formatRD(monto)}). Total esperado en gaveta actualizado.`, 'success');
+  } catch (err) {
+    console.error('Error registrando salida de caja:', err);
+    showToast('Error de conexión al registrar salida de caja.', 'error');
+  }
+}
+
+async function deletePosCajaExpense(expenseId) {
+  if (!confirm('¿Eliminar esta salida de caja del turno?')) return;
+  const f = sysState.authenticatedPharmacy || { id: 1 };
+  try {
+    const res = await fetch('/api/pos/caja/salida/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: Number(f.id || 1),
+        expense_id: expenseId,
+        usuario: f.nombre_usuario_actual || f.usuario_actual || f.usuario_admin || 'Cajero'
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      await loadCajaShiftSummary();
+      if (typeof recalculateCajaCounting === 'function') recalculateCajaCounting();
+      showToast('Salida de caja eliminada.', 'info');
+    }
+  } catch (err) {}
+}
+
+window.renderPosCajaExpenses = renderPosCajaExpenses;
+window.submitPosCajaExpense = submitPosCajaExpense;
+window.deletePosCajaExpense = deletePosCajaExpense;
+
+
+// =============================================================================
+// ALERTA DE DEUDA PENDIENTE EN MOSTRADOR Y RECIBO IMPRIMIBLE DE ABONO
+// =============================================================================
+function checkPosClientPendingDebt() {
+  const alertEl = document.getElementById('pos-client-debt-alert');
+  const amountEl = document.getElementById('pos-client-debt-amount');
+  if (!alertEl || !amountEl) return;
+
+  const cedRaw = (document.getElementById('pos-client-cedula')?.value || '').trim();
+  const nameRaw = (document.getElementById('pos-client-name')?.value || '').trim();
+  const phoneRaw = (document.getElementById('pos-client-phone')?.value || '').trim();
+
+  const cedDigits = cedRaw.replace(/[^0-9]/g, '');
+  const phoneDigits = phoneRaw.replace(/[^0-9]/g, '');
+  const nameLower = nameRaw.toLowerCase();
+  const isGenericName = !nameLower || nameLower === 'cliente de mostrador' || nameLower.length < 3;
+
+  if (!cedDigits && !phoneDigits && isGenericName) {
+    alertEl.classList.add('hidden');
+    return;
+  }
+
+  const debtors = Array.isArray(sysState.debtors) ? sysState.debtors : [];
+  const matches = debtors.filter((d) => {
+    const saldo = Number(d.saldo_pendiente_rd || 0);
+    if (saldo <= 0.01) return false;
+    const dCed = String(d.cedula || '').replace(/[^0-9]/g, '');
+    const dPhone = String(d.cliente_telefono || '').replace(/[^0-9]/g, '');
+    const dName = String(d.cliente_nombre || '').trim().toLowerCase();
+
+    if (cedDigits && cedDigits.length >= 6 && dCed && dCed === cedDigits) return true;
+    if (phoneDigits && phoneDigits.length >= 7 && dPhone && dPhone.includes(phoneDigits)) return true;
+    if (!isGenericName && dName && (dName.includes(nameLower) || nameLower.includes(dName))) return true;
+    return false;
+  });
+
+  if (!matches.length) {
+    alertEl.classList.add('hidden');
+    return;
+  }
+
+  const totalSaldo = matches.reduce((acc, d) => acc + Number(d.saldo_pendiente_rd || 0), 0);
+  const nombres = [...new Set(matches.map((d) => d.cliente_nombre))].slice(0, 2).join(', ');
+  amountEl.textContent = `⚠️ Saldo pendiente: ${formatRD(totalSaldo)} (${matches.length} cuenta${matches.length > 1 ? 's' : ''} • ${nombres})`;
+  alertEl.classList.remove('hidden');
+}
+
+function showDebtorPaymentReceiptModal(debtor, abonoRD) {
+  const f = sysState.authenticatedPharmacy || {};
+  const area = document.getElementById('printable-receipt-area');
+  if (!area) return;
+
+  const nowStr = new Date().toLocaleString();
+  const pharmacyTitle = escapeQuote((f.nombre || 'MI FARMACIA').toUpperCase());
+  const pharmacyTel = f.telefono || f.telefono_whatsapp || '';
+  const saldoRestante = Math.max(0, Number(debtor.saldo_pendiente_rd ?? 0));
+
+  area.innerHTML = `
+    <div class="text-center space-y-1">
+      <div class="flex justify-center mb-1"><img src="/icon-192.png" class="w-11 h-11 object-contain mx-auto" /></div>
+      <h3 class="text-lg font-black text-teal-900 tracking-wider">${pharmacyTitle}</h3>
+      ${f.eslogan ? `<p class="text-xs font-semibold text-teal-700">${escapeQuote(f.eslogan)}</p>` : ''}
+      <p class="text-[11px] font-mono font-bold text-slate-600">RNC: ${escapeQuote(f.rnc || 'N/A')}${pharmacyTel ? ` | Tel: ${escapeQuote(pharmacyTel)}` : ''}</p>
+      ${f.direccion ? `<p class="text-[11px] text-slate-500">${escapeQuote(f.direccion)}</p>` : ''}
+    </div>
+    <div class="border-t-2 border-dashed border-teal-200 my-2"></div>
+    <div class="text-center">
+      <span class="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-black uppercase">RECIBO DE ABONO A CUENTA POR COBRAR</span>
+    </div>
+    <div class="text-[11px] space-y-1 mt-2">
+      <div class="flex justify-between"><span>Fecha y Hora:</span><span>${escapeQuote(nowStr)}</span></div>
+      <div class="flex justify-between"><span>Cliente:</span><strong>${escapeQuote(debtor.cliente_nombre || 'Cliente')}</strong></div>
+      ${debtor.cliente_telefono ? `<div class="flex justify-between"><span>Teléfono:</span><span class="font-mono">${escapeQuote(debtor.cliente_telefono)}</span></div>` : ''}
+      ${debtor.cedula ? `<div class="flex justify-between"><span>Cédula:</span><span class="font-mono">${escapeQuote(debtor.cedula)}</span></div>` : ''}
+      ${debtor.concepto ? `<div class="flex justify-between"><span>Concepto:</span><span>${escapeQuote(debtor.concepto)}</span></div>` : ''}
+      <div class="flex justify-between"><span>Recibido por:</span><span>${escapeQuote(f.nombre_usuario_actual || f.usuario_actual || 'Cajero')}</span></div>
+    </div>
+    <div class="border-t border-slate-200 my-2 pt-2 space-y-1 text-xs">
+      ${debtor.monto_deuda_rd !== undefined ? `<div class="flex justify-between text-slate-600"><span>Monto Original Deuda:</span><span class="font-mono">${formatRD(debtor.monto_deuda_rd)}</span></div>` : ''}
+      <div class="flex justify-between text-emerald-700 font-black text-sm">
+        <span>ABONO RECIBIDO HOY:</span>
+        <span class="font-mono">${formatRD(abonoRD)}</span>
+      </div>
+      <div class="flex justify-between font-extrabold ${saldoRestante > 0 ? 'text-rose-700' : 'text-emerald-800'} pt-1 border-t border-slate-100">
+        <span>SALDO PENDIENTE ACTUAL:</span>
+        <span class="font-mono">${saldoRestante > 0 ? formatRD(saldoRestante) : 'RD$ 0.00 (SALDADO)'}</span>
+      </div>
+    </div>
+    <div class="border-t-2 border-dashed border-teal-200 my-2 pt-2 text-center">
+      <p class="text-xs font-semibold text-slate-600">${escapeQuote(f.mensaje_factura || '¡Gracias por su abono y preferencia!')}</p>
+    </div>
+  `;
+
+  showModal('invoice-receipt-modal');
+}
+
+window.checkPosClientPendingDebt = checkPosClientPendingDebt;
+window.showDebtorPaymentReceiptModal = showDebtorPaymentReceiptModal;
+
+(function restoreReceiptPaperFormat() {
+  try {
+    const saved = localStorage.getItem('farmasys_receipt_paper_width');
+    const sel = document.getElementById('receipt-print-format');
+    if (saved && sel) {
+      sel.value = saved;
+      if (typeof onReceiptPrintFormatChange === 'function') onReceiptPrintFormatChange(saved);
+    }
+  } catch (e) {}
+})();
+
+
+// =============================================================================
+// ADVERTENCIA DE VENTAS EN ESPERA ANTES DE CERRAR CAJA (CORTE X / Z)
+// =============================================================================
+function checkHeldSalesWarningInCaja() {
+  const warnEl = document.getElementById('caja-held-sales-warning');
+  const txtEl = document.getElementById('caja-held-sales-warning-text');
+  if (!warnEl || !txtEl) return;
+
+  const list = Array.isArray(sysState.heldSales) ? sysState.heldSales : [];
+  if (!list.length) {
+    warnEl.classList.add('hidden');
+    return;
+  }
+
+  const labels = list.map((s) => `${s.label} (${s.totalText})`).join(', ');
+  txtEl.textContent = `Tienes ${list.length} venta(s) en pausa: ${labels}. Cóbralas o descártalas antes de cerrar el turno (Corte Z).`;
+  warnEl.classList.remove('hidden');
+}
+
+function discardAllHeldSalesFromCaja() {
+  const list = Array.isArray(sysState.heldSales) ? sysState.heldSales : [];
+  if (!list.length) return;
+  if (!confirm(`¿Seguro que deseas descartar las ${list.length} venta(s) en espera?`)) return;
+  sysState.heldSales = [];
+  if (typeof saveHeldPosSales === 'function') saveHeldPosSales();
+  if (typeof renderHeldPosSalesPills === 'function') renderHeldPosSalesPills();
+  checkHeldSalesWarningInCaja();
+  if (typeof showToast === 'function') showToast('Ventas en espera descartadas.', 'info');
+}
+
+window.checkHeldSalesWarningInCaja = checkHeldSalesWarningInCaja;
+window.discardAllHeldSalesFromCaja = discardAllHeldSalesFromCaja;
+
+
+async function populatePosCourierAssignSelect(trackingData) {
+  const sel = document.getElementById('pos-delivery-assign-courier-select');
+  if (!sel || !sysState.authenticatedPharmacy) return;
+  try {
+    const fid = sysState.authenticatedPharmacy.id || 1;
+    const res = await fetch(`/api/staff/users?farmacia_id=${fid}`);
+    const data = await res.json();
+    const list = (data && data.ok && Array.isArray(data.users || data.staff)) ? (data.users || data.staff) : [];
+    const couriers = list.filter((u) => String(u.rol || '').toUpperCase() === 'REPARTIDOR');
+    const others = list.filter((u) => String(u.rol || '').toUpperCase() !== 'REPARTIDOR');
+    const ordered = [...couriers, ...others];
+    const currentName = trackingData && trackingData.repartidor ? trackingData.repartidor.nombre : '';
+    sel.innerHTML = '<option value="">Elegir repartidor registrado...</option>' + ordered.map((u) => {
+      const roleTag = String(u.rol || '').toUpperCase() === 'REPARTIDOR' ? '🛵' : '👤';
+      const val = `${u.nombre_completo} (${u.username})`;
+      const selected = currentName && currentName.includes(u.nombre_completo) ? 'selected' : '';
+      return `<option value="${val}" ${selected}>${roleTag} ${u.nombre_completo} (${u.rol})</option>`;
+    }).join('');
+  } catch (e) {}
+}
+
+async function assignCourierFromPosModal() {
+  const sel = document.getElementById('pos-delivery-assign-courier-select');
+  const orderCode = document.getElementById('pos-delivery-modal-order')?.textContent?.trim();
+  const repName = sel ? sel.value.trim() : '';
+  if (!orderCode || !repName) {
+    showToast('Selecciona un repartidor registrado para asignar.', 'error');
+    return;
+  }
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+  try {
+    const res = await fetch('/api/delivery/asignar-repartidor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        codigo_orden: orderCode,
+        repartidor_nombre: repName,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const nameEl = document.getElementById('pos-delivery-modal-courier-name');
+      if (nameEl) nameEl.textContent = data.repartidor_nombre;
+      showToast(`🛵 Repartidor asignado: ${data.repartidor_nombre}`, 'success');
+    } else {
+      showToast(data.error || 'No se pudo asignar el repartidor.', 'error');
+    }
+  } catch (e) {
+    showToast('Error de conexión al asignar repartidor.', 'error');
+  }
+}

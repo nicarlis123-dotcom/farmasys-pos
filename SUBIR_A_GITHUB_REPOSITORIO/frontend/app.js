@@ -2,26 +2,55 @@
 /* =========================================================================
    CONTROLADOR DE PANTALLA DE CARGA FARMASYS (SEGURO Y SIN BLOQUEOS)
    ========================================================================= */
+let farmasysSlowTimer = null;
+let farmasysSlowStageTimer = null;
+
 function showFarmasysLoader(title = "Cargando FarmaSys...", sub = "Un momento por favor...") {
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     const tEl = document.getElementById('farmasys-loader-title');
     const sEl = document.getElementById('farmasys-loader-sub');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    const slowMsg = document.getElementById('farmasys-slow-msg');
+
     if (tEl) tEl.textContent = title;
     if (sEl) sEl.textContent = sub;
+    if (slowNotice) slowNotice.classList.add('hidden');
+    el.classList.remove('farmasys-is-slow');
+
     el.style.display = 'flex';
     el.style.pointerEvents = 'auto';
     el.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
     el.classList.add('opacity-100');
+
+    clearTimeout(farmasysSlowTimer);
+    clearTimeout(farmasysSlowStageTimer);
+    farmasysSlowTimer = setTimeout(() => {
+      if (el && !el.classList.contains('hidden') && !el.classList.contains('opacity-0')) {
+        el.classList.add('farmasys-is-slow');
+        if (slowNotice) slowNotice.classList.remove('hidden');
+        if (slowMsg) slowMsg.textContent = "Sincronizando módulos e inventario seguro...";
+        
+        farmasysSlowStageTimer = setTimeout(() => {
+          if (slowMsg && el && !el.classList.contains('hidden')) {
+            slowMsg.textContent = "Optimizando respuestas y bases de datos...";
+          }
+        }, 3000);
+      }
+    }, 2500);
   }
 }
 
 function hideFarmasysLoader() {
+  clearTimeout(farmasysSlowTimer);
+  clearTimeout(farmasysSlowStageTimer);
   const el = document.getElementById('farmasys-global-loader');
   if (el) {
     el.style.pointerEvents = 'none';
     el.classList.add('opacity-0', 'pointer-events-none');
-    el.classList.remove('opacity-100');
+    el.classList.remove('opacity-100', 'farmasys-is-slow');
+    const slowNotice = document.getElementById('farmasys-slow-notice');
+    if (slowNotice) slowNotice.classList.add('hidden');
     setTimeout(() => {
       el.style.display = 'none';
       el.classList.add('hidden');
@@ -47,6 +76,9 @@ window.addEventListener('load', () => {
  */
 
 const state = {
+  activePharmacyId: 1,
+  pharmacies: [],
+  patientOrders: [],
   promotionalKits: [],
   activeModule: 'app',
   products: [],
@@ -73,6 +105,84 @@ const state = {
   whatsappConfig: {},
   activeReviewOrderId: null,
 };
+
+function getActiveAppPharmacyId() {
+  const fid = parseInt(state.activePharmacyId, 10);
+  return (!isNaN(fid) && fid > 0) ? fid : 1;
+}
+
+async function initAppPharmacies() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramFid = parseInt(urlParams.get('farmacia_id') || urlParams.get('farmacia') || '', 10);
+    const paramCode = (urlParams.get('codigo') || '').trim().toUpperCase();
+    const savedFid = parseInt(localStorage.getItem('farmasys_app_pharmacy_id') || '', 10);
+
+    const res = await fetch('/api/pharmacies');
+    const data = await res.json();
+    const list = (data && data.ok && Array.isArray(data.pharmacies)) ? data.pharmacies : [];
+    state.pharmacies = list;
+
+    let chosen = null;
+    if (!isNaN(paramFid) && paramFid > 0) {
+      chosen = list.find((p) => Number(p.id) === paramFid) || null;
+    }
+    if (!chosen && paramCode) {
+      chosen = list.find((p) => String(p.codigo || '').toUpperCase() === paramCode) || null;
+    }
+    if (!chosen && !isNaN(savedFid) && savedFid > 0) {
+      chosen = list.find((p) => Number(p.id) === savedFid) || null;
+    }
+    if (!chosen && list.length > 0) {
+      chosen = list[0];
+    }
+
+    if (chosen) {
+      state.activePharmacyId = Number(chosen.id);
+      localStorage.setItem('farmasys_app_pharmacy_id', String(state.activePharmacyId));
+    } else if (!isNaN(paramFid) && paramFid > 0) {
+      state.activePharmacyId = paramFid;
+    }
+
+    const sel = document.getElementById('app-pharmacy-select');
+    if (sel) {
+      if (list.length === 0) {
+        sel.innerHTML = '<option value="1" class="bg-slate-900 text-white">Sin farmacias registradas</option>';
+      } else {
+        sel.innerHTML = list.map((p) => {
+          const label = p.ciudad_sector ? `${p.nombre} (${p.ciudad_sector})` : p.nombre;
+          return `<option value="${p.id}" class="bg-slate-900 text-white">${label}</option>`;
+        }).join('');
+        sel.value = String(getActiveAppPharmacyId());
+      }
+    }
+  } catch (e) {
+    console.warn('Error cargando farmacias en App:', e);
+  }
+}
+
+async function onAppPharmacyChange(newVal) {
+  const newFid = parseInt(newVal, 10);
+  if (isNaN(newFid) || newFid <= 0 || newFid === getActiveAppPharmacyId()) return;
+  saveAppCartToStorage();
+  state.activePharmacyId = newFid;
+  localStorage.setItem('farmasys_app_pharmacy_id', String(newFid));
+
+  loadAppCartFromStorage();
+  renderCartDrawerItems();
+  const ph = (state.pharmacies || []).find((p) => Number(p.id) === newFid);
+  if (ph) showToast(`Farmacia seleccionada: ${ph.nombre}`, 'success');
+
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('farmacia_id', String(newFid));
+    window.history.replaceState({}, '', url.toString());
+  } catch (e) {}
+
+  await fetchAndApplyLivePharmacyConfig();
+  await refreshAllData();
+  refreshActiveOrderBanner();
+}
 
 function formatRD(amount) {
   const num = Number(amount || 0);
@@ -162,35 +272,54 @@ async function refreshAllData() {
 }
 
 async function loadProducts() {
+  const fid = getActiveAppPharmacyId();
   const params = new URLSearchParams();
+  params.set('farmacia_id', String(fid));
   if (state.searchQuery) params.set('search', state.searchQuery);
-  if (state.selectedSymptom && state.selectedSymptom !== 'todos') {
+  if (state.selectedSymptom && state.selectedSymptom !== 'todos' && state.selectedSymptom !== 'favoritos') {
     params.set('symptom', state.selectedSymptom);
   }
 
-  const res = await fetch(`/api/products?${params.toString()}`);
-  const data = await res.json();
-  if (data.ok) {
-    if (data.pharmacy_config) {
-      applyPatientAppServiceConfig(data.pharmacy_config);
+  try {
+    const res = await fetch(`/api/products?${params.toString()}`);
+    const data = await res.json();
+    if (data.ok) {
+      if (data.pharmacy_config) {
+        applyPatientAppServiceConfig(data.pharmacy_config);
+      }
+      // También guardamos el catálogo completo si no hay filtro para el POS y Backoffice
+      if (!state.searchQuery && state.selectedSymptom === 'todos') {
+        state.products = data.products;
+      } else {
+        const fullRes = await fetch(`/api/products?farmacia_id=${fid}`);
+        const fullData = await fullRes.json();
+        if (fullData.ok) state.products = fullData.products;
+      }
+      state.filteredProducts = state.selectedSymptom === 'favoritos'
+        ? (data.products || []).filter((p) => isAppFavorite(p.id))
+        : data.products;
+      renderAppProductsGrid();
+      renderPosQuickBarcodes();
+      renderBackofficeInventory();
     }
-    // También guardamos el catálogo completo si no hay filtro para el POS y Backoffice
-    if (!state.searchQuery && state.selectedSymptom === 'todos') {
-      state.products = data.products;
-    } else {
-      const fullRes = await fetch('/api/products');
-      const fullData = await fullRes.json();
-      if (fullData.ok) state.products = fullData.products;
+  } catch (err) {
+    const grid = document.getElementById('app-products-grid');
+    if (grid) {
+      grid.innerHTML = `
+        <div class="col-span-full bg-white rounded-2xl p-8 text-center border border-rose-200 space-y-3">
+          <p class="text-base font-extrabold text-rose-800">No pudimos conectar con el catálogo de esta farmacia.</p>
+          <p class="text-xs text-slate-600">Verifica tu conexión a internet e intenta recargar para ver los precios y disponibilidad reales.</p>
+          <button type="button" onclick="loadProducts()" class="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold cursor-pointer">
+            🔄 Reintentar
+          </button>
+        </div>
+      `;
     }
-    state.filteredProducts = data.products;
-    renderAppProductsGrid();
-    renderPosQuickBarcodes();
-    renderBackofficeInventory();
   }
 }
 
 async function loadDashboardMetrics() {
-  const res = await fetch('/api/dashboard');
+  const res = await fetch(`/api/dashboard?farmacia_id=${getActiveAppPharmacyId()}`);
   const data = await res.json();
   if (!data.ok) return;
   const m = data.metrics;
@@ -295,11 +424,35 @@ function selectCardPresentation(productId, presentacion) {
 function renderAppProductsGrid() {
   const grid = document.getElementById('app-products-grid');
   if (!state.filteredProducts.length) {
+    if (state.selectedSymptom === 'favoritos') {
+      grid.innerHTML = `
+        <div class="col-span-full bg-white rounded-2xl p-8 text-center border border-amber-200 space-y-2">
+          <div class="text-3xl">⭐</div>
+          <p class="text-base font-extrabold text-slate-800">Aún no tienes medicamentos favoritos en esta farmacia.</p>
+          <p class="text-xs text-slate-500 max-w-md mx-auto">Toca la estrella <strong>☆</strong> en cualquier medicamento del catálogo para guardarlo aquí y comprarlo más rápido cada mes.</p>
+          <button type="button" onclick="selectSymptom('todos')" class="mt-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold cursor-pointer">
+            Explorar catálogo completo
+          </button>
+        </div>
+      `;
+      return;
+    }
+    if (!state.products.length && !state.searchQuery && state.selectedSymptom === 'todos') {
+      const phName = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'esta farmacia';
+      grid.innerHTML = `
+        <div class="col-span-full bg-white rounded-2xl p-8 text-center border border-slate-200 space-y-2">
+          <div class="text-3xl">🏥</div>
+          <p class="text-base font-extrabold text-slate-800">${phName} aún no tiene medicamentos publicados en su catálogo.</p>
+          <p class="text-xs text-slate-500 max-w-md mx-auto">Cuando la farmacia agregue sus productos en el sistema, aparecerán aquí automáticamente con su stock y precios reales.</p>
+        </div>
+      `;
+      return;
+    }
     const qEsc = escapeJsQuotes(state.searchQuery || '');
     grid.innerHTML = `
       <div class="col-span-full bg-white rounded-2xl p-8 text-center border border-slate-200 space-y-3">
         <p class="text-base font-extrabold text-slate-800">No encontramos ese nombre comercial exacto en el catálogo.</p>
-        <p class="text-xs text-slate-600 max-w-lg mx-auto">💡 <strong>FarmaIA te ayuda:</strong> Si no encuentras el medicamento que buscas, nuestra Inteligencia Artificial te recomienda los medicamentos disponibles con el <strong>mismo Principio Activo</strong>.</p>
+        <p class="text-xs text-slate-600 max-w-lg mx-auto">💡 <strong>Consejo de búsqueda:</strong> Si no encuentras el medicamento que buscas, nuestra Inteligencia Artificial te recomienda los medicamentos disponibles con el <strong>mismo Principio Activo</strong>.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
           ${state.searchQuery ? `
             <button type="button" onclick="openAppAiAssistantModal('principio', '${qEsc}')" class="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black shadow-sm cursor-pointer">
@@ -336,8 +489,18 @@ function renderAppProductsGrid() {
           <div>
             <!-- Encabezado de tarjeta -->
             <div class="flex items-center justify-between gap-1 mb-2">
-              ${rxBadge}
-              ${stockStatusBadge}
+              <div class="flex items-center gap-1 flex-wrap">
+                ${rxBadge}
+                ${stockStatusBadge}
+              </div>
+              <button
+                type="button"
+                onclick="toggleAppFavorite(${p.id})"
+                title="${isAppFavorite(p.id) ? 'Quitar de favoritos' : 'Guardar en Mis Favoritos'}"
+                class="w-7 h-7 rounded-full flex items-center justify-center border transition cursor-pointer shrink-0 ${isAppFavorite(p.id) ? 'bg-amber-100 border-amber-400 text-amber-600' : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-amber-500 hover:border-amber-300'}"
+              >
+                ${isAppFavorite(p.id) ? '⭐' : '☆'}
+              </button>
             </div>
 
             <h3 class="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">${p.nombre_comercial}</h3>
@@ -527,10 +690,62 @@ function updateFloatingCartUI() {
         ? `${totalItems} artículo(s) • Total: ${formatRD(totalRD)}`
         : 'Agrega medicamentos por Caja, Blíster o Kits en 1 Clic';
   }
+  const hdrCount = document.getElementById('app-cart-count');
+  if (hdrCount) hdrCount.textContent = totalItems;
+  const hdrText = document.getElementById('app-cart-badge-text');
+  if (hdrText) hdrText.textContent = formatRD(totalRD);
+
+  saveAppCartToStorage();
+}
+
+function getAppCartStorageKey(fidOverride = null) {
+  const fid = fidOverride || getActiveAppPharmacyId();
+  return `farmasys_app_cart_${fid}`;
+}
+
+function saveAppCartToStorage() {
+  try {
+    const key = getAppCartStorageKey();
+    if (!state.appCart || state.appCart.length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(state.appCart));
+    }
+  } catch (e) {}
+}
+
+function loadAppCartFromStorage() {
+  try {
+    const raw = localStorage.getItem(getAppCartStorageKey());
+    if (!raw) {
+      state.appCart = [];
+    } else {
+      const parsed = JSON.parse(raw);
+      state.appCart = Array.isArray(parsed)
+        ? parsed.filter((i) => i && Number(i.cantidad) > 0 && (i.es_kit || (i.product && i.product.id)))
+        : [];
+    }
+  } catch (e) {
+    state.appCart = [];
+  }
+  const totalItems = state.appCart.reduce((acc, i) => acc + i.cantidad, 0);
+  const totalRD = state.appCart.reduce(
+    (acc, i) => acc + (i.es_kit ? i.precio_oferta * i.cantidad : (i.product.precios_presentacion[i.presentacion] || i.product.precio_base) * i.cantidad),
+    0
+  );
+  const countEl = document.getElementById('floating-cart-count');
+  if (countEl) countEl.textContent = totalItems;
+  const totalEl = document.getElementById('floating-cart-total');
+  if (totalEl) totalEl.textContent = formatRD(totalRD);
+  const hdrCount = document.getElementById('app-cart-count');
+  if (hdrCount) hdrCount.textContent = totalItems;
+  const hdrText = document.getElementById('app-cart-badge-text');
+  if (hdrText) hdrText.textContent = formatRD(totalRD);
 }
 
 function openCartDrawer() {
   fetchAndApplyLivePharmacyConfig();
+  renderSavedAddressesBar();
   renderCartDrawerItems();
   document.getElementById('cart-drawer-backdrop').classList.remove('hidden');
 }
@@ -657,8 +872,20 @@ function renderCartDrawerItems() {
     rxBox.classList.add('hidden');
   }
 
+  const shipInfo = calcAppShippingFee(totalRD);
+  const grandTotal = totalRD + shipInfo.fee;
+
   document.getElementById('app-cart-total-units').textContent = `${totalUnits} unidades mínimas`;
-  document.getElementById('app-cart-total-rd').textContent = formatRD(totalRD);
+  const subEl = document.getElementById('app-cart-subtotal-rd');
+  if (subEl) subEl.textContent = formatRD(totalRD);
+  const shipLabelEl = document.getElementById('app-cart-shipping-label');
+  if (shipLabelEl) shipLabelEl.textContent = shipInfo.label;
+  const shipValEl = document.getElementById('app-cart-shipping-rd');
+  if (shipValEl) {
+    shipValEl.textContent = shipInfo.fee > 0 ? formatRD(shipInfo.fee) : 'GRATIS';
+    shipValEl.className = shipInfo.fee > 0 ? 'font-extrabold text-slate-900' : 'font-extrabold text-emerald-700';
+  }
+  document.getElementById('app-cart-total-rd').textContent = formatRD(grandTotal);
   calculateCashChange();
 }
 
@@ -754,14 +981,6 @@ async function handlePrescriptionFileChange(event) {
   reader.readAsDataURL(file);
 }
 
-function useSamplePrescription() {
-  const sampleUri = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MjAiIGhlaWdodD0iMzIwIiB2aWV3Qm94PSIwIDAgNTIwIDMyMCI+CiAgPHJlY3Qgd2lkdGg9IjUyMCIgaGVpZ2h0PSIzMjAiIHJ4PSIxNiIgZmlsbD0iI2Y4ZmFmYyIgc3Ryb2tlPSIjMGQ5NDg4IiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSIzMCIgeT0iNDUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMwZjc2NmUiPkNFTlRSTyBNw4lESUNPIERPTUlOSUNBTk8g4oCUIFJFQ0VUQSBNw4lESUNBPC90ZXh0PgogIDx0ZXh0IHg9IjMwIiB5PSI3MCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjNDc1NTY5Ij5Eci4gQWxlamFuZHJvIE3DqW5kZXog4oCiIEV4ZXF1w6F0dXIgIzQ4Mi05MSDigKIgQ2FyZGlvbG9nw61hIC8gTWVkaWNpbmEgSW50ZXJuYTwvdGV4dD4KICA8bGluZSB4MT0iMzAiIHkxPSI4NSIgeDI9IjQ5MCIgeTI9Ijg1IiBzdHJva2U9IiNjYmQ1ZTEiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjMwIiB5PSIxMjAiIGZvbnQtZmFtaWx5PSJDb3VyaWVyIE5ldywgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzBmMTcyYSI+Ung6IDEpIEFtb3hpbCAvIEFtb3hpY2lsaW5hIDg3NW1nIOKAlCAxIENhamEgKFRvbWFyIDEgYy8xMmggcG9yIDcgZMOtYXMpPC90ZXh0PgogIDx0ZXh0IHg9IjMwIiB5PSIxNTUiIGZvbnQtZmFtaWx5PSJDb3VyaWVyIE5ldywgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iIzBmMTcyYSI+ICAgIDIpIExvc2FydMOhbiBDYXJkaW9EYXYgNTBtZyDigJQgMSBDYWphIChUb21hciAxIGRpYXJpYSBlbiBsYSBtYcOxYW5hKTwvdGV4dD4KICA8cmVjdCB4PSIzMTAiIHk9IjIxNSIgd2lkdGg9IjE3NSIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiNlNmZmZmEiIHN0cm9rZT0iIzBkOTQ4OCIgc3Ryb2tlLWRhc2hhcnJheT0iNCA0Ii8+CiAgPHRleHQgeD0iMzI1IiB5PSIyNDUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IiMwZjc2NmUiPlNFTExPIFkgRklSTUEgTcOJRElDQTwvdGV4dD4KICA8dGV4dCB4PSIzMjUiIHk9IjI2OCIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjMGQ5NDg4Ij5Ww6FsaWRvIHBhcmEgRGVzcGFjaG88L3RleHQ+Cjwvc3ZnPg==';
-  state.uploadedPrescriptionUrl = sampleUri;
-  document.getElementById('app-rx-preview-img').src = sampleUri;
-  document.getElementById('app-rx-preview-wrap').classList.remove('hidden');
-  showToast('Receta médica validada adjuntada correctamente.');
-}
-
 function clearPrescriptionUpload() {
   state.uploadedPrescriptionUrl = null;
   document.getElementById('app-rx-preview-img').src = '';
@@ -836,6 +1055,7 @@ async function submitAppOrder() {
   const longitudEntrega = parseFloat(document.getElementById('app-client-lng')?.value || -69.9405);
 
   const payload = {
+    farmacia_id: getActiveAppPharmacyId(),
     canal: 'APP_PACIENTE',
     modalidad_entrega: effectiveDeliveryMode,
     cliente_nombre: clienteNombre,
@@ -890,6 +1110,7 @@ async function submitAppOrder() {
 
 function showOrderSuccessModal(order, waDispatches) {
   state.lastConfirmedAppOrder = order;
+  saveActiveAppOrder(order);
   document.getElementById('success-modal-title').textContent = `¡Orden #${order.codigo_orden} Confirmada (${formatRD(order.total)})!`;
   const body = document.getElementById('order-success-body');
 
@@ -1628,9 +1849,14 @@ async function saveWhatsAppConfig(event) {
 }
 
 // Inicialización al cargar la página
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  await initAppPharmacies();
+  loadAppCartFromStorage();
+  await fetchAndApplyLivePharmacyConfig();
   refreshAllData();
   checkPatientAuthOnLoad();
+  refreshActiveOrderBanner();
+  startActiveOrderPolling();
 });
 
 
@@ -1872,7 +2098,7 @@ window.switchPatientAuthMode = switchPatientAuthMode;
 
 async function fetchAndApplyLivePharmacyConfig() {
   try {
-    const res = await fetch('/api/pharmacy/config?farmacia_id=1');
+    const res = await fetch(`/api/pharmacy/config?farmacia_id=${getActiveAppPharmacyId()}`);
     const data = await res.json();
     if (data.ok && data.config) {
       applyPatientAppServiceConfig(data.config);
@@ -1910,8 +2136,10 @@ function selectAppDeliveryMode(mode) {
         : 'p-2.5 rounded-xl border-2 border-rose-200 bg-rose-50/50 text-left transition flex items-center gap-2 opacity-60 cursor-not-allowed';
     }
     if (addrLabel) addrLabel.textContent = 'Sucursal de Retiro / Nota de Recogida';
-    if (addrInput) addrInput.value = 'Retiro en Sucursal — Farmacia Davalsi Principal';
+    const phName = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'Sucursal Principal';
+    if (addrInput) addrInput.value = `Retiro en Sucursal — ${phName}`;
   }
+  renderCartDrawerItems();
 }
 
 function applyPatientAppServiceConfig(cfg) {
@@ -1921,10 +2149,40 @@ function applyPatientAppServiceConfig(cfg) {
   const arsActive = cfg.seguro_medico_activo !== false;
 
   state.pharmacyConfig = {
+    ...cfg,
     pago_tarjeta_activo: cardActive,
     envio_domicilio_activo: deliveryActive,
     seguro_medico_activo: arsActive,
   };
+
+  const phName = cfg.nombre || 'FarmaSys';
+  document.title = `${phName} - Tu Salud y Bienestar`;
+  document.querySelectorAll('.app-dynamic-pharmacy-name').forEach((el) => {
+    el.textContent = phName;
+  });
+  const hdrName = document.getElementById('app-header-pharmacy-name');
+  if (hdrName) hdrName.textContent = phName.toUpperCase();
+  const infoAddr = document.getElementById('app-info-address');
+  if (infoAddr) infoAddr.textContent = cfg.direccion || cfg.ciudad_sector || 'Sucursal Principal';
+  const infoPhone = document.getElementById('app-info-phone');
+  if (infoPhone) infoPhone.textContent = cfg.telefono || 'Consultar';
+  const infoPhoneLink = document.getElementById('app-info-phone-link');
+  if (infoPhoneLink && cfg.telefono) infoPhoneLink.href = `tel:${String(cfg.telefono).replace(/[^0-9+]/g, '')}`;
+  const infoHours = document.getElementById('app-info-hours');
+  if (infoHours) infoHours.textContent = cfg.horario || 'Lun-Dom 7:00 AM - 11:00 PM';
+  const heroTitle = document.getElementById('app-hero-pharmacy-title');
+  if (heroTitle) heroTitle.textContent = `Tu salud a un toque en ${phName}`;
+  const checkoutTitle = document.getElementById('app-checkout-pharmacy-title');
+  if (checkoutTitle) checkoutTitle.textContent = `Confirmar Pedido — ${phName}`;
+  const bankTitle = document.getElementById('app-bank-pharmacy-title');
+  if (bankTitle) bankTitle.textContent = `🏦 Cuentas Bancarias ${phName} (RD$):`;
+  const bankBox = document.getElementById('app-bank-details-box');
+  if (bankBox) {
+    const banco = cfg.banco_nombre || 'Banco Popular / Banreservas';
+    const cuenta = cfg.banco_cuenta || 'Consultar con la sucursal';
+    const rnc = cfg.rnc || 'N/A';
+    bankBox.innerHTML = `• ${banco}: ${cuenta}<br/>• RNC: ${rnc} (${phName})`;
+  }
 
   // 1. Cintillo superior en el catálogo de la App
   const topCard = document.getElementById('app-top-status-card');
@@ -2082,287 +2340,15 @@ function syncSymptomScrollRange() {
 // Permite comprar por Caja, Blíster o Unidad, calcular cambio, elegir Tarjeta o
 // Depósito, adjuntar receta y procesar la orden tanto conectado al POS como autónomo.
 // ============================================================================
-const EMBEDDED_DEFAULT_PRODUCTS = [{"id": 1, "farmacia_id": 1, "codigo_barras": "7460101001015", "nombre_comercial": "Paracetamol Davalsi 500mg", "principio_activo": "Paracetamol / Acetaminofén", "concentracion": "500mg / 65mg", "laboratorio": "GSK / Rowe", "categoria": "Analgésicos y Antipiréticos", "sintomas_tags": "fiebre,dolor de cabeza,malestar general,gripe", "unidad_minima_nombre": "Tableta", "precio_base": 35.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 12.0, "requiere_receta": false, "unidades_por_blister": 10, "blisters_por_caja": 3, "stock_total_unidades": 39, "stock_minimo_alerta": 30, "lote": "LOT-26A10-F1", "fecha_vencimiento": "2027-06-19", "ubicacion_anaquel": "A-01", "activo": 1, "sintomas_lista": ["fiebre", "dolor de cabeza", "malestar general", "gripe"], "unidades_por_caja": 30, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 39, "unidades_por_blister": 10, "blisters_por_caja": 3, "unidades_por_caja": 30, "cajas_disponibles": 1, "blisters_disponibles": 3, "desglose_fisico": {"cajas": 1, "blisters_sueltos": 0, "unidades_sueltas": 9, "texto": "1 Caja(s) + 0 Blíster(es) + 9 Unid."}, "stock_minimo_alerta": 30, "alerta_stock_bajo": false, "estado_stock": "BAJO"}, "precios_presentacion": {"UNIDAD": 35.0, "BLISTER": 332.5, "CAJA": 924.0}, "vencimiento": {"fecha_vencimiento": "2027-06-19", "dias_para_vencer": 237, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (237 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 2, "farmacia_id": 1, "codigo_barras": "7460101002029", "nombre_comercial": "Amoxil / Amoxicilina Clavulánico 875mg", "principio_activo": "Amoxicilina + Ácido Clavulánico", "concentracion": "875mg / 125mg", "laboratorio": "Laboratorios Sued & Fargesa", "categoria": "Antibióticos", "sintomas_tags": "infeccion,garganta,fiebre", "unidad_minima_nombre": "Comprimido", "precio_base": 95.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 10.0, "requiere_receta": true, "unidades_por_blister": 7, "blisters_por_caja": 2, "stock_total_unidades": 9, "stock_minimo_alerta": 14, "lote": "LOT-26B04-F1", "fecha_vencimiento": "2026-11-09", "ubicacion_anaquel": "B-04", "activo": 1, "sintomas_lista": ["infeccion", "garganta", "fiebre"], "unidades_por_caja": 14, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 9, "unidades_por_blister": 7, "blisters_por_caja": 2, "unidades_por_caja": 14, "cajas_disponibles": 0, "blisters_disponibles": 1, "desglose_fisico": {"cajas": 0, "blisters_sueltos": 1, "unidades_sueltas": 2, "texto": "0 Caja(s) + 1 Blíster(es) + 2 Unid."}, "stock_minimo_alerta": 14, "alerta_stock_bajo": true, "estado_stock": "CRITICO"}, "precios_presentacion": {"UNIDAD": 95.0, "BLISTER": 631.75, "CAJA": 1197.0}, "vencimiento": {"fecha_vencimiento": "2026-11-09", "dias_para_vencer": 15, "estado_vencimiento": "CRITICO_30D", "etiqueta_vencimiento": "Vence en 15 día(s) (Crítico ≤30d)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 2}}, {"id": 3, "farmacia_id": 1, "codigo_barras": "7460101003033", "nombre_comercial": "Voltaren Dolo / Diclofenac Potásico", "principio_activo": "Diclofenac Potásico", "concentracion": "50mg", "laboratorio": "Novartis / Infaca", "categoria": "Antiinflamatorios", "sintomas_tags": "dolor muscular,inflamacion,dolor de cabeza", "unidad_minima_nombre": "Gragea", "precio_base": 28.0, "descuento_blister_pct": 6.0, "descuento_caja_pct": 14.0, "requiere_receta": false, "unidades_por_blister": 10, "blisters_por_caja": 3, "stock_total_unidades": 62, "stock_minimo_alerta": 25, "lote": "LOT-26C19-F1", "fecha_vencimiento": "2026-12-23", "ubicacion_anaquel": "A-03", "activo": 1, "sintomas_lista": ["dolor muscular", "inflamacion", "dolor de cabeza"], "unidades_por_caja": 30, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 62, "unidades_por_blister": 10, "blisters_por_caja": 3, "unidades_por_caja": 30, "cajas_disponibles": 2, "blisters_disponibles": 6, "desglose_fisico": {"cajas": 2, "blisters_sueltos": 0, "unidades_sueltas": 2, "texto": "2 Caja(s) + 0 Blíster(es) + 2 Unid."}, "stock_minimo_alerta": 25, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 28.0, "BLISTER": 263.2, "CAJA": 722.4}, "vencimiento": {"fecha_vencimiento": "2026-12-23", "dias_para_vencer": 59, "estado_vencimiento": "PREVENTIVO_90D", "etiqueta_vencimiento": "Vence en 59 días (Preventivo ≤90d)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 4, "farmacia_id": 1, "codigo_barras": "7460101004047", "nombre_comercial": "Azitromicina Davalsi 500mg", "principio_activo": "Azitromicina Dihidrato", "concentracion": "500mg", "laboratorio": "Laboratorios Magnachem", "categoria": "Antibióticos", "sintomas_tags": "infeccion,garganta,gripe,fiebre", "unidad_minima_nombre": "Tableta", "precio_base": 135.0, "descuento_blister_pct": 4.0, "descuento_caja_pct": 10.0, "requiere_receta": true, "unidades_por_blister": 3, "blisters_por_caja": 2, "stock_total_unidades": 7, "stock_minimo_alerta": 18, "lote": "LOT-26D02-F1", "fecha_vencimiento": "2026-10-31", "ubicacion_anaquel": "B-01", "activo": 1, "sintomas_lista": ["infeccion", "garganta", "gripe", "fiebre"], "unidades_por_caja": 6, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 7, "unidades_por_blister": 3, "blisters_por_caja": 2, "unidades_por_caja": 6, "cajas_disponibles": 1, "blisters_disponibles": 2, "desglose_fisico": {"cajas": 1, "blisters_sueltos": 0, "unidades_sueltas": 1, "texto": "1 Caja(s) + 0 Blíster(es) + 1 Unid."}, "stock_minimo_alerta": 18, "alerta_stock_bajo": true, "estado_stock": "CRITICO"}, "precios_presentacion": {"UNIDAD": 135.0, "BLISTER": 388.8, "CAJA": 729.0}, "vencimiento": {"fecha_vencimiento": "2026-10-31", "dias_para_vencer": 6, "estado_vencimiento": "CRITICO_30D", "etiqueta_vencimiento": "Vence en 6 día(s) (Crítico ≤30d)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 2}}, {"id": 5, "farmacia_id": 1, "codigo_barras": "7460101005051", "nombre_comercial": "Omeprazol Gastril 20mg", "principio_activo": "Omeprazol", "concentracion": "20mg", "laboratorio": "Laboratorios Feltrex", "categoria": "Gastrointestinal", "sintomas_tags": "acidez,estomago,reflujo", "unidad_minima_nombre": "Cápsula", "precio_base": 22.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 15.0, "requiere_receta": false, "unidades_por_blister": 10, "blisters_por_caja": 3, "stock_total_unidades": 180, "stock_minimo_alerta": 30, "lote": "LOT-26E88-F1", "fecha_vencimiento": "2027-04-20", "ubicacion_anaquel": "C-02", "activo": 1, "sintomas_lista": ["acidez", "estomago", "reflujo"], "unidades_por_caja": 30, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 180, "unidades_por_blister": 10, "blisters_por_caja": 3, "unidades_por_caja": 30, "cajas_disponibles": 6, "blisters_disponibles": 18, "desglose_fisico": {"cajas": 6, "blisters_sueltos": 0, "unidades_sueltas": 0, "texto": "6 Caja(s) + 0 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 30, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 22.0, "BLISTER": 209.0, "CAJA": 561.0}, "vencimiento": {"fecha_vencimiento": "2027-04-20", "dias_para_vencer": 177, "estado_vencimiento": "ALERTA_7_MESES", "etiqueta_vencimiento": "Vence en 177 días (~5.8 meses | Alerta ≤ 7 Meses)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 6, "farmacia_id": 1, "codigo_barras": "7460101006065", "nombre_comercial": "Desloratadina AlergiFin 5mg", "principio_activo": "Desloratadina", "concentracion": "5mg", "laboratorio": "Acromax Dominicana", "categoria": "Antialérgicos y Respiratorios", "sintomas_tags": "alergia,gripe,congestion", "unidad_minima_nombre": "Tableta", "precio_base": 42.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 12.0, "requiere_receta": false, "unidades_por_blister": 10, "blisters_por_caja": 2, "stock_total_unidades": 19, "stock_minimo_alerta": 20, "lote": "LOT-26F11-F1", "fecha_vencimiento": "2026-12-06", "ubicacion_anaquel": "C-05", "activo": 1, "sintomas_lista": ["alergia", "gripe", "congestion"], "unidades_por_caja": 20, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 19, "unidades_por_blister": 10, "blisters_por_caja": 2, "unidades_por_caja": 20, "cajas_disponibles": 0, "blisters_disponibles": 1, "desglose_fisico": {"cajas": 0, "blisters_sueltos": 1, "unidades_sueltas": 9, "texto": "0 Caja(s) + 1 Blíster(es) + 9 Unid."}, "stock_minimo_alerta": 20, "alerta_stock_bajo": true, "estado_stock": "CRITICO"}, "precios_presentacion": {"UNIDAD": 42.0, "BLISTER": 399.0, "CAJA": 739.2}, "vencimiento": {"fecha_vencimiento": "2026-12-06", "dias_para_vencer": 42, "estado_vencimiento": "PREVENTIVO_90D", "etiqueta_vencimiento": "Vence en 42 días (Preventivo ≤90d)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 7, "farmacia_id": 1, "codigo_barras": "7460101007079", "nombre_comercial": "Losartán CardioDav 50mg", "principio_activo": "Losartán Potásico", "concentracion": "50mg", "laboratorio": "Ethical Pharmaceutical RD", "categoria": "Cardiovascular e Hipertensión", "sintomas_tags": "presion arterial,corazon,dolor de cabeza", "unidad_minima_nombre": "Comprimido", "precio_base": 25.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 15.0, "requiere_receta": true, "unidades_por_blister": 10, "blisters_por_caja": 3, "stock_total_unidades": 112, "stock_minimo_alerta": 30, "lote": "LOT-26G50-F1", "fecha_vencimiento": "2027-06-19", "ubicacion_anaquel": "D-01", "activo": 1, "sintomas_lista": ["presion arterial", "corazon", "dolor de cabeza"], "unidades_por_caja": 30, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 112, "unidades_por_blister": 10, "blisters_por_caja": 3, "unidades_por_caja": 30, "cajas_disponibles": 3, "blisters_disponibles": 11, "desglose_fisico": {"cajas": 3, "blisters_sueltos": 2, "unidades_sueltas": 2, "texto": "3 Caja(s) + 2 Blíster(es) + 2 Unid."}, "stock_minimo_alerta": 30, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 25.0, "BLISTER": 237.5, "CAJA": 637.5}, "vencimiento": {"fecha_vencimiento": "2027-06-19", "dias_para_vencer": 237, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (237 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 8, "farmacia_id": 1, "codigo_barras": "7460101008083", "nombre_comercial": "Jarabe Pediátrico Ambroxol (Lote Vencido Demo)", "principio_activo": "Ambroxol Clorhidrato", "concentracion": "15mg/5ml", "laboratorio": "Laboratorios Lam", "categoria": "Respiratorios", "sintomas_tags": "gripe,tos,congestion", "unidad_minima_nombre": "Dosis", "precio_base": 35.0, "descuento_blister_pct": 5.0, "descuento_caja_pct": 10.0, "requiere_receta": false, "unidades_por_blister": 5, "blisters_por_caja": 4, "stock_total_unidades": 24, "stock_minimo_alerta": 20, "lote": "LOT-24X99-F1", "fecha_vencimiento": "2026-10-16", "ubicacion_anaquel": "Z-CUARENTENA", "activo": 1, "sintomas_lista": ["gripe", "tos", "congestion"], "unidades_por_caja": 20, "permite_blister": true, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 24, "unidades_por_blister": 5, "blisters_por_caja": 4, "unidades_por_caja": 20, "cajas_disponibles": 1, "blisters_disponibles": 4, "desglose_fisico": {"cajas": 1, "blisters_sueltos": 0, "unidades_sueltas": 4, "texto": "1 Caja(s) + 0 Blíster(es) + 4 Unid."}, "stock_minimo_alerta": 20, "alerta_stock_bajo": false, "estado_stock": "BAJO"}, "precios_presentacion": {"UNIDAD": 35.0, "BLISTER": 166.25, "CAJA": 630.0}, "vencimiento": {"fecha_vencimiento": "2026-10-16", "dias_para_vencer": -9, "estado_vencimiento": "VENCIDO", "etiqueta_vencimiento": "VENCIDO hace 9 día(s)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": true, "severidad": 3}}, {"id": 9, "farmacia_id": 1, "codigo_barras": "7460101009097", "nombre_comercial": "Desodorante Rexona Clinical Men Antitranspirante 50g", "principio_activo": "Aluminio Zirconio Tetraclorohidrex", "concentracion": "50g Barra Crema", "laboratorio": "Unilever / Rexona", "categoria": "Cuidado Personal", "sintomas_tags": "desodorante,antitranspirante,higiene,sudor,hombre", "unidad_minima_nombre": "Unidad", "precio_base": 300.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 5.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 12, "stock_total_unidades": 50, "stock_minimo_alerta": 6, "lote": "LOT-REEMPLAZAR-02", "fecha_vencimiento": "2027-12-31", "ubicacion_anaquel": "Pasillo 1 - Cabecera", "activo": 1, "sintomas_lista": ["desodorante", "antitranspirante", "higiene", "sudor", "hombre"], "unidades_por_caja": 12, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 50, "unidades_por_blister": 1, "blisters_por_caja": 12, "unidades_por_caja": 12, "cajas_disponibles": 4, "blisters_disponibles": 50, "desglose_fisico": {"cajas": 4, "blisters_sueltos": 2, "unidades_sueltas": 0, "texto": "4 Caja(s) + 2 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 6, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 300.0, "BLISTER": 300.0, "CAJA": 3420.0}, "vencimiento": {"fecha_vencimiento": "2027-12-31", "dias_para_vencer": 432, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (432 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 10, "farmacia_id": 1, "codigo_barras": "7460101009103", "nombre_comercial": "Desodorante Lady Speed Stick Powder Roll-On 50ml", "principio_activo": "Antitranspirante Femenino", "concentracion": "50ml Roll-On", "laboratorio": "Colgate-Palmolive", "categoria": "Cuidado Personal", "sintomas_tags": "desodorante,rollon,mujer,higiene,antitranspirante", "unidad_minima_nombre": "Unidad", "precio_base": 165.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 6.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 12, "stock_total_unidades": 28, "stock_minimo_alerta": 6, "lote": "LOT-26LSS2-F1", "fecha_vencimiento": "2027-04-23", "ubicacion_anaquel": "Pasillo 1 - Cuidado Personal", "activo": 1, "sintomas_lista": ["desodorante", "rollon", "mujer", "higiene", "antitranspirante"], "unidades_por_caja": 12, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 28, "unidades_por_blister": 1, "blisters_por_caja": 12, "unidades_por_caja": 12, "cajas_disponibles": 2, "blisters_disponibles": 28, "desglose_fisico": {"cajas": 2, "blisters_sueltos": 4, "unidades_sueltas": 0, "texto": "2 Caja(s) + 4 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 6, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 165.0, "BLISTER": 165.0, "CAJA": 1861.2}, "vencimiento": {"fecha_vencimiento": "2027-04-23", "dias_para_vencer": 180, "estado_vencimiento": "ALERTA_7_MESES", "etiqueta_vencimiento": "Vence en 180 días (~5.9 meses | Alerta ≤ 7 Meses)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 11, "farmacia_id": 1, "codigo_barras": "7460101009110", "nombre_comercial": "Lima de Uñas Profesional Esmeril 7 Pasos Brillo", "principio_activo": "Esmeril Abrasivo Pulidor", "concentracion": "1 Unidad Multisuperficie", "laboratorio": "Trim Beauty Tools", "categoria": "Limas y Manicura", "sintomas_tags": "lima,unas,manicura,pedicura,belleza,pulidor", "unidad_minima_nombre": "Pieza", "precio_base": 95.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 10.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 24, "stock_total_unidades": 45, "stock_minimo_alerta": 10, "lote": "LOT-26LIMA1-F1", "fecha_vencimiento": "2027-06-22", "ubicacion_anaquel": "Mostrador - Vitrina Limas", "activo": 1, "sintomas_lista": ["lima", "unas", "manicura", "pedicura", "belleza", "pulidor"], "unidades_por_caja": 24, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 45, "unidades_por_blister": 1, "blisters_por_caja": 24, "unidades_por_caja": 24, "cajas_disponibles": 1, "blisters_disponibles": 45, "desglose_fisico": {"cajas": 1, "blisters_sueltos": 21, "unidades_sueltas": 0, "texto": "1 Caja(s) + 21 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 10, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 95.0, "BLISTER": 95.0, "CAJA": 2052.0}, "vencimiento": {"fecha_vencimiento": "2027-06-22", "dias_para_vencer": 240, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (240 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 12, "farmacia_id": 1, "codigo_barras": "7460101009127", "nombre_comercial": "Lima Metálica Diamante con Mango Antideslizante", "principio_activo": "Acero Inoxidable Quirúrgico", "concentracion": "6 Pulgadas", "laboratorio": "Revlon / Titania", "categoria": "Limas y Manicura", "sintomas_tags": "lima,metalica,acero,unas,manicura,belleza", "unidad_minima_nombre": "Pieza", "precio_base": 125.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 8.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 12, "stock_total_unidades": 30, "stock_minimo_alerta": 8, "lote": "LOT-26LIMA2-F1", "fecha_vencimiento": "2027-06-22", "ubicacion_anaquel": "Mostrador - Vitrina Limas", "activo": 1, "sintomas_lista": ["lima", "metalica", "acero", "unas", "manicura", "belleza"], "unidades_por_caja": 12, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 30, "unidades_por_blister": 1, "blisters_por_caja": 12, "unidades_por_caja": 12, "cajas_disponibles": 2, "blisters_disponibles": 30, "desglose_fisico": {"cajas": 2, "blisters_sueltos": 6, "unidades_sueltas": 0, "texto": "2 Caja(s) + 6 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 8, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 125.0, "BLISTER": 125.0, "CAJA": 1380.0}, "vencimiento": {"fecha_vencimiento": "2027-06-22", "dias_para_vencer": 240, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (240 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 13, "farmacia_id": 1, "codigo_barras": "7460101009134", "nombre_comercial": "Champú Anticaspa Head & Shoulders Limpieza Renovadora 375ml", "principio_activo": "Piritionato de Zinc 1%", "concentracion": "375ml", "laboratorio": "Procter & Gamble", "categoria": "Cuidado Personal", "sintomas_tags": "champu,caspa,cabello,higiene,limpieza", "unidad_minima_nombre": "Frasco", "precio_base": 340.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 5.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 6, "stock_total_unidades": 22, "stock_minimo_alerta": 5, "lote": "LOT-26HS03-F1", "fecha_vencimiento": "2027-04-23", "ubicacion_anaquel": "Pasillo 2 - Cuidado Capilar", "activo": 1, "sintomas_lista": ["champu", "caspa", "cabello", "higiene", "limpieza"], "unidades_por_caja": 6, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 22, "unidades_por_blister": 1, "blisters_por_caja": 6, "unidades_por_caja": 6, "cajas_disponibles": 3, "blisters_disponibles": 22, "desglose_fisico": {"cajas": 3, "blisters_sueltos": 4, "unidades_sueltas": 0, "texto": "3 Caja(s) + 4 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 5, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 340.0, "BLISTER": 340.0, "CAJA": 1938.0}, "vencimiento": {"fecha_vencimiento": "2027-04-23", "dias_para_vencer": 180, "estado_vencimiento": "ALERTA_7_MESES", "etiqueta_vencimiento": "Vence en 180 días (~5.9 meses | Alerta ≤ 7 Meses)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 14, "farmacia_id": 1, "codigo_barras": "7460101009141", "nombre_comercial": "Curitas Adhesivas Antibacterianas Curad (Caja x 30)", "principio_activo": "Cloruro de Benzalconio Antiséptico", "concentracion": "Caja 30 Unidades", "laboratorio": "Medline Curad", "categoria": "Material Médico y Curaciones", "sintomas_tags": "curitas,heridas,cortaduras,primeros auxilios,adhesivas", "unidad_minima_nombre": "Caja", "precio_base": 180.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 8.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 10, "stock_total_unidades": 40, "stock_minimo_alerta": 8, "lote": "LOT-26CUR4-F1", "fecha_vencimiento": "2027-06-22", "ubicacion_anaquel": "Pasillo 3 - Primeros Auxilios", "activo": 1, "sintomas_lista": ["curitas", "heridas", "cortaduras", "primeros auxilios", "adhesivas"], "unidades_por_caja": 10, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 40, "unidades_por_blister": 1, "blisters_por_caja": 10, "unidades_por_caja": 10, "cajas_disponibles": 4, "blisters_disponibles": 40, "desglose_fisico": {"cajas": 4, "blisters_sueltos": 0, "unidades_sueltas": 0, "texto": "4 Caja(s) + 0 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 8, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 180.0, "BLISTER": 180.0, "CAJA": 1656.0}, "vencimiento": {"fecha_vencimiento": "2027-06-22", "dias_para_vencer": 240, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (240 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 15, "farmacia_id": 1, "codigo_barras": "7460101009158", "nombre_comercial": "Cepillo Dental Colgate Triple Acción 2x1 Pack", "principio_activo": "Cerdas Medias Antibacterianas", "concentracion": "Pack 2 Cepillos", "laboratorio": "Colgate-Palmolive", "categoria": "Higiene y Cuidado Personal", "sintomas_tags": "cepillo,dientes,dental,colgate,higiene oral", "unidad_minima_nombre": "Paquete", "precio_base": 145.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 6.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 12, "stock_total_unidades": 35, "stock_minimo_alerta": 8, "lote": "LOT-26COL5-F1", "fecha_vencimiento": "2027-06-22", "ubicacion_anaquel": "Pasillo 1 - Higiene Oral", "activo": 1, "sintomas_lista": ["cepillo", "dientes", "dental", "colgate", "higiene oral"], "unidades_por_caja": 12, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 35, "unidades_por_blister": 1, "blisters_por_caja": 12, "unidades_por_caja": 12, "cajas_disponibles": 2, "blisters_disponibles": 35, "desglose_fisico": {"cajas": 2, "blisters_sueltos": 11, "unidades_sueltas": 0, "texto": "2 Caja(s) + 11 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 8, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 145.0, "BLISTER": 145.0, "CAJA": 1635.6}, "vencimiento": {"fecha_vencimiento": "2027-06-22", "dias_para_vencer": 240, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (240 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 16, "farmacia_id": 1, "codigo_barras": "7460101009165", "nombre_comercial": "Alcohol Isopropílico Antiséptico 70% 500ml", "principio_activo": "Alcohol Isopropílico 70%", "concentracion": "500ml", "laboratorio": "Laboratorios Roldán", "categoria": "Material Médico y Curaciones", "sintomas_tags": "alcohol,desinfectante,antiseptico,curacion,primeros auxilios", "unidad_minima_nombre": "Frasco", "precio_base": 110.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 5.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 12, "stock_total_unidades": 50, "stock_minimo_alerta": 12, "lote": "LOT-26ALC6-F1", "fecha_vencimiento": "2027-04-23", "ubicacion_anaquel": "Pasillo 3 - Antisépticos", "activo": 1, "sintomas_lista": ["alcohol", "desinfectante", "antiseptico", "curacion", "primeros auxilios"], "unidades_por_caja": 12, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 50, "unidades_por_blister": 1, "blisters_por_caja": 12, "unidades_por_caja": 12, "cajas_disponibles": 4, "blisters_disponibles": 50, "desglose_fisico": {"cajas": 4, "blisters_sueltos": 2, "unidades_sueltas": 0, "texto": "4 Caja(s) + 2 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 12, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 110.0, "BLISTER": 110.0, "CAJA": 1254.0}, "vencimiento": {"fecha_vencimiento": "2027-04-23", "dias_para_vencer": 180, "estado_vencimiento": "ALERTA_7_MESES", "etiqueta_vencimiento": "Vence en 180 días (~5.9 meses | Alerta ≤ 7 Meses)", "alerta_vencimiento": true, "es_menor_7_meses": true, "vencido": false, "severidad": 1}}, {"id": 17, "farmacia_id": 1, "codigo_barras": "7469001170152", "nombre_comercial": "Gel Fijador Egos Black For Men 250ml", "principio_activo": "Fijación Extrema", "concentracion": "250ml Frasco", "laboratorio": "Genomma Lab", "categoria": "Cuidado Personal", "sintomas_tags": "gel,cabello,fijador,hombre,higiene", "unidad_minima_nombre": "Frasco", "precio_base": 195.0, "descuento_blister_pct": 0.0, "descuento_caja_pct": 10.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 6, "stock_total_unidades": 18, "stock_minimo_alerta": 4, "lote": "LOT-EGOS-2026", "fecha_vencimiento": "2027-09-15", "ubicacion_anaquel": "Pasillo 2 - Cuidado Masculino", "activo": 1, "sintomas_lista": ["gel", "cabello", "fijador", "hombre", "higiene"], "unidades_por_caja": 6, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 18, "unidades_por_blister": 1, "blisters_por_caja": 6, "unidades_por_caja": 6, "cajas_disponibles": 3, "blisters_disponibles": 18, "desglose_fisico": {"cajas": 3, "blisters_sueltos": 0, "unidades_sueltas": 0, "texto": "3 Caja(s) + 0 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 4, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 195.0, "BLISTER": 195.0, "CAJA": 1053.0}, "vencimiento": {"fecha_vencimiento": "2027-09-15", "dias_para_vencer": 325, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (325 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}, {"id": 18, "farmacia_id": 1, "codigo_barras": "7469998881110", "nombre_comercial": "Lima de Cartón Abrasiva 100/180", "principio_activo": "Trim Manicura", "concentracion": "1 Unidad", "laboratorio": "Distribución General", "categoria": "Limas y Manicura", "sintomas_tags": "limas,manicura,unas", "unidad_minima_nombre": "Unidad", "precio_base": 42.5, "descuento_blister_pct": 0.0, "descuento_caja_pct": 10.0, "requiere_receta": false, "unidades_por_blister": 1, "blisters_por_caja": 24, "stock_total_unidades": 50, "stock_minimo_alerta": 10, "lote": "LOT-2026-FINAL", "fecha_vencimiento": "2029-05-15", "ubicacion_anaquel": "Pasillo 1 - Sección Cosmética", "activo": 1, "sintomas_lista": ["limas", "manicura", "unas"], "unidades_por_caja": 24, "permite_blister": false, "permite_caja": true, "es_mercancia": false, "inventario": {"stock_total_unidades": 50, "unidades_por_blister": 1, "blisters_por_caja": 24, "unidades_por_caja": 24, "cajas_disponibles": 2, "blisters_disponibles": 50, "desglose_fisico": {"cajas": 2, "blisters_sueltos": 2, "unidades_sueltas": 0, "texto": "2 Caja(s) + 2 Blíster(es) + 0 Unid."}, "stock_minimo_alerta": 10, "alerta_stock_bajo": false, "estado_stock": "OPTIMO"}, "precios_presentacion": {"UNIDAD": 42.5, "BLISTER": 42.5, "CAJA": 918.0}, "vencimiento": {"fecha_vencimiento": "2029-05-15", "dias_para_vencer": 933, "estado_vencimiento": "VIGENTE", "etiqueta_vencimiento": "Vigente (933 días restantes)", "alerta_vencimiento": false, "es_menor_7_meses": false, "vencido": false, "severidad": 0}}];
-const EMBEDDED_DEFAULT_CONFIG = {"id": 1, "uuid_farmacia": "059accf8-1159-42d1-99f4-051f80ec3c09", "codigo": "DAVALSI-PIANTINI", "nombre": "Farmacia Davalsi — Principal", "eslogan": "Sistema de Farmacia Omnicanal", "ciudad_sector": "Piantini, Santo Domingo D.N.", "telefono": "809-555-0199", "direccion": "Av. Abraham Lincoln #402, Piantini, Santo Domingo", "telefono_whatsapp": "18095550199", "wa_activo": true, "mensaje_factura": "¡Gracias por su compra! Su salud es nuestra prioridad.", "usuario_admin": "nicarlis123", "pista_clave_demo": "davalsi123", "rnc": "1-31-99887-2", "banco_nombre": "Banco Popular Dominicano / Banreservas", "banco_cuenta": "Popular: 789-451230-9 | Banreservas: 960-112233-4", "wa_provider": "META_CLOUD_API", "meta_phone_number_id": "105928374650192", "meta_access_token": "", "meta_api_version": "v20.0", "twilio_account_sid": "", "twilio_auth_token": "", "twilio_from_number": "whatsapp:+14155238886", "public_base_url": "http://localhost:8080", "horario": "Lun-Dom 24 Horas", "activa": 1, "pago_tarjeta_activo": false, "envio_domicilio_activo": false, "seguro_medico_activo": false};
-
-function getLocalMobileCatalog() {
-  try {
-    const saved = localStorage.getItem('davalsi_mobile_catalog_v2');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {}
-  localStorage.setItem('davalsi_mobile_catalog_v2', JSON.stringify(EMBEDDED_DEFAULT_PRODUCTS));
-  return JSON.parse(JSON.stringify(EMBEDDED_DEFAULT_PRODUCTS));
-}
-
-function saveLocalMobileCatalog(prods) {
-  try {
-    localStorage.setItem('davalsi_mobile_catalog_v2', JSON.stringify(prods));
-  } catch (e) {}
-}
-
-function recalculateProductStockBreakdown(p) {
-  const uBlist = Math.max(1, Number(p.unidades_por_blister || 1));
-  const bCaja = Math.max(1, Number(p.blisters_por_caja || 1));
-  const uCaja = uBlist * bCaja;
-  const totalU = Math.max(0, Number(p.stock_total_unidades || (p.inventario && p.inventario.stock_total_unidades) || 0));
-  const minAlert = Number(p.stock_minimo_alerta || 10);
-
-  const cajasDisp = uCaja > 1 ? Math.floor(totalU / uCaja) : totalU;
-  const blistersDisp = uBlist > 1 ? Math.floor(totalU / uBlist) : totalU;
-  const cajasFis = uCaja > 1 ? Math.floor(totalU / uCaja) : 0;
-  const remAfterCajas = uCaja > 1 ? (totalU % uCaja) : totalU;
-  const blistFis = uBlist > 1 ? Math.floor(remAfterCajas / uBlist) : 0;
-  const unidSueltas = uBlist > 1 ? (remAfterCajas % uBlist) : remAfterCajas;
-
-  p.stock_total_unidades = totalU;
-  p.inventario = {
-    stock_total_unidades: totalU,
-    unidades_por_blister: uBlist,
-    blisters_por_caja: bCaja,
-    unidades_por_caja: uCaja,
-    cajas_disponibles: cajasDisp,
-    blisters_disponibles: blistersDisp,
-    unidades_disponibles: totalU,
-    alerta_stock_bajo: totalU <= minAlert,
-    stock_minimo_alerta: minAlert,
-    desglose_fisico: {
-      cajas_cerradas: cajasFis,
-      blisters_sueltos: blistFis,
-      unidades_sueltas: unidSueltas,
-      texto: uBlist > 1
-        ? `${cajasFis} Caja(s), ${blistFis} Blíster(es), ${unidSueltas} ${p.unidad_minima_nombre || 'Unidad'}(s)`
-        : `${totalU} ${p.unidad_minima_nombre || 'Unidad'}(s)`,
-    }
-  };
-  return p;
-}
-
-function handleAutonomousMobileApi(urlStr, init) {
-  const u = new URL(urlStr, 'http://localhost:8080');
-  const path = u.pathname;
-  const params = u.searchParams;
-  const method = (init && init.method) ? init.method.toUpperCase() : 'GET';
-  let body = {};
-  if (init && init.body) {
-    try { body = JSON.parse(init.body); } catch (e) {}
-  }
-
-  const cfgSaved = localStorage.getItem('farmasys_live_service_sync');
-  let activeCfg = Object.assign({}, EMBEDDED_DEFAULT_CONFIG);
-  if (cfgSaved) {
-    try { Object.assign(activeCfg, JSON.parse(cfgSaved)); } catch (e) {}
-  }
-
-  if (path === '/api/pharmacy/config') {
-    return { ok: true, config: activeCfg };
-  }
-
-  if (path === '/api/products' && method === 'GET') {
-    let list = getLocalMobileCatalog().map(recalculateProductStockBreakdown);
-    const search = (params.get('search') || '').trim().toLowerCase();
-    const symptom = (params.get('symptom') || '').trim().toLowerCase();
-
-    if (search) {
-      list = list.filter((p) =>
-        (p.nombre_comercial || '').toLowerCase().includes(search) ||
-        (p.principio_activo || '').toLowerCase().includes(search) ||
-        (p.categoria || '').toLowerCase().includes(search) ||
-        (p.sintomas_tags || '').toLowerCase().includes(search)
-      );
-    }
-    if (symptom && symptom !== 'todos') {
-      list = list.filter((p) =>
-        (p.sintomas_tags || '').toLowerCase().includes(symptom) ||
-        (p.categoria || '').toLowerCase().includes(symptom)
-      );
-    }
-    return { ok: true, products: list, pharmacy_config: activeCfg };
-  }
-
-  if (path === '/api/patient/auth/login' && method === 'POST') {
-    const idVal = String(body.identificador || '').trim();
-    const passVal = String(body.clave_acceso || '').trim();
-    const customPatients = JSON.parse(localStorage.getItem('davalsi_mobile_patients') || '[]');
-    const found = customPatients.find((pt) => pt.telefono === idVal || pt.cedula === idVal);
-    if (found && found.clave_acceso === passVal) {
-      return { ok: true, patient: found };
-    }
-    if ((idVal === '8095558490' || idVal === '001-1122334-5') && passVal === 'paciente123') {
-      return {
-        ok: true,
-        patient: {
-          id: 1,
-          nombre_completo: 'María Fernanda Almonte',
-          telefono: '8095558490',
-          cedula: '001-1122334-5',
-          direccion_frecuente: 'Av. Winston Churchill #102, Piantini, Santo Domingo',
-        }
-      };
-    }
-    // Permitir acceso rápido con cualquier teléfono de al menos 7 dígitos y clave >= 4 caracteres en modo móvil
-    if (idVal.length >= 6 && passVal.length >= 4) {
-      return {
-        ok: true,
-        patient: {
-          id: Date.now(),
-          nombre_completo: 'Cliente Farmacia Davalsi',
-          telefono: idVal,
-          cedula: '',
-          direccion_frecuente: 'Santo Domingo, R.D.',
-        }
-      };
-    }
-    return { ok: false, error: 'Credenciales incorrectas. Puedes usar la Cuenta Demo o Crear Cuenta Nueva.' };
-  }
-
-  if (path === '/api/patient/auth/register' && method === 'POST') {
-    const newPt = {
-      id: Date.now(),
-      nombre_completo: String(body.nombre_completo || 'Paciente Davalsi').trim(),
-      telefono: String(body.telefono || '8095550000').trim(),
-      cedula: String(body.cedula || '').trim(),
-      clave_acceso: String(body.clave_acceso || '1234').trim(),
-      direccion_frecuente: String(body.direccion_frecuente || 'Santo Domingo').trim(),
-    };
-    const customPatients = JSON.parse(localStorage.getItem('davalsi_mobile_patients') || '[]');
-    customPatients.push(newPt);
-    localStorage.setItem('davalsi_mobile_patients', JSON.stringify(customPatients));
-    return { ok: true, patient: newPt };
-  }
-
-  if (path === '/api/upload-prescription' && method === 'POST') {
-    return {
-      ok: true,
-      receta_imagen_url: body.image_base64 || '/api/sample-prescription.svg',
-    };
-  }
-
-  if (path === '/api/sales' && method === 'POST') {
-    const catalog = getLocalMobileCatalog().map(recalculateProductStockBreakdown);
-    const itemsReq = body.items || [];
-    if (!itemsReq.length) {
-      return { ok: false, error: 'El carrito está vacío.' };
-    }
-
-    const evaluatedItems = [];
-    let totalOrden = 0;
-
-    for (const item of itemsReq) {
-      const p = catalog.find((x) => Number(x.id) === Number(item.producto_id));
-      if (!p) {
-        return { ok: false, error: 'Producto no encontrado en el catálogo.' };
-      }
-      const pres = String(item.presentacion || 'UNIDAD').toUpperCase();
-      const qty = Math.max(1, parseInt(item.cantidad, 10) || 1);
-      const minUnits = calcMinUnits(p, pres, qty);
-      const stockAntes = Number(p.inventario.stock_total_unidades || 0);
-
-      if (minUnits > stockAntes) {
-        return {
-          ok: false,
-          error: `Stock insuficiente para ${p.nombre_comercial}. Solicitado: ${minUnits} unid., Disponible: ${stockAntes} unid.`
-        };
-      }
-
-      const unitPrice = Number((p.precios_presentacion && p.precios_presentacion[pres]) || p.precio_base || 0);
-      const sub = Math.round(unitPrice * qty * 100) / 100;
-      const stockDespues = stockAntes - minUnits;
-
-      p.stock_total_unidades = stockDespues;
-      recalculateProductStockBreakdown(p);
-
-      evaluatedItems.push({
-        producto_id: p.id,
-        nombre_comercial: p.nombre_comercial,
-        presentacion: pres,
-        cantidad_presentacion: qty,
-        unidades_minimas_descontadas: minUnits,
-        precio_unitario_presentacion: unitPrice,
-        subtotal: sub,
-        stock_antes_unidades: stockAntes,
-        stock_despues_unidades: stockDespues,
-      });
-      totalOrden = Math.round((totalOrden + sub) * 100) / 100;
-    }
-
-    saveLocalMobileCatalog(catalog);
-
-    const orderNum = 'DAV-' + Math.floor(10000 + Math.random() * 90000);
-    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const orderObj = {
-      id: Date.now(),
-      codigo_orden: orderNum,
-      fecha_hora: nowStr,
-      canal: 'APP_PACIENTE',
-      modalidad_entrega: body.modalidad_entrega || 'DOMICILIO',
-      cliente_nombre: body.cliente_nombre || 'Cliente App',
-      cliente_telefono: body.cliente_telefono || '18095550000',
-      cliente_direccion: body.cliente_direccion || 'Santo Domingo',
-      metodo_pago: body.metodo_pago || 'EFECTIVO',
-      seguro_ars: body.seguro_ars || 'Sin Seguro',
-      referencia_pago: body.referencia_pago || '',
-      total: totalOrden,
-      items: evaluatedItems,
-    };
-
-    const itemsLines = evaluatedItems
-      .map((i) => `• ${i.cantidad_presentacion}x ${i.presentacion} ${i.nombre_comercial} (RD$ ${i.subtotal.toFixed(2)})`)
-      .join('\n');
-
-    const waDispatches = [
-      {
-        recipient_role: 'PACIENTE_CLIENTE',
-        to_phone: orderObj.cliente_telefono,
-        provider: 'WHATSAPP_DIRECT_ENGINE',
-        http_status: 200,
-        message_text: `✅ *FARMACIA DAVALSI — ORDEN #${orderNum} CONFIRMADA*\nHola ${orderObj.cliente_nombre}, recibimos tu pedido:\n${itemsLines}\n\n💳 *Pago:* ${orderObj.metodo_pago} (${orderObj.referencia_pago})\n🛡️ *Seguro:* ${orderObj.seguro_ars}\n📍 *Entrega:* ${orderObj.cliente_direccion}\n💰 *TOTAL:* RD$ ${totalOrden.toFixed(2)}`,
-      },
-      {
-        recipient_role: 'FARMACIA_DESPACHO',
-        to_phone: activeCfg.telefono_whatsapp || '18095550199',
-        provider: 'WHATSAPP_DIRECT_ENGINE',
-        http_status: 200,
-        message_text: `🚨 *NUEVO PEDIDO APP MÓVIL #${orderNum}*\n👤 Cliente: ${orderObj.cliente_nombre} (+${orderObj.cliente_telefono})\n📍 Dirección: ${orderObj.cliente_direccion}\n💳 Método Pago: ${orderObj.metodo_pago}\n🛡️ Seguro ARS: ${orderObj.seguro_ars}\n\n📦 *Artículos:*\n${itemsLines}\n\n💰 *Total a Cobrar:* RD$ ${totalOrden.toFixed(2)}`,
-      }
-    ];
-
-    return {
-      ok: true,
-      order: orderObj,
-      whatsapp_dispatches: waDispatches,
-    };
-  }
-
-  if (path === '/api/dashboard') {
-    return {
-      ok: true,
-      metrics: {
-        pedidos_web_pendientes: 0,
-        alertas_stock_bajo_count: 0,
-        total_whatsapp_logs: 0,
-        total_unidades_minimas_stock: 1500,
-        ventas_totales_rd: 0,
-        ventas_pos_rd: 0,
-        ventas_app_rd: 0,
-        alertas_stock_bajo_items: [],
-      }
-    };
-  }
-
-  return { ok: true, transactions: [], logs: [], config: activeCfg };
-}
-
 function openDirectOrderWhatsApp() {
   const order = state.lastConfirmedAppOrder;
   if (!order) return;
   const itemsText = (order.items || [])
     .map((i) => `• ${i.cantidad_presentacion}x ${i.presentacion} ${i.nombre_comercial} (${formatRD(i.subtotal)})`)
     .join('\n');
+  const phName = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'Farmacia';
   const msg =
-    `Hola *Farmacia Davalsi*, acabo de realizar el pedido *#${order.codigo_orden}* desde la App Móvil:\n\n` +
+    `Hola *${phName}*, acabo de realizar el pedido *#${order.codigo_orden}* desde la App Móvil:\n\n` +
     `👤 *Cliente:* ${order.cliente_nombre}\n` +
     `📞 *Teléfono:* ${order.cliente_telefono}\n` +
     `📍 *Entrega:* ${order.cliente_direccion}\n` +
@@ -2370,79 +2356,30 @@ function openDirectOrderWhatsApp() {
     `💳 *Método de Pago:* ${order.metodo_pago} (${order.referencia_pago || ''})\n\n` +
     `💊 *Detalle del Pedido:*\n${itemsText}\n\n` +
     `💰 *TOTAL:* ${formatRD(order.total)}`;
-  const farmPhone = (EMBEDDED_DEFAULT_CONFIG.telefono_whatsapp || '18095550199').replace(/\D/g, '');
+  const rawWa = (state.pharmacyConfig && (state.pharmacyConfig.telefono_whatsapp || state.pharmacyConfig.whatsapp_notificaciones)) || '18095550199';
+  const farmPhone = String(rawWa).replace(/\D/g, '');
   const waUrl = `https://wa.me/${farmPhone}?text=${encodeURIComponent(msg)}`;
   window.open(waUrl, '_blank');
 }
 
 function configurePosServerIp() {
   const currentUrl = localStorage.getItem('davalsi_apk_server_url') || 'http://192.168.1.100:8080';
-  const nextUrl = window.prompt(
-    '🌐 Conexión opcional con Caja POS en Red Wi-Fi:\nIngresa la dirección IP del servidor POS (o deja vacío para usar Modo Autónomo en el celular):',
+  const newUrl = prompt(
+    'Ingresa la URL del servidor FarmaSys (ejemplo: https://tu-app.onrender.com o http://192.168.1.100:8080):',
     currentUrl
   );
-  if (nextUrl !== null) {
-    const clean = nextUrl.trim();
+  if (newUrl !== null) {
+    const clean = newUrl.trim().replace(/\/$/, '');
     if (clean) {
       localStorage.setItem('davalsi_apk_server_url', clean);
       showToast(`Conectando con servidor POS: ${clean}`);
     } else {
       localStorage.removeItem('davalsi_apk_server_url');
-      showToast('Modo Autónomo Móvil activado.');
+      showToast('URL de servidor personalizada eliminada.');
     }
     refreshAllData();
   }
 }
-
-// Interceptor global de fetch: intenta primero el servidor POS (si está en red) y si no hay conexión
-// o se ejecuta desde el APK instalado en cualquier celular, procesa la operación con el Motor Autónomo.
-(function() {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = async function(input, init) {
-    let urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-    const isApiCall = urlStr.startsWith('/api/') || urlStr.includes('/api/');
-
-    if (!isApiCall) {
-      return nativeFetch(input, init);
-    }
-
-    const isFileProtocol = (window.location.protocol === 'file:' || window.location.protocol === 'content:');
-    let targetUrl = urlStr;
-    if (isFileProtocol && urlStr.startsWith('/')) {
-      const savedServer = localStorage.getItem('davalsi_apk_server_url');
-      if (savedServer) {
-        targetUrl = savedServer.replace(/\/$/, '') + urlStr;
-      } else {
-        // Responder instantáneamente con el Motor Autónomo del APK en el celular
-        const mockData = handleAutonomousMobileApi(urlStr, init);
-        return new Response(JSON.stringify(mockData), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2800);
-      const resp = await nativeFetch(targetUrl, Object.assign({}, init || {}, { signal: controller.signal }));
-      clearTimeout(timer);
-      if (resp && (resp.ok || resp.status === 400)) {
-        return resp;
-      }
-    } catch (err) {
-      // Fallback automático al Motor Autónomo si el celular no está en la red del servidor PC
-    }
-
-    const fallbackData = handleAutonomousMobileApi(urlStr, init);
-    return new Response(JSON.stringify(fallbackData), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  };
-})();
-
-
 
 // =============================================================================
 // PROGRAMA DE PACIENTES CRÓNICOS Y MEDICACIÓN CONTINUA (APP PACIENTE)
@@ -2620,7 +2557,7 @@ async function submitChronicPatientFromApp(event) {
 
   try {
     const payload = {
-      farmacia_id: 1,
+      farmacia_id: getActiveAppPharmacyId(),
       paciente_nombre: nameVal,
       paciente_telefono: phoneVal,
       paciente_cedula: cedulaVal,
@@ -2722,7 +2659,7 @@ async function loadMyChronicTreatments() {
   `;
 
   try {
-    const res = await fetch(`/api/chronic-patients?farmacia_id=1&telefono=${encodeURIComponent(phone)}`);
+    const res = await fetch(`/api/chronic-patients?farmacia_id=${getActiveAppPharmacyId()}&telefono=${encodeURIComponent(phone)}`);
     const data = await res.json();
 
     const patients = (data.patients && data.patients.patients) ? data.patients.patients : [];
@@ -2831,7 +2768,7 @@ async function renewMyChronicTreatment(patientId, duracionDias) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        farmacia_id: 1,
+        farmacia_id: getActiveAppPharmacyId(),
         paciente_id: patientId,
         dias_agregados: duracionDias
       })
@@ -2869,7 +2806,7 @@ window.renewMyChronicTreatment = renewMyChronicTreatment;
    ========================================================================= */
 async function loadPromotionalKits() {
   try {
-    const res = await fetch('/api/promotional-kits?farmacia_id=1');
+    const res = await fetch(`/api/promotional-kits?farmacia_id=${getActiveAppPharmacyId()}`);
     const data = await res.json();
     if (data.ok) {
       state.promotionalKits = data.kits || [];
@@ -3163,7 +3100,7 @@ function triggerAppAiSubstituteHelper(queryText) {
   if (appAiSearchDebounce) clearTimeout(appAiSearchDebounce);
   appAiSearchDebounce = setTimeout(async () => {
     try {
-      const fid = state.activePharmacyId || 1;
+      const fid = getActiveAppPharmacyId();
       const res = await fetch(`/api/ai/suggest-active-ingredient?farmacia_id=${fid}&q=${encodeURIComponent(q)}`);
       const data = await res.json();
       if (!data.ok || !data.total_opciones_en_stock) {
@@ -3286,7 +3223,7 @@ async function searchAppAiModalSubstitute(queryText) {
   resultsEl.innerHTML = `<div class="p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500 font-semibold">🤖 Analizando principio activo y buscando equivalentes disponibles en inventario...</div>`;
 
   try {
-    const fid = state.activePharmacyId || 1;
+    const fid = getActiveAppPharmacyId();
     const res = await fetch(`/api/ai/suggest-active-ingredient?farmacia_id=${fid}&q=${encodeURIComponent(q)}`);
     const data = await res.json();
 
@@ -3319,7 +3256,7 @@ async function searchAppAiModalSubstitute(queryText) {
     let outHtml = `
       <div class="p-3.5 rounded-2xl bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2 shadow-sm">
         <div>
-          <span class="text-[10px] font-black uppercase tracking-wider text-teal-400 block">Principio Activo Analizado por FarmaIA:</span>
+          <span class="text-[10px] font-black uppercase tracking-wider text-teal-400 block">Principio Activo Analizado:</span>
           <h5 class="text-sm font-black text-white flex items-center gap-2">
             <span>🔬</span> <span>${data.principio_activo_detectado || q}</span>
           </h5>
@@ -3505,7 +3442,7 @@ async function loadAppChronic5DayReminders(autoBannerOnly = false) {
     listEl.innerHTML = `<div class="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500 font-semibold">⏳ Verificando tus medicamentos crónicos registrados...</div>`;
   }
 
-  const fid = state.activePharmacyId || 1;
+  const fid = getActiveAppPharmacyId();
   const url = `/api/ai/chronic-10d-reminders?farmacia_id=${fid}&days_ahead=5&telefono=${encodeURIComponent(phoneFilter)}`;
 
   fetch(url)
@@ -3685,7 +3622,7 @@ async function savePatientVitalsFromApp() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        farmacia_id: state.activePharmacyId || 1,
+        farmacia_id: getActiveAppPharmacyId(),
         paciente_nombre: nameVal,
         paciente_telefono: phoneVal,
         tipo_servicio: tipoServicio,
@@ -3696,7 +3633,7 @@ async function savePatientVitalsFromApp() {
         condicion_ayuno: cond,
         peso_kg: peso > 0 ? peso : null,
         talla_cm: talla > 0 ? talla : null,
-        atendido_por: 'App Paciente / FarmaIA Davalsi',
+        atendido_por: 'App Paciente / Farmacia Davalsi',
         observaciones: 'Registrado desde la App con verificación interactiva de técnica.'
       })
     });
@@ -3797,7 +3734,7 @@ async function askAppGuideQuestion(questionText) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        farmacia_id: state.activePharmacyId || 1,
+        farmacia_id: getActiveAppPharmacyId(),
         question: questionText
       })
     });
@@ -3847,10 +3784,10 @@ function runAppGuideAction(actionKey) {
 }
 
 function openDirectPharmacyWhatsAppHelp() {
-  const farmaciaPhone = (state.pharmacyConfig && state.pharmacyConfig.whatsapp_notificaciones)
-    ? String(state.pharmacyConfig.whatsapp_notificaciones).replace(/\D/g, '')
-    : '18492831899';
-  const msg = 'Hola Farmacia Davalsi, estoy usando la App y deseo asistencia para realizar mi pedido de medicamentos.';
+  const rawWa = (state.pharmacyConfig && (state.pharmacyConfig.telefono_whatsapp || state.pharmacyConfig.whatsapp_notificaciones)) || '18492831899';
+  const farmaciaPhone = String(rawWa).replace(/\D/g, '');
+  const phName = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'Farmacia';
+  const msg = `Hola ${phName}, estoy usando la App y deseo asistencia para realizar mi pedido de medicamentos.`;
   window.open(`https://wa.me/${farmaciaPhone}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
@@ -3870,7 +3807,7 @@ async function handleCustomerComplaintSubmit(event) {
 
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span>🤖 FarmaIA procesando...</span>';
+    btn.innerHTML = '<span>⏳ Procesando receta...</span>';
   }
 
   try {
@@ -3878,7 +3815,7 @@ async function handleCustomerComplaintSubmit(event) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        farmacia_id: 1,
+        farmacia_id: getActiveAppPharmacyId(),
         cliente_nombre: nombre,
         cliente_telefono: telefono,
         mensaje: mensaje
@@ -3985,6 +3922,7 @@ const FARMAIA_3D_DIALOGUES = {
 };
 
 function setFarmaIa3dSpeech(text, durationMs = 6000) {
+  return;
   const bubble = document.getElementById('farmaia-bubble-msg');
   const bubbleText = document.getElementById('farmaia-bubble-text');
   if (!bubble || !bubbleText) return;
@@ -4000,6 +3938,7 @@ function setFarmaIa3dSpeech(text, durationMs = 6000) {
 }
 
 function triggerFarmaIaReaction(role) {
+  return;
   if (window.farmaIaModal3D) {
     window.farmaIaModal3D.setMode(role);
     window.farmaIaModal3D.triggerSalute();
@@ -4038,6 +3977,7 @@ window.toggleFarmaIaFabMenu = toggleFarmaIaFabMenu;
    INICIALIZACIÓN DEL MOTOR 3D EN LA APP DE PACIENTES
    ========================================================================= */
 function initFarmaIa3dViewers() {
+  return;
   if (typeof FarmaIa3DViewer === 'undefined' || typeof THREE === 'undefined') return;
 
   // 1. Floating Action Button 3D avatar
@@ -4196,7 +4136,7 @@ function renderAppOcrResults(data) {
           ` : `
             <div class="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
               <span class="text-emerald-700 font-extrabold flex items-center gap-1"><span>✅</span> <span>Seguro para tu salud</span></span>
-              <span class="text-slate-400">Verificado por FarmaIA</span>
+              <span class="text-slate-400">Verificado por el sistema</span>
             </div>
           `}
         </div>
@@ -4260,7 +4200,7 @@ async function handleCustomerComplaintSubmitAparte(event) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        farmacia_id: 1,
+        farmacia_id: getActiveAppPharmacyId(),
         cliente_nombre: nombre || 'Cliente de la App',
         cliente_telefono: telefono,
         mensaje: mensaje
@@ -4325,7 +4265,7 @@ async function checkPatientAdherenceReminders() {
     const authUser = window.state && window.state.user ? window.state.user : null;
     const phone = (authUser && authUser.telefono) ? authUser.telefono : (localStorage.getItem('farma_patient_phone') || '');
     
-    const res = await fetch(`/api/adherencia/renovaciones?farmacia_id=1&dias=5`);
+    const res = await fetch(`/api/adherencia/renovaciones?farmacia_id=${getActiveAppPharmacyId()}&dias=5`);
     const data = await res.json();
     if (!data.ok || !data.renovaciones || data.renovaciones.length === 0) return;
 
@@ -4506,11 +4446,17 @@ window.closeDeliveryTrackingModal = function() {
 async function refrescarRastreoDelivery() {
   try {
     const url = currentTrackingOrderCode
-      ? `/api/delivery/tracking?farmacia_id=1&codigo_orden=${encodeURIComponent(currentTrackingOrderCode)}`
-      : `/api/delivery/tracking?farmacia_id=1`;
+      ? `/api/delivery/tracking?farmacia_id=${getActiveAppPharmacyId()}&codigo_orden=${encodeURIComponent(currentTrackingOrderCode)}`
+      : `/api/delivery/tracking?farmacia_id=${getActiveAppPharmacyId()}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.ok) return;
+    if (!data.ok) {
+      const orderTitle = document.getElementById('tracking-order-title');
+      const statusPill = document.getElementById('tracking-status-pill');
+      if (orderTitle) orderTitle.textContent = 'Sin pedidos activos';
+      if (statusPill) statusPill.textContent = 'ℹ️ SIN DELIVERY ACTIVO';
+      return;
+    }
 
     // Actualizar Textos y Badges
     const orderTitle = document.getElementById('tracking-order-title');
@@ -4523,13 +4469,14 @@ async function refrescarRastreoDelivery() {
 
     if (orderTitle) orderTitle.textContent = `#${data.codigo_orden}`;
     if (statusPill) statusPill.textContent = data.estado_delivery === 'EN_CAMINO' ? '🛵 EN CAMINO' : (data.estado_delivery === 'ENTREGADO' ? '✅ ENTREGADO' : '📦 PREPARANDO');
-    if (etaPill) etaPill.textContent = `⏱️ ETA: ~${data.eta_minutos || 8} minutos`;
-    if (courierName && data.repartidor) courierName.textContent = data.repartidor.nombre || 'Pedro Ramírez';
+    if (etaPill) etaPill.textContent = data.estado_delivery === 'ENTREGADO' ? '✅ Entregado' : `⏱️ ETA: ~${data.eta_minutos || 12} minutos`;
+    if (courierName && data.repartidor) courierName.textContent = data.repartidor.nombre || 'Por asignar';
     if (courierPhone && data.repartidor) {
-      courierPhone.textContent = `Tel: ${data.repartidor.telefono || '809-555-8899'}`;
-      courierPhone.href = `tel:${(data.repartidor.telefono || '').replace(/\D/g, '')}`;
+      const tel = data.repartidor.telefono || '';
+      courierPhone.textContent = tel ? `Tel: ${tel}` : 'Tel: Consultar sucursal';
+      courierPhone.href = tel ? `tel:${tel.replace(/\D/g, '')}` : '#';
     }
-    if (courierVeh && data.repartidor) courierVeh.textContent = data.repartidor.vehiculo || 'Motocicleta Honda C-90';
+    if (courierVeh && data.repartidor) courierVeh.textContent = data.repartidor.vehiculo || 'Delivery Farmacia';
     if (addrDestino) addrDestino.textContent = data.cliente_direccion || 'Tu Domicilio';
 
     // Renderizar o actualizar Mapa Leaflet
@@ -4606,4 +4553,702 @@ function renderizarMapaCliente(data) {
   L.polyline(latlngs, { color: '#0d9488', weight: 4, dashArray: '6, 6' }).addTo(appTrackingMap);
   appTrackingMap.fitBounds(L.latLngBounds(latlngs), { padding: [35, 35] });
   setTimeout(() => appTrackingMap.invalidateSize(), 200);
+}
+
+
+// ============================================================================
+// MIS PEDIDOS + REPETIR COMPRA EN 1 CLIC
+// ============================================================================
+
+function openPatientOrdersModal() {
+  const modal = document.getElementById('patient-orders-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  const phTitle = document.getElementById('patient-orders-pharmacy-name');
+  if (phTitle) phTitle.textContent = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'esta Farmacia';
+
+  const phoneInput = document.getElementById('patient-orders-phone-input');
+  if (phoneInput && !phoneInput.value.trim()) {
+    const savedPhone = (currentPatient && currentPatient.telefono) || document.getElementById('app-client-phone')?.value || '';
+    if (savedPhone) phoneInput.value = savedPhone.trim();
+  }
+  loadPatientOrders();
+}
+
+function closePatientOrdersModal() {
+  const modal = document.getElementById('patient-orders-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function loadPatientOrders() {
+  const listEl = document.getElementById('patient-orders-list');
+  const phoneVal = (document.getElementById('patient-orders-phone-input')?.value || '').trim();
+  const patientName = (currentPatient && currentPatient.nombre_completo) || '';
+
+  if (!phoneVal && !patientName) {
+    if (listEl) {
+      listEl.innerHTML = '<div class="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">Escribe tu número de teléfono arriba o inicia sesión para consultar tus pedidos en esta farmacia.</div>';
+    }
+    return;
+  }
+
+  if (listEl) {
+    listEl.innerHTML = '<div class="p-6 text-center text-xs text-slate-500">Cargando tus pedidos...</div>';
+  }
+
+  try {
+    const params = new URLSearchParams();
+    params.set('farmacia_id', String(getActiveAppPharmacyId()));
+    if (phoneVal) params.set('telefono', phoneVal);
+    if (patientName) params.set('nombre', patientName);
+
+    const res = await fetch(`/api/patient/orders?${params.toString()}`);
+    const data = await res.json();
+    if (!data.ok) {
+      if (listEl) listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">${data.error || 'No se pudieron cargar los pedidos.'}</div>`;
+      return;
+    }
+    state.patientOrders = data.orders || [];
+    renderPatientOrdersList();
+  } catch (e) {
+    if (listEl) listEl.innerHTML = '<div class="p-4 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">Error de conexión al consultar tus pedidos.</div>';
+  }
+}
+
+function renderPatientOrdersList() {
+  const listEl = document.getElementById('patient-orders-list');
+  if (!listEl) return;
+  const orders = state.patientOrders || [];
+  if (orders.length === 0) {
+    listEl.innerHTML = '<div class="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">No encontramos pedidos registrados con esos datos en la farmacia seleccionada.</div>';
+    return;
+  }
+
+  const badgeStyle = (estado) => {
+    const st = String(estado || '').toUpperCase();
+    if (st === 'ENTREGADO' || st === 'COMPLETADO' || st === 'APROBADO') return 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    if (st === 'EN_CAMINO' || st === 'LISTO_PARA_ENTREGA') return 'bg-sky-100 text-sky-800 border-sky-300';
+    if (st === 'RECHAZADO' || st === 'ANULADO') return 'bg-rose-100 text-rose-800 border-rose-300';
+    return 'bg-amber-100 text-amber-800 border-amber-300';
+  };
+
+  listEl.innerHTML = orders.map((o) => {
+    const estadoMostrado = o.estado_delivery || o.estado_pedido || 'PENDIENTE';
+    const itemsHtml = (o.items || []).map((it) => `
+      <li class="flex items-center justify-between text-[11px] text-slate-700">
+        <span>• <strong>${it.cantidad_presentacion}x</strong> ${it.presentacion} ${it.nombre_comercial}</span>
+        <span class="font-mono font-bold">${formatRD(it.subtotal)}</span>
+      </li>
+    `).join('') || '<li class="text-[11px] text-slate-400">Sin detalle de artículos</li>';
+
+    const etaTxt = o.eta_minutos ? ` • ETA ~${o.eta_minutos} min` : '';
+    return `
+      <div class="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="font-mono font-black text-xs text-slate-900">#${o.codigo_orden}</span>
+            <span class="text-[11px] text-slate-500 ml-2">${o.fecha_hora || o.fecha_dia || ''}</span>
+          </div>
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black border ${badgeStyle(estadoMostrado)}">
+            ${estadoMostrado}${etaTxt}
+          </span>
+        </div>
+
+        <ul class="space-y-1 bg-white p-2.5 rounded-xl border border-slate-200">${itemsHtml}</ul>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div class="text-xs font-extrabold text-slate-900">
+            Total: <span class="text-teal-700">${formatRD(o.total)}</span>
+            <span class="text-[10px] font-semibold text-slate-500 ml-1">(${o.metodo_pago || 'EFECTIVO'})</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="closePatientOrdersModal(); openDeliveryTrackingModal('${o.codigo_orden}');" class="px-3 py-1.5 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-900 font-extrabold text-[11px] cursor-pointer">
+              🛵 Rastrear
+            </button>
+            <button type="button" onclick="repeatPatientOrder('${o.codigo_orden}')" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-[11px] cursor-pointer">
+              🔄 Repetir Pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function repeatPatientOrder(codigoOrden) {
+  const order = (state.patientOrders || []).find((o) => o.codigo_orden === codigoOrden);
+  if (!order || !Array.isArray(order.items) || order.items.length === 0) {
+    showToast('Este pedido no tiene artículos disponibles para repetir.', 'error');
+    return;
+  }
+
+  if (!state.products || state.products.length === 0) {
+    await loadProducts();
+  }
+
+  let addedCount = 0;
+  let skippedNames = [];
+
+  for (const it of order.items) {
+    const prod = (state.products || []).find(
+      (p) => Number(p.id) === Number(it.producto_id) ||
+        (it.codigo_barras && p.codigo_barras === it.codigo_barras) ||
+        String(p.nombre_comercial || '').toLowerCase() === String(it.nombre_comercial || '').toLowerCase()
+    );
+
+    if (!prod || Number(prod.stock_total_unidades || 0) <= 0) {
+      skippedNames.push(it.nombre_comercial || 'Producto');
+      continue;
+    }
+
+    const pres = it.presentacion || 'UNIDAD';
+    const qty = Math.max(1, parseInt(it.cantidad_presentacion || 1, 10));
+    const existing = state.appCart.find((c) => !c.es_kit && c.product && c.product.id === prod.id && c.presentacion === pres);
+    if (existing) {
+      existing.cantidad += qty;
+    } else {
+      state.appCart.push({ product: prod, presentacion: pres, cantidad: qty });
+    }
+    addedCount += 1;
+  }
+
+  updateFloatingCartUI();
+  renderCartDrawerItems();
+  closePatientOrdersModal();
+
+  if (addedCount > 0) {
+    openCartDrawer();
+    const extra = skippedNames.length > 0 ? ` (Sin stock actual: ${skippedNames.join(', ')})` : '';
+    showToast(`🔄 Se cargaron ${addedCount} artículo(s) del pedido #${codigoOrden} al carrito.${extra}`, 'success');
+  } else {
+    showToast(`Ningún artículo del pedido #${codigoOrden} tiene stock disponible en este momento.`, 'error');
+  }
+}
+
+
+// ============================================================================
+// DIRECCIONES GUARDADAS (CASA / TRABAJO) Y TARIFA DE ENVÍO CONFIGURABLE
+// ============================================================================
+
+function calcAppShippingFee(subtotalRD) {
+  const deliveryAllowed = state.pharmacyConfig ? state.pharmacyConfig.envio_domicilio_activo !== false : true;
+  const effectiveMode = deliveryAllowed ? (state.appDeliveryMode || 'DOMICILIO') : 'RETIRO_FARMACIA';
+  if (effectiveMode !== 'DOMICILIO') {
+    return { fee: 0, label: 'Retiro en farmacia:' };
+  }
+  const tarifa = Math.max(0, Number((state.pharmacyConfig && state.pharmacyConfig.tarifa_envio_rd) || 0));
+  const gratisDesde = Math.max(0, Number((state.pharmacyConfig && state.pharmacyConfig.envio_gratis_desde_rd) || 0));
+  if (tarifa <= 0) {
+    return { fee: 0, label: 'Costo de envío (Domicilio):' };
+  }
+  if (gratisDesde > 0 && subtotalRD >= gratisDesde) {
+    return { fee: 0, label: `Envío gratis (compra ≥ ${formatRD(gratisDesde)}):` };
+  }
+  const extraHint = gratisDesde > 0 ? ` (gratis desde ${formatRD(gratisDesde)})` : '';
+  return { fee: tarifa, label: `Costo de envío${extraHint}:` };
+}
+
+function getSavedAddressesStorageKey() {
+  const tel = (currentPatient && currentPatient.telefono) || document.getElementById('app-client-phone')?.value || 'guest';
+  const clean = String(tel).replace(/\D/g, '') || 'guest';
+  return `farmasys_saved_addresses_${clean}`;
+}
+
+function loadSavedAddresses() {
+  try {
+    const raw = localStorage.getItem(getSavedAddressesStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, 3) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveAddressesList(list) {
+  try {
+    localStorage.setItem(getSavedAddressesStorageKey(), JSON.stringify((list || []).slice(0, 3)));
+  } catch (e) {}
+}
+
+function renderSavedAddressesBar() {
+  const bar = document.getElementById('app-saved-addresses-bar');
+  if (!bar) return;
+  const list = loadSavedAddresses();
+  if (list.length === 0) {
+    bar.innerHTML = '<span class="text-[10px] text-slate-400 font-semibold">💡 Puedes guardar hasta 3 direcciones frecuentes (Casa, Trabajo, Otro).</span>';
+    return;
+  }
+  const icons = { Casa: '🏠', Trabajo: '🏢', Otro: '📍' };
+  bar.innerHTML = list.map((item, idx) => `
+    <div class="inline-flex items-center rounded-lg border border-teal-300 bg-teal-50 text-teal-900 text-[11px] font-bold overflow-hidden">
+      <button type="button" onclick="applySavedAddress(${idx})" title="${escapeJsQuotes(item.address)}" class="px-2 py-1 hover:bg-teal-100 cursor-pointer flex items-center gap-1">
+        <span>${icons[item.label] || '📍'}</span> <span>${item.label}</span>
+      </button>
+      <button type="button" onclick="deleteSavedAddress(${idx})" title="Eliminar dirección" class="px-1.5 py-1 text-rose-600 hover:bg-rose-100 cursor-pointer text-[10px]">✕</button>
+    </div>
+  `).join('');
+}
+
+function applySavedAddress(idx) {
+  const list = loadSavedAddresses();
+  const item = list[idx];
+  if (!item) return;
+  const input = document.getElementById('app-client-address');
+  if (input) input.value = item.address;
+  showToast(`📍 Dirección "${item.label}" aplicada.`);
+}
+
+function deleteSavedAddress(idx) {
+  const list = loadSavedAddresses();
+  list.splice(idx, 1);
+  saveAddressesList(list);
+  renderSavedAddressesBar();
+}
+
+function promptSaveClientAddress() {
+  const input = document.getElementById('app-client-address');
+  const addr = (input ? input.value : '').trim();
+  if (!addr || addr.startsWith('Retiro en Sucursal')) {
+    showToast('Escribe primero una dirección de entrega válida para guardarla.', 'error');
+    return;
+  }
+  const labelRaw = prompt('Etiqueta para esta dirección (ej. Casa, Trabajo u Otro):', 'Casa');
+  if (labelRaw === null) return;
+  const label = (labelRaw.trim() || 'Casa').slice(0, 18);
+
+  const list = loadSavedAddresses().filter((x) => x.label.toLowerCase() !== label.toLowerCase());
+  list.unshift({ label, address: addr });
+  saveAddressesList(list.slice(0, 3));
+  renderSavedAddressesBar();
+  showToast(`💾 Dirección "${label}" guardada para tus próximos pedidos.`);
+}
+
+
+// ============================================================================
+// BARRA FIJA DE SEGUIMIENTO EN VIVO + WHATSAPP POR ORDEN
+// ============================================================================
+let activeOrderPollTimer = null;
+
+function getActiveOrderStorageKey() {
+  return `farmasys_active_order_${getActiveAppPharmacyId()}`;
+}
+
+function saveActiveAppOrder(order) {
+  if (!order || !order.codigo_orden) return;
+  try {
+    localStorage.setItem(getActiveOrderStorageKey(), JSON.stringify({
+      codigo_orden: order.codigo_orden,
+      farmacia_id: getActiveAppPharmacyId(),
+      estado: order.estado_pedido || 'PENDIENTE',
+      total: order.total || 0,
+      ts: Date.now(),
+    }));
+    refreshActiveOrderBanner();
+  } catch (e) {}
+}
+
+function getSavedActiveAppOrder() {
+  try {
+    const raw = localStorage.getItem(getActiveOrderStorageKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.codigo_orden) return null;
+    // Expirar automáticamente tras 24 horas
+    if (parsed.ts && (Date.now() - parsed.ts > 24 * 60 * 60 * 1000)) {
+      localStorage.removeItem(getActiveOrderStorageKey());
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function dismissActiveOrderBanner() {
+  try { localStorage.removeItem(getActiveOrderStorageKey()); } catch (e) {}
+  const el = document.getElementById('app-active-order-banner');
+  if (el) el.classList.add('hidden');
+}
+
+function formatFriendlyOrderStatus(rawStatus) {
+  const st = String(rawStatus || '').toUpperCase();
+  if (st === 'EN_CAMINO') return 'En camino 🛵';
+  if (st === 'LISTO_PARA_ENTREGA') return 'Listo para entrega 📦';
+  if (st === 'APROBADO' || st === 'COMPLETADO') return 'Aprobado / En preparación ✅';
+  if (st === 'ENTREGADO') return 'Entregado ✅';
+  if (st === 'RECHAZADO' || st === 'ANULADO') return 'Cancelado / Anulado';
+  return 'En preparación ⏳';
+}
+
+async function refreshActiveOrderBanner(showFeedback = false) {
+  const banner = document.getElementById('app-active-order-banner');
+  if (!banner) return;
+  const saved = getSavedActiveAppOrder();
+  if (!saved) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  const codeEl = document.getElementById('active-banner-order-code');
+  const statusEl = document.getElementById('active-banner-order-status');
+  const etaEl = document.getElementById('active-banner-order-eta');
+  if (codeEl) codeEl.textContent = `#${saved.codigo_orden}`;
+
+  let currentStatus = saved.estado || 'PENDIENTE';
+  let etaText = '';
+
+  try {
+    const res = await fetch(`/api/delivery/tracking?farmacia_id=${getActiveAppPharmacyId()}&codigo_orden=${encodeURIComponent(saved.codigo_orden)}`);
+    const data = await res.json();
+    if (data && data.ok && data.tracking) {
+      currentStatus = data.tracking.estado_delivery || currentStatus;
+      if (data.tracking.eta_minutos && String(currentStatus).toUpperCase() !== 'ENTREGADO') {
+        etaText = `ETA ~${data.tracking.eta_minutos} min`;
+      }
+      if (data.tracking.repartidor_nombre && String(currentStatus).toUpperCase() === 'EN_CAMINO') {
+        etaText = `${data.tracking.repartidor_nombre}${etaText ? ' • ' + etaText : ''}`;
+      }
+    }
+  } catch (e) {}
+
+  if (statusEl) statusEl.textContent = formatFriendlyOrderStatus(currentStatus);
+  if (etaEl) etaEl.textContent = etaText;
+  banner.classList.remove('hidden');
+
+  if (showFeedback) {
+    showToast(`Estado actualizado para #${saved.codigo_orden}: ${formatFriendlyOrderStatus(currentStatus)}`, 'info');
+  }
+}
+
+function startActiveOrderPolling() {
+  if (activeOrderPollTimer) clearInterval(activeOrderPollTimer);
+  activeOrderPollTimer = setInterval(() => {
+    const saved = getSavedActiveAppOrder();
+    if (saved) refreshActiveOrderBanner(false);
+  }, 15000);
+}
+
+function openActiveOrderMap() {
+  const saved = getSavedActiveAppOrder();
+  if (saved && saved.codigo_orden) {
+    openDeliveryTrackingModal(saved.codigo_orden);
+  } else {
+    openDeliveryTrackingModal();
+  }
+}
+
+function openActiveOrderWhatsApp() {
+  const saved = getSavedActiveAppOrder();
+  const code = saved ? saved.codigo_orden : '';
+  const phName = (state.pharmacyConfig && state.pharmacyConfig.nombre) || 'Farmacia';
+  const rawWa = (state.pharmacyConfig && (state.pharmacyConfig.telefono_whatsapp || state.pharmacyConfig.whatsapp_notificaciones)) || '18095550199';
+  const farmPhone = String(rawWa).replace(/\D/g, '');
+  const msg = code
+    ? `Hola *${phName}*, quiero consultar el seguimiento de mi pedido *#${code}*.`
+    : `Hola *${phName}*, quiero consultar el seguimiento de mi pedido.`;
+  window.open(`https://wa.me/${farmPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+
+// ============================================================================
+// FAVORITOS POR FARMACIA EN EL CATÁLOGO
+// ============================================================================
+
+function getAppFavoritesStorageKey() {
+  return `farmasys_app_favorites_${getActiveAppPharmacyId()}`;
+}
+
+function getAppFavorites() {
+  try {
+    const raw = localStorage.getItem(getAppFavoritesStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map((id) => Number(id)) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function isAppFavorite(productId) {
+  return getAppFavorites().includes(Number(productId));
+}
+
+function toggleAppFavorite(productId) {
+  const pid = Number(productId);
+  let favs = getAppFavorites();
+  const exists = favs.includes(pid);
+  if (exists) {
+    favs = favs.filter((id) => id !== pid);
+    showToast('Quitado de tus favoritos.', 'info');
+  } else {
+    favs.push(pid);
+    showToast('⭐ Guardado en tus Favoritos de esta farmacia.', 'success');
+  }
+  try {
+    localStorage.setItem(getAppFavoritesStorageKey(), JSON.stringify(favs));
+  } catch (e) {}
+
+  if (state.selectedSymptom === 'favoritos') {
+    state.filteredProducts = (state.products || []).filter((p) => favs.includes(Number(p.id)));
+  }
+  renderAppProductsGrid();
+}
+
+
+// ============================================================================
+// MODO REPARTIDOR CONECTADO EN TODO MOMENTO + TRANSMISIÓN GPS EN VIVO
+// ============================================================================
+let courierSession = null;
+let courierActiveOrderCode = null;
+let courierGpsWatchId = null;
+let courierGpsBackupTimer = null;
+let courierLastCoords = { lat: 18.4746, lng: -69.9328 };
+
+function openCourierModeModal() {
+  const modal = document.getElementById('courier-mode-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  try {
+    const saved = localStorage.getItem(`farmasys_courier_${getActiveAppPharmacyId()}`);
+    if (saved) {
+      courierSession = JSON.parse(saved);
+    }
+  } catch (e) {}
+
+  syncCourierModalView();
+}
+
+function closeCourierModeModal() {
+  const modal = document.getElementById('courier-mode-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function syncCourierModalView() {
+  const loginForm = document.getElementById('courier-login-form');
+  const activePanel = document.getElementById('courier-active-panel');
+  const nameEl = document.getElementById('courier-session-name');
+  if (courierSession && courierSession.username) {
+    if (loginForm) loginForm.classList.add('hidden');
+    if (activePanel) activePanel.classList.remove('hidden');
+    if (nameEl) nameEl.textContent = `${courierSession.nombre_completo} (${courierSession.username})`;
+    loadCourierOrders();
+  } else {
+    if (loginForm) loginForm.classList.remove('hidden');
+    if (activePanel) activePanel.classList.add('hidden');
+  }
+}
+
+async function handleCourierLogin(event) {
+  event.preventDefault();
+  const errEl = document.getElementById('courier-login-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  const username = document.getElementById('courier-login-username')?.value?.trim() || '';
+  const clave = document.getElementById('courier-login-password')?.value?.trim() || '';
+
+  try {
+    const res = await fetch('/api/delivery/login-repartidor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: getActiveAppPharmacyId(),
+        username,
+        clave_acceso: clave,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'Credenciales inválidas.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    courierSession = data;
+    try {
+      localStorage.setItem(`farmasys_courier_${getActiveAppPharmacyId()}`, JSON.stringify(courierSession));
+    } catch (e) {}
+    syncCourierModalView();
+    showToast(`🛵 Conectado como repartidor: ${courierSession.nombre_completo}`, 'success');
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = 'Error de conexión con el servidor.';
+      errEl.classList.remove('hidden');
+    }
+  }
+}
+
+function logoutCourierMode() {
+  stopCourierGpsTransmission();
+  courierSession = null;
+  try { localStorage.removeItem(`farmasys_courier_${getActiveAppPharmacyId()}`); } catch (e) {}
+  syncCourierModalView();
+}
+
+async function loadCourierOrders() {
+  const listEl = document.getElementById('courier-orders-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch(`/api/delivery/pedidos-pendientes?farmacia_id=${getActiveAppPharmacyId()}&estado=TODOS`);
+    const data = await res.json();
+    const orders = (data && data.ok && Array.isArray(data.pedidos)) ? data.pedidos : [];
+    if (orders.length === 0) {
+      listEl.innerHTML = '<div class="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">No hay pedidos a domicilio registrados en esta farmacia todavía.</div>';
+      return;
+    }
+
+    listEl.innerHTML = orders.map((o) => {
+      const st = String(o.estado_delivery || 'LISTO_PARA_ENTREGA').toUpperCase();
+      const isActive = st === 'EN_CAMINO';
+      const isDone = st === 'ENTREGADO';
+      const badge = isDone
+        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+        : (isActive ? 'bg-amber-100 text-amber-900 border-amber-400 animate-pulse' : 'bg-sky-100 text-sky-900 border-sky-300');
+
+      return `
+        <div class="p-3.5 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-2 text-xs">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-mono font-black text-slate-900">#${o.codigo_orden}</span>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black border ${badge}">${st}</span>
+          </div>
+          <p class="font-bold text-slate-800">👤 ${o.cliente_nombre} • 📞 ${o.telefono_contacto || o.cliente_telefono}</p>
+          <p class="text-[11px] text-slate-600">📍 ${o.direccion_texto || o.cliente_direccion}</p>
+          <p class="text-[11px] text-teal-800 font-semibold">💊 ${o.medicamentos_detalle || 'Pedido de Farmacia'} • Total: <strong>${formatRD(o.total_rd || 0)}</strong></p>
+          <p class="text-[10px] text-slate-500">🛵 Repartidor: <strong>${o.repartidor_nombre || 'Por asignar'}</strong></p>
+          <div class="flex flex-wrap items-center gap-1.5 pt-1">
+            ${!isDone ? `
+              <button type="button" onclick="startCourierDelivery('${o.codigo_orden}')" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-[11px] cursor-pointer">
+                🚀 ${isActive ? 'Transmitir GPS en Vivo' : 'Iniciar Entrega + GPS'}
+              </button>
+              <button type="button" onclick="completeCourierDelivery('${o.codigo_orden}')" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] cursor-pointer">
+                ✅ Marcar Entregado
+              </button>
+            ` : ''}
+            <button type="button" onclick="closeCourierModeModal(); openDeliveryTrackingModal('${o.codigo_orden}');" class="px-3 py-1.5 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-900 font-extrabold text-[11px] cursor-pointer">
+              🗺️ Ver Mapa
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div class="p-4 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">Error al consultar pedidos de delivery.</div>';
+  }
+}
+
+async function sendCourierGpsPing(orderCode, lat, lng) {
+  try {
+    await fetch('/api/delivery/actualizar-gps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: getActiveAppPharmacyId(),
+        codigo_orden: orderCode,
+        latitud: lat,
+        longitud: lng,
+        estado: 'EN_CAMINO',
+        repartidor_nombre: courierSession ? `${courierSession.nombre_completo} (${courierSession.username})` : '',
+      }),
+    });
+  } catch (e) {}
+}
+
+function stopCourierGpsTransmission() {
+  if (courierGpsWatchId !== null && navigator.geolocation) {
+    try { navigator.geolocation.clearWatch(courierGpsWatchId); } catch (e) {}
+    courierGpsWatchId = null;
+  }
+  if (courierGpsBackupTimer) {
+    clearInterval(courierGpsBackupTimer);
+    courierGpsBackupTimer = null;
+  }
+  courierActiveOrderCode = null;
+  const stEl = document.getElementById('courier-gps-live-status');
+  if (stEl) {
+    stEl.textContent = 'GPS en espera (inicia una entrega para transmitir en tiempo real)';
+    stEl.className = 'text-[11px] font-bold text-slate-600';
+  }
+}
+
+async function startCourierDelivery(orderCode) {
+  stopCourierGpsTransmission();
+  courierActiveOrderCode = orderCode;
+  const repName = courierSession ? `${courierSession.nombre_completo} (${courierSession.username})` : '';
+
+  const beginLive = async (lat, lng) => {
+    courierLastCoords = { lat, lng };
+    await fetch('/api/delivery/iniciar-entrega', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: getActiveAppPharmacyId(),
+        codigo_orden: orderCode,
+        latitud: lat,
+        longitud: lng,
+        repartidor_nombre: repName,
+      }),
+    });
+    const stEl = document.getElementById('courier-gps-live-status');
+    if (stEl) {
+      stEl.textContent = `📡 GPS Conectado y Transmitiendo en Vivo — Orden #${orderCode}`;
+      stEl.className = 'text-[11px] font-extrabold text-emerald-700 animate-pulse';
+    }
+    loadCourierOrders();
+    showToast(`📡 Entrega #${orderCode} iniciada. Cliente y farmacia ya ven tu ubicación en el mapa.`, 'success');
+  };
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => beginLive(pos.coords.latitude, pos.coords.longitude),
+      () => beginLive(courierLastCoords.lat, courierLastCoords.lng),
+      { enableHighAccuracy: true, timeout: 4000 }
+    );
+    courierGpsWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        courierLastCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        if (courierActiveOrderCode) {
+          sendCourierGpsPing(courierActiveOrderCode, courierLastCoords.lat, courierLastCoords.lng);
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 3000 }
+    );
+  } else {
+    await beginLive(courierLastCoords.lat, courierLastCoords.lng);
+  }
+
+  courierGpsBackupTimer = setInterval(() => {
+    if (courierActiveOrderCode) {
+      sendCourierGpsPing(courierActiveOrderCode, courierLastCoords.lat, courierLastCoords.lng);
+    }
+  }, 5000);
+}
+
+async function completeCourierDelivery(orderCode) {
+  try {
+    await fetch('/api/delivery/actualizar-estado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: getActiveAppPharmacyId(),
+        codigo_orden: orderCode,
+        estado_delivery: 'ENTREGADO',
+        progreso_pct: 100.0,
+      }),
+    });
+    if (courierActiveOrderCode === orderCode) {
+      stopCourierGpsTransmission();
+    }
+    await loadCourierOrders();
+    showToast(`✅ Pedido #${orderCode} marcado como ENTREGADO.`, 'success');
+  } catch (e) {
+    showToast('Error al marcar entrega.', 'error');
+  }
 }

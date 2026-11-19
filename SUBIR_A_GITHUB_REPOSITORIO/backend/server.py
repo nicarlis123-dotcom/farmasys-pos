@@ -113,19 +113,7 @@ class SimpleJWT:
         return payload
 
 
-# Iniciar servidor WebSocket RFC 6455 para el Asistente Visual y Marco Verde en el POS
-try:
-    pos_guide_hub.start_websocket_server()
-except Exception as e:
-    print(f"Warning starting pos_guide_hub WebSocket: {e}")
-
-# Iniciar Servidor WebSocket Asistente IA en Puerto 8765 (Venta Guiada: búsqueda -> lote -> cobro)
-try:
-    import servidor_asistente_ws
-    servidor_asistente_ws.start_in_background()
-    print("[Asistente IA] Servidor WebSocket 8765 activo para Venta Guiada.")
-except Exception as e:
-    print(f"Warning starting pos_guide_hub WebSocket: {e}")
+# [Farma Desactivada]: Asistente virtual y WebSockets 8085/8765 deshabilitados por solicitud del usuario.
 
 db = DatabaseManager(DB_PATH)
 whatsapp_engine = WhatsAppBusinessService(db)
@@ -444,6 +432,12 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "config": cfg})
                 return
 
+            if path == "/api/accounts/usage":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                report = db.get_accounts_usage_report(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "report": report})
+                return
+
             if path == "/api/staff":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
                 staff = db.list_staff(farmacia_id=farmacia_id)
@@ -480,6 +474,18 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "patients": patients})
                 return
 
+            if path == "/api/patient/orders":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                telefono = query.get("telefono", [""])[0]
+                cliente_nombre = query.get("nombre", [""])[0]
+                orders = db.get_patient_orders(
+                    farmacia_id=farmacia_id,
+                    telefono=telefono,
+                    cliente_nombre=cliente_nombre,
+                )
+                self._send_json(200, {"ok": True, "orders": orders})
+                return
+
             if path == "/api/patient/vital-signs":
                 current_user = self._get_authenticated_user()
                 if not current_user:
@@ -510,7 +516,10 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/ai/hub":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
-                hub = ai_engine.get_full_ai_hub_overview(farmacia_id=farmacia_id)
+                try:
+                    hub = ai_engine.get_full_ai_hub_overview(farmacia_id=farmacia_id)
+                except Exception:
+                    hub = {"ok": True, "low_stock": [], "top_sellers": [], "chronic_10d": [], "kits": []}
                 self._send_json(200, hub)
                 return
 
@@ -653,6 +662,43 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                     ]
                 }
                 self._send_json(200, res)
+                return
+
+            if path in ("/api/backup/download", "/api/backup/list"):
+                current_user = self._get_authenticated_user()
+                if not current_user or current_user.get("role") not in ("ROL_ADMIN_CAJA", "ADMIN", "SUPERADMIN"):
+                    self._send_json(401, {"ok": False, "error": "Inicie sesión como administrador de la farmacia para descargar respaldos."})
+                    return
+                farmacia_id = int(current_user.get("farmacia_id") or 1)
+                if path == "/api/backup/list":
+                    self._send_json(200, {"ok": True, "respaldos": db.list_local_backups(), "carpeta": db.backups_dir})
+                    return
+                data_zip, filename, stats = db.create_backup_zip(farmacia_id)
+                try:
+                    db.run_automatic_backup(farmacia_id)
+                except Exception as e_auto:
+                    print(f"[Backup] Aviso respaldo local: {e_auto}")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header("Content-Length", str(len(data_zip)))
+                self.send_header("X-Backup-Productos", str(stats.get("productos", 0)))
+                self.send_header("X-Backup-Ventas-Hoy", str(stats.get("ventas_hoy", 0)))
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition, X-Backup-Productos, X-Backup-Ventas-Hoy")
+                self.end_headers()
+                self.wfile.write(data_zip)
+                return
+
+            if path == "/api/farma/unmet-demand":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                items = db.list_unmet_demand(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "items": items, "total_faltantes": len(items)})
+                return
+
+            if path == "/api/farma/voice/profiles":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                profiles = db.list_voice_profiles(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "profiles": profiles, "max_voces": 5})
                 return
 
             if path == "/api/delivery/pedidos-pendientes":
@@ -1051,6 +1097,14 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(201, {"ok": True, "seller": new_seller})
                 return
 
+            if path == "/api/accounts/delete":
+                farmacia_id = safe_farmacia_id(body, 1)
+                tipo = str(body.get("tipo", "staff")).strip()
+                account_id = body.get("account_id")
+                db.delete_account(tipo=tipo, account_id=account_id, farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "message": f"Cuenta {tipo} eliminada correctamente."})
+                return
+
             if path == "/api/staff/delete":
                 farmacia_id = safe_farmacia_id(body, 1)
                 staff_id = int(body.get("staff_id", 0))
@@ -1174,6 +1228,34 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, ocr_result)
                 return
 
+            if path == "/api/pos/caja/salida":
+                farmacia_id = safe_farmacia_id(body, 1)
+                concepto = str(body.get("concepto", "")).strip()
+                monto = float(body.get("monto_dop", 0.0) or 0.0)
+                categoria = str(body.get("categoria", "GASTO_MENOR"))
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.register_caja_expense(farmacia_id, concepto, monto, categoria=categoria, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
+            if path == "/api/pos/caja/salida/delete":
+                farmacia_id = safe_farmacia_id(body, 1)
+                exp_id = int(body.get("expense_id", 0))
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.delete_caja_expense(farmacia_id, exp_id, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
+            if path == "/api/pos/caja/fondo":
+                farmacia_id = safe_farmacia_id(body, 1)
+                f_dop = float(body.get("fondo_inicial_dop", 0.0) or 0.0)
+                f_usd = float(body.get("fondo_inicial_usd", 0.0) or 0.0)
+                t_usd = float(body.get("tasa_cambio_usd", 60.0) or 60.0)
+                usuario = str(body.get("usuario", "Cajero"))
+                summary = db.save_caja_opening_config(farmacia_id, f_dop, f_usd, t_usd, usuario=usuario)
+                self._send_json(200, summary)
+                return
+
             if path == "/api/pos/caja/corte":
                 farmacia_id = safe_farmacia_id(body, 1)
                 actor_role = str(body.get("actor_role", "")).upper()
@@ -1295,12 +1377,139 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(csv_bytes)
                 return
 
+            if path == "/api/farma/invoice/extract":
+                farmacia_id = safe_farmacia_id(body, 1)
+                data_url = str(body.get("file_data_url") or body.get("image_data_url") or "").strip()
+                raw_text = str(body.get("raw_text") or "").strip()
+                mime_type = str(body.get("mime_type") or "image/jpeg").strip()
+
+                file_bytes = None
+                if data_url:
+                    if "," in data_url:
+                        header, b64_part = data_url.split(",", 1)
+                        if "application/pdf" in header:
+                            mime_type = "application/pdf"
+                        elif "image/png" in header:
+                            mime_type = "image/png"
+                        elif "image/webp" in header:
+                            mime_type = "image/webp"
+                    else:
+                        b64_part = data_url
+                    try:
+                        file_bytes = base64.b64decode(b64_part)
+                    except Exception:
+                        file_bytes = None
+
+                catalog = db.list_products(farmacia_id=farmacia_id)
+                res = farma_brain.extract_supplier_invoice_multimodal(
+                    file_bytes=file_bytes,
+                    mime_type=mime_type,
+                    raw_text_hint=raw_text,
+                    existing_catalog=catalog
+                )
+                self._send_json(200, res)
+                return
+
+            if path == "/api/farma/invoice/commit":
+                farmacia_id = safe_farmacia_id(body, 1)
+                try:
+                    res = db.commit_supplier_invoice_bulk(body, farmacia_id=farmacia_id)
+                    self._send_json(200, res)
+                except ValueError as ve:
+                    self._send_json(400, {"ok": False, "error": str(ve)})
+                return
+
+            if path == "/api/farma/voice/enroll":
+                farmacia_id = safe_farmacia_id(body, 1)
+                try:
+                    profile = db.register_voice_profile(body, farmacia_id=farmacia_id)
+                    self._send_json(200, {"ok": True, "profile": profile})
+                except ValueError as ve:
+                    self._send_json(400, {"ok": False, "error": str(ve)})
+                return
+
+            if path == "/api/farma/voice/delete":
+                farmacia_id = safe_farmacia_id(body, 1)
+                voice_id = int(body.get("id", 0))
+                db.delete_voice_profile(voice_id=voice_id, farmacia_id=farmacia_id)
+                profiles = db.list_voice_profiles(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "profiles": profiles, "max_voces": 5})
+                return
+
+            if path == "/api/farma/unmet-demand/record":
+                farmacia_id = safe_farmacia_id(body, 1)
+                termino = str(body.get("termino_buscado", "")).strip()
+                origen = str(body.get("origen", "POS")).strip()
+                rec = None
+                if termino and farma_brain._is_valid_medicine_demand(termino):
+                    enr = farma_brain._fallback_enrichment(termino, "")
+                    rec = db.record_unmet_demand(
+                        termino_buscado=termino,
+                        origen=origen,
+                        farmacia_id=farmacia_id,
+                        principio_activo_sugerido=enr.get("principio_activo_dci", ""),
+                        categoria_sugerida=enr.get("familia_farmacologica", "")
+                    )
+                items = db.list_unmet_demand(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "recorded": rec, "items": items, "total_faltantes": len(items)})
+                return
+
+            if path == "/api/farma/unmet-demand/resolve":
+                farmacia_id = safe_farmacia_id(body, 1)
+                demand_id = int(body.get("id", 0))
+                db.resolve_unmet_demand(demand_id=demand_id, farmacia_id=farmacia_id)
+                items = db.list_unmet_demand(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "items": items, "total_faltantes": len(items)})
+                return
+
+            if path == "/api/farma/voice/command":
+                farmacia_id = safe_farmacia_id(body, 1)
+                transcript = str(body.get("transcript", "")).strip()
+                context_type = str(body.get("context_type", "POS")).strip()
+                operator_name = str(body.get("operator_name", "Operador")).strip()
+                session_id = str(body.get("session_id", f"{context_type}_{farmacia_id}")).strip()
+                client_memory = body.get("client_memory")
+                catalog = db.list_products(farmacia_id=farmacia_id) or body.get("catalogo_resumen") or []
+                sales_summary = db.get_dashboard_and_reports(farmacia_id=farmacia_id)
+                res = farma_brain.parse_voice_command(
+                    transcript=transcript,
+                    context_type=context_type,
+                    catalog_products=catalog,
+                    operator_name=operator_name,
+                    session_id=session_id,
+                    client_memory=client_memory,
+                    sales_summary=sales_summary
+                )
+                # Demanda insatisfecha desactivada permanentemente por voz
+                pass
+                self._send_json(200, res)
+                return
+
+            if path == "/api/delivery/login-repartidor":
+                farmacia_id = safe_farmacia_id(body, 1)
+                username = str(body.get("username", "")).strip()
+                clave = str(body.get("clave_acceso", "")).strip()
+                res = db.authenticate_courier(farmacia_id, username, clave)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/delivery/asignar-repartidor":
+                farmacia_id = safe_farmacia_id(body, 1)
+                order_code = str(body.get("codigo_orden", "")).strip()
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                rep_tel = str(body.get("repartidor_telefono", "")).strip()
+                rep_veh = str(body.get("repartidor_vehiculo", "")).strip()
+                res = db.assign_courier_to_order(farmacia_id, order_code, rep_nombre, rep_tel, rep_veh)
+                self._send_json(200, res)
+                return
+
             if path == "/api/delivery/iniciar-entrega":
                 farmacia_id = safe_farmacia_id(body, 1)
                 order_code = str(body.get("codigo_orden", "")).strip()
                 lat = float(body.get("latitud", 18.4746))
                 lng = float(body.get("longitud", -69.9328))
-                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado="EN_CAMINO")
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado="EN_CAMINO", repartidor_nombre=rep_nombre)
                 self._send_json(200, res)
                 return
 
@@ -1312,7 +1521,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 estado = str(body.get("estado", "EN_CAMINO"))
                 eta = body.get("eta_minutos")
                 eta_val = int(eta) if eta is not None else None
-                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado=estado, eta_minutos=eta_val)
+                rep_nombre = str(body.get("repartidor_nombre", "")).strip()
+                res = db.update_courier_live_location(farmacia_id, order_code, lat, lng, estado=estado, eta_minutos=eta_val, repartidor_nombre=rep_nombre)
                 self._send_json(200, res)
                 return
 
@@ -1435,6 +1645,15 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "receta_imagen_url": public_url})
                 return
 
+            if path == "/api/sales/annul":
+                farmacia_id = safe_farmacia_id(body, 1)
+                tx_id = int(body.get("transaccion_id", 0))
+                motivo = str(body.get("motivo", "Devolución / Anulación rápida en mostrador"))
+                usuario = str(body.get("usuario", "Cajero Mostrador"))
+                res = db.annul_pos_transaction(farmacia_id, tx_id, motivo=motivo, usuario=usuario)
+                self._send_json(200, res)
+                return
+
             if path == "/api/sales":
                 order_record = db.process_sale(body)
                 whatsapp_dispatches = []
@@ -1464,7 +1683,7 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                                     ?, ?, ?, ?, ?,
                                     ?, ?, ?, ?,
                                     ?, ?,
-                                    'Pedro Ramírez (Motorizado #3)', '809-555-8899', 'Motocicleta Honda C-90 (Placa K-084213)', 'LISTO_PARA_ENTREGA',
+                                    str(body.get("repartidor_nombre", "")).strip() or 'Por asignar', str(body.get("repartidor_telefono", "")).strip() or '', str(body.get("repartidor_vehiculo", "")).strip() or 'Delivery Farmacia', 'LISTO_PARA_ENTREGA',
                                     18.4746, -69.9328, ?, ?,
                                     18.4746, -69.9328, 0.0, 15,
                                     ?, ?
@@ -1941,8 +2160,36 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
         self.do_POST()
 
 
+def _start_auto_backup_thread() -> None:
+    """Respaldo automático diario (se revisa cada hora; guarda 1 por día por farmacia)."""
+    import threading
+
+    def _loop() -> None:
+        while True:
+            try:
+                ids = [1]
+                try:
+                    if os.path.isfile(db.master_db_path):
+                        import sqlite3 as _sq
+                        mc = _sq.connect(db.master_db_path, timeout=10.0)
+                        ids = [int(r[0]) for r in mc.execute("SELECT id FROM farmacias_directorio").fetchall()] or [1]
+                        mc.close()
+                except Exception:
+                    ids = [1]
+                for fid in ids:
+                    saved = db.run_automatic_backup(fid)
+                    if saved:
+                        print(f"[Backup] Respaldo automático diario guardado: {saved}")
+            except Exception as e:
+                print(f"[Backup] Error en respaldo automático: {e}")
+            time.sleep(3600)
+
+    threading.Thread(target=_loop, daemon=True, name="auto-backup").start()
+
+
 def run_server(port: int = 8080) -> None:
     server = ThreadingHTTPServer(("0.0.0.0", port), DavalsiRequestHandler)
+    _start_auto_backup_thread()
     print(f"==================================================================")
     print(f"  FARMACIA DAVALSI — ARQUITECTURA SEPARADA MULTI-FARMACIA")
     print(f"  1) App Pacientes:        http://localhost:{port}/app")
