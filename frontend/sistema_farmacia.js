@@ -226,7 +226,37 @@ window.fetch = function(input, init = {}) {
       if (!init.headers['Authorization']) init.headers['Authorization'] = 'Bearer ' + token;
     }
   }
-  return origFetchSystem.apply(this, [input, init]);
+  const urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+  const isLoginReq = urlStr.includes('/api/pharmacies/auth') || urlStr.includes('/api/pharmacies/login');
+
+  return origFetchSystem.apply(this, [input, init]).then((response) => {
+    if (
+      response &&
+      response.status === 401 &&
+      !isLoginReq &&
+      window.sysState &&
+      window.sysState.authenticatedPharmacy &&
+      !window._handlingSysSessionExpiry
+    ) {
+      window._handlingSysSessionExpiry = true;
+      try {
+        if (typeof logoutPharmacy === 'function') {
+          logoutPharmacy();
+        }
+        const errBox = document.getElementById('login-error-msg');
+        if (errBox) {
+          errBox.textContent = '🔒 Sesión expirada, vuelve a ingresar.';
+          errBox.classList.remove('hidden');
+        }
+        if (typeof showToast === 'function') {
+          showToast('🔒 Sesión expirada, vuelve a ingresar.', 'error');
+        }
+      } finally {
+        setTimeout(() => { window._handlingSysSessionExpiry = false; }, 2500);
+      }
+    }
+    return response;
+  });
 };
 
 // Modal / Notificación para funciones futuras o en desarrollo
@@ -486,24 +516,29 @@ function fillDemoLogin(farmaciaId, username, clave) {
 
 async function handlePharmacyLogin(event) {
   if (event) event.preventDefault();
-  const selEl = document.getElementById('login-pharmacy-select');
-  let farmaciaId = selEl ? parseInt(selEl.value, 10) : 1;
-  if (!farmaciaId || isNaN(farmaciaId) || farmaciaId <= 0) {
-    farmaciaId = (sysState.pharmacies && sysState.pharmacies.length > 0) ? sysState.pharmacies[0].id : 1;
-  }
+  const idInput = document.getElementById('login-pharmacy-identifier');
+  const farmaciaIdent = (idInput ? idInput.value : '').trim();
   const uInput = document.getElementById('login-username-input');
   const pInput = document.getElementById('login-password-input');
-  const username = (uInput ? uInput.value : 'admin').trim() || 'admin';
-  const clave = (pInput ? pInput.value : '123456').trim() || '123456';
+  const username = (uInput ? uInput.value : '').trim();
+  const clave = (pInput ? pInput.value : '').trim();
   const errEl = document.getElementById('login-error-msg');
   if (errEl) errEl.classList.add('hidden');
+
+  if (!farmaciaIdent || !username || !clave) {
+    if (errEl) {
+      errEl.textContent = 'Ingresa el código o nombre de la farmacia, tu usuario y tu clave de acceso.';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
 
   let data;
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ farmacia_id: farmaciaId, username, clave_acceso: clave }),
+      body: JSON.stringify({ farmacia_identificador: farmaciaIdent, username, clave_acceso: clave }),
     });
     data = await res.json();
   } catch (netErr) {
@@ -552,8 +587,12 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
     gate.style.display = 'none';
   }
 
+  const phDisplayName = pharmacy.nombre || 'Farmacia';
+  const phCodeTag = pharmacy.codigo ? ` (${pharmacy.codigo})` : '';
+  document.title = `${phDisplayName} — FarmaSys POS`;
+
   const nameEl = document.getElementById('sys-header-pharmacy-name');
-  if (nameEl) nameEl.textContent = pharmacy.nombre || 'Farmacia Davalsi';
+  if (nameEl) nameEl.textContent = `${phDisplayName}${phCodeTag}`;
 
   const r = (pharmacy.rol_actual || 'ADMINISTRADOR').toUpperCase();
   const roleIcon = (r === 'CAJERO' || r === 'VENDEDOR') ? '👤' : (r.includes('REGENTE') ? '🩺' : '🛡️');
@@ -561,7 +600,7 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
   if (badgeEl) badgeEl.textContent = `${roleIcon} ${pharmacy.usuario_actual || pharmacy.usuario_admin || 'admin'} (${r})`;
 
   const subEl = document.getElementById('sys-header-pharmacy-sub');
-  if (subEl) subEl.textContent = `📍 ${pharmacy.direccion || 'Sede Principal'} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp || '809-555-0900'}`;
+  if (subEl) subEl.textContent = `🏥 Farmacia Activa • 📍 ${pharmacy.direccion || pharmacy.ciudad_sector || 'Sede Principal'} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp || ''}`;
 
   try { applyRolePermissions(r); } catch (e) { console.error('Error en applyRolePermissions:', e); }
   try { applyOperationalServiceFlags(pharmacy); } catch (e) { console.error('Error en applyOperationalServiceFlags:', e); }
@@ -903,6 +942,7 @@ function switchSysTab(tab, pushToHistory = true) {
     loadFrequentPlans();
   } else if (tab === 'reportes') {
     initSalesReportsView();
+    loadProfitabilityReport();
   } else if (tab === 'config') {
     loadSysStaff();
     loadSysWhatsAppLogs();
@@ -3045,6 +3085,20 @@ function renderInventoryTable() {
                 ⚖️
               </button>
               <button
+                onclick="openBarcodeLabelsModal(${p.id})"
+                title="Imprimir etiqueta de precio y código de barras"
+                class="w-7 h-7 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-300 font-bold text-xs flex items-center justify-center cursor-pointer"
+              >
+                🏷️
+              </button>
+              <button
+                onclick="openLotWriteOffModal(${p.id})"
+                title="Dar de baja lote (Merma / Rotura / Vencido)"
+                class="w-7 h-7 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs flex items-center justify-center cursor-pointer"
+              >
+                🗑️
+              </button>
+              <button
                 onclick="openProductMovementsModal(${p.id})"
                 title="Historial de movimientos (Kárdex)"
                 class="w-7 h-7 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 font-bold text-xs flex items-center justify-center cursor-pointer"
@@ -3419,9 +3473,14 @@ function renderExpiryTable() {
           <td class="py-3 px-3 text-center font-bold">${p.inventario.stock_total_unidades} ${p.unidad_minima_nombre}s</td>
           <td class="py-3 px-3 text-right font-extrabold text-slate-900">${formatRD(valorRiesgo)}</td>
           <td class="py-3 px-3 text-center">
-            <button onclick="openReplenishModal(${p.id})" class="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px]">
-              🔄 Renovar Lote
-            </button>
+            <div class="inline-flex items-center gap-1">
+              <button onclick="openReplenishModal(${p.id})" class="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] cursor-pointer">
+                🔄 Renovar
+              </button>
+              <button onclick="openLotWriteOffModal(${p.id}, '${escapeJsQuotes(p.lote || '')}')" class="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer">
+                🗑️ Dar de Baja
+              </button>
+            </div>
           </td>
         </tr>
       `;
@@ -3977,6 +4036,7 @@ async function saveCurrentPharmacyConfig(event) {
    ========================================================================= */
 
 function openReplenishModal(productId) {
+  loadSuppliersForReplenishSelect();
   const p = sysState.products.find((x) => x.id === productId);
   if (!p) return;
 
@@ -4177,6 +4237,10 @@ async function submitReplenishStock(event) {
     nuevo_precio_base: isNaN(newPrice) ? null : newPrice,
     nueva_ubicacion: newShelf || null,
     costo_compra: isNaN(cost) ? null : cost,
+    proveedor_id: document.getElementById('replenish-supplier-select')?.value ? parseInt(document.getElementById('replenish-supplier-select').value, 10) : null,
+    numero_factura: document.getElementById('replenish-invoice-num')?.value?.trim() || '',
+    condicion_pago: document.getElementById('replenish-payment-cond')?.value || 'CONTADO',
+    costo_total_rd: document.getElementById('replenish-invoice-total')?.value ? parseFloat(document.getElementById('replenish-invoice-total').value) : null,
     motivo:
       motivo ||
       (modo === 'SUMAR'
@@ -13255,6 +13319,14 @@ async function loadPosRecentSales() {
               !isAnulada
                 ? `<button
                     type="button"
+                    onclick="openPartialReturnModal(${tx.id})"
+                    class="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-500 text-amber-900 hover:text-slate-950 border border-amber-300 font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Devolver solo uno o varios artículos sin anular toda la factura"
+                  >
+                    <span>📦</span> <span>Dev. Parcial</span>
+                  </button>
+                  <button
+                    type="button"
                     onclick="annulPosTransaction(${tx.id}, '${escapeQuote(tx.codigo_orden)}', ${Number(tx.total || 0)})"
                     class="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5"
                     title="Anular factura y devolver todas las unidades al inventario"
@@ -13964,4 +14036,958 @@ async function assignCourierFromPosModal() {
   } catch (e) {
     showToast('Error de conexión al asignar repartidor.', 'error');
   }
+}
+
+
+// ============================================================================
+// COMPARTIR LINK DIRECTO Y CÓDIGO QR IMPRIMIBLE DE LA FARMACIA
+// ============================================================================
+
+function getPharmacyDirectAppUrl() {
+  const fid = (sysState && sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.id) || 1;
+  return `${window.location.origin}/app?farmacia_id=${fid}`;
+}
+
+function openPharmacyShareQrModal() {
+  const ph = (sysState && sysState.authenticatedPharmacy) || {};
+  const directUrl = getPharmacyDirectAppUrl();
+
+  const nameEl = document.getElementById('qr-poster-pharmacy-name');
+  if (nameEl) nameEl.textContent = ph.nombre || 'Mi Farmacia';
+  const metaEl = document.getElementById('qr-poster-pharmacy-meta');
+  if (metaEl) metaEl.textContent = [ph.direccion || ph.ciudad_sector, ph.telefono].filter(Boolean).join(' • ');
+
+  const urlInput = document.getElementById('qr-poster-url-input');
+  if (urlInput) urlInput.value = directUrl;
+
+  const qrImg = document.getElementById('qr-poster-img');
+  if (qrImg) {
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(directUrl)}`;
+  }
+
+  const modal = document.getElementById('pharmacy-share-qr-modal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function closePharmacyShareQrModal() {
+  const modal = document.getElementById('pharmacy-share-qr-modal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+async function copyPharmacyShareLink() {
+  const url = getPharmacyDirectAppUrl();
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('📋 Enlace directo de la farmacia copiado al portapapeles.', 'success');
+  } catch (e) {
+    const inp = document.getElementById('qr-poster-url-input');
+    if (inp) {
+      inp.select();
+      document.execCommand('copy');
+      showToast('📋 Enlace copiado.', 'success');
+    }
+  }
+}
+
+function sharePharmacyLinkWhatsApp() {
+  const ph = (sysState && sysState.authenticatedPharmacy) || {};
+  const url = getPharmacyDirectAppUrl();
+  const msg = `¡Hola! Haz tus pedidos de medicamentos o rastrea tu delivery en *${ph.nombre || 'nuestra farmacia'}* entrando directo aquí:
+${url}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+function printPharmacyQrPoster() {
+  const poster = document.getElementById('printable-pharmacy-qr-poster');
+  if (!poster) return;
+  const w = window.open('', '_blank', 'width=520,height=680');
+  if (!w) {
+    window.print();
+    return;
+  }
+  const ph = (sysState && sysState.authenticatedPharmacy) || {};
+  const directUrl = getPharmacyDirectAppUrl();
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(directUrl)}`;
+  w.document.write(`
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      <title>Cartel QR - ${ph.nombre || 'Farmacia'}</title>
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 32px; color: #0f172a; }
+        .card { border: 3px solid #0d9488; border-radius: 24px; padding: 28px; max-width: 400px; margin: 0 auto; }
+        .tag { display: inline-block; background: #ccfbf1; color: #115e59; font-weight: 800; font-size: 11px; padding: 4px 12px; border-radius: 999px; text-transform: uppercase; }
+        h1 { font-size: 24px; margin: 12px 0 4px; }
+        .meta { font-size: 12px; color: #475569; margin-bottom: 18px; }
+        img { width: 240px; height: 240px; border: 2px solid #e2e8f0; border-radius: 16px; padding: 8px; }
+        .hint { font-size: 13px; font-weight: 700; margin-top: 16px; color: #1e293b; }
+        .url { font-family: monospace; font-size: 11px; color: #0f766e; margin-top: 10px; word-break: break-all; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <span class="tag">Pedidos Online y Delivery en Vivo</span>
+        <h1>${ph.nombre || 'Mi Farmacia'}</h1>
+        <p class="meta">${[ph.direccion || ph.ciudad_sector, ph.telefono].filter(Boolean).join(' • ')}</p>
+        <img src="${qrSrc}" alt="QR" onload="setTimeout(function(){window.print();}, 250);" />
+        <p class="hint">Escanea este código QR con la cámara de tu celular para pedir tus medicamentos.</p>
+        <p class="url">${directUrl}</p>
+      </div>
+    </body>
+    </html>
+  `);
+  w.document.close();
+}
+
+
+// ============================================================================
+// CATÁLOGO DE PROVEEDORES Y FACTURAS DE COMPRA POR LOTE
+// ============================================================================
+
+async function loadSuppliersForReplenishSelect() {
+  const sel = document.getElementById('replenish-supplier-select');
+  if (!sel || !sysState.authenticatedPharmacy) return;
+  try {
+    const fid = sysState.authenticatedPharmacy.id || 1;
+    const res = await fetch(`/api/suppliers?farmacia_id=${fid}`);
+    const data = await res.json();
+    const list = (data && data.ok && Array.isArray(data.suppliers)) ? data.suppliers : [];
+    sel.innerHTML = '<option value="">-- Sin proveedor específico --</option>' + list.map((s) =>
+      `<option value="${s.id}">${s.nombre}${s.dias_credito > 0 ? ` (${s.dias_credito}d crédito)` : ''}</option>`
+    ).join('');
+  } catch (e) {}
+}
+
+function openSuppliersPurchasesModal() {
+  const modal = document.getElementById('suppliers-purchases-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadSuppliersAndInvoices();
+}
+
+function closeSuppliersPurchasesModal() {
+  const modal = document.getElementById('suppliers-purchases-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function loadSuppliersAndInvoices() {
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  const supBox = document.getElementById('suppliers-list-box');
+  const invBox = document.getElementById('purchase-invoices-list-box');
+
+  try {
+    const [resSup, resInv] = await Promise.all([
+      fetch(`/api/suppliers?farmacia_id=${fid}`),
+      fetch(`/api/purchases?farmacia_id=${fid}`),
+    ]);
+    const dataSup = await resSup.json();
+    const dataInv = await resInv.json();
+
+    const sups = (dataSup && dataSup.ok) ? (dataSup.suppliers || []) : [];
+    const invs = (dataInv && dataInv.ok) ? (dataInv.invoices || []) : [];
+
+    if (supBox) {
+      supBox.innerHTML = sups.length === 0
+        ? '<p class="text-xs text-slate-400 p-3 bg-slate-50 rounded-xl">Sin proveedores registrados.</p>'
+        : sups.map((s) => `
+          <div class="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs space-y-0.5">
+            <p class="font-extrabold text-slate-900">${s.nombre}</p>
+            <p class="text-[11px] text-slate-600">${s.rnc ? 'RNC: ' + s.rnc + ' • ' : ''}${s.telefono || 'Sin tel.'}</p>
+            <p class="text-[10px] font-bold text-teal-700">${s.dias_credito > 0 ? `Crédito ${s.dias_credito} días` : 'Contado'}${s.contacto ? ' • ' + s.contacto : ''}</p>
+          </div>
+        `).join('');
+    }
+
+    if (invBox) {
+      invBox.innerHTML = invs.length === 0
+        ? '<p class="text-xs text-slate-400 p-3 bg-slate-50 rounded-xl">Aún no hay facturas de compra registradas al reponer lotes.</p>'
+        : invs.map((inv) => {
+          const isPend = inv.estado_pago === 'PENDIENTE';
+          return `
+            <div class="p-3 rounded-xl border ${isPend ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-white'} text-xs flex flex-wrap items-center justify-between gap-2">
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono font-black text-slate-900">Fac. #${inv.numero_factura}</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-black ${isPend ? 'bg-amber-200 text-amber-950' : 'bg-emerald-100 text-emerald-800'}">${inv.condicion_pago} • ${inv.estado_pago}</span>
+                </div>
+                <p class="font-bold text-slate-800">${inv.proveedor_nombre} — ${inv.producto_nombre}</p>
+                <p class="text-[11px] text-slate-500">Lote: <strong class="font-mono">${inv.lote}</strong> • Cant: <strong>+${inv.cantidad_unidades}</strong> unid. • Total: <strong class="text-teal-700">${formatRD(inv.costo_total_rd)}</strong></p>
+              </div>
+              ${isPend ? `
+                <button type="button" onclick="markPurchasePaid(${inv.id})" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] cursor-pointer">
+                  ✅ Marcar Pagada
+                </button>
+              ` : ''}
+            </div>
+          `;
+        }).join('');
+    }
+  } catch (e) {}
+}
+
+async function submitNewSupplier(event) {
+  event.preventDefault();
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  try {
+    const res = await fetch('/api/suppliers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        nombre: document.getElementById('sup-nombre').value.trim(),
+        rnc: document.getElementById('sup-rnc').value.trim(),
+        telefono: document.getElementById('sup-telefono').value.trim(),
+        dias_credito: parseInt(document.getElementById('sup-dias-credito').value || '0', 10) || 0,
+        contacto: document.getElementById('sup-contacto').value.trim(),
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('sup-nombre').value = '';
+      document.getElementById('sup-rnc').value = '';
+      document.getElementById('sup-telefono').value = '';
+      document.getElementById('sup-contacto').value = '';
+      await loadSuppliersAndInvoices();
+      await loadSuppliersForReplenishSelect();
+      showToast(`🏭 Proveedor '${data.supplier.nombre}' guardado.`, 'success');
+    } else {
+      showToast(data.error || 'No se pudo guardar el proveedor.', 'error');
+    }
+  } catch (e) {
+    showToast('Error guardando proveedor.', 'error');
+  }
+}
+
+async function markPurchasePaid(invoiceId) {
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  try {
+    const res = await fetch('/api/purchases/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farmacia_id: fid, invoice_id: invoiceId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      await loadSuppliersAndInvoices();
+      showToast('✅ Factura de compra marcada como PAGADA.', 'success');
+    }
+  } catch (e) {}
+}
+
+
+// ============================================================================
+// BAJA FORMAL DE LOTES POR MERMA, ROTURA O VENCIMIENTO
+// ============================================================================
+let woCurrentLots = [];
+
+async function openLotWriteOffModal(productoId = null, preferredLote = '') {
+  const modal = document.getElementById('lot-writeoff-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  const prodSel = document.getElementById('wo-product-select');
+  if (prodSel) {
+    const prods = sysState.products || [];
+    prodSel.innerHTML = prods.map((p) => {
+      const stk = (p.inventario && p.inventario.stock_total_unidades) ?? p.stock_total_unidades ?? 0;
+      return `<option value="${p.id}">${p.nombre_comercial} (Stock: ${stk})</option>`;
+    }).join('');
+    if (productoId) prodSel.value = String(productoId);
+  }
+
+  await onWriteOffProductChange(preferredLote);
+  await loadLotWriteOffHistory();
+}
+
+function closeLotWriteOffModal() {
+  const modal = document.getElementById('lot-writeoff-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function onWriteOffProductChange(preferredLote = '') {
+  const prodSel = document.getElementById('wo-product-select');
+  const lotSel = document.getElementById('wo-lot-select');
+  if (!prodSel || !lotSel) return;
+  const pid = parseInt(prodSel.value, 10);
+  const p = (sysState.products || []).find((x) => Number(x.id) === pid);
+  const fid = sysState.authenticatedPharmacy ? sysState.authenticatedPharmacy.id : 1;
+
+  woCurrentLots = [];
+  try {
+    const res = await fetch(`/api/inventory/lots?farmacia_id=${fid}&producto_id=${pid}`);
+    const data = await res.json();
+    if (data && data.ok && Array.isArray(data.lots)) {
+      woCurrentLots = data.lots.filter((l) => Number(l.cantidad_disponible || 0) > 0);
+    }
+  } catch (e) {}
+
+  if (woCurrentLots.length === 0 && p) {
+    const stk = (p.inventario && p.inventario.stock_total_unidades) ?? p.stock_total_unidades ?? 0;
+    lotSel.innerHTML = `<option value="0" data-lote="${p.lote || 'SIN-LOTE'}" data-disp="${stk}">${p.lote || 'Lote Principal'} • Vence: ${p.fecha_vencimiento || 'N/A'} (${stk} u.)</option>`;
+  } else {
+    lotSel.innerHTML = woCurrentLots.map((l) =>
+      `<option value="${l.id}" data-lote="${l.numero_lote}" data-disp="${l.cantidad_disponible}">${l.numero_lote} • Vence: ${l.fecha_vencimiento} (${l.cantidad_disponible} u.)</option>`
+    ).join('');
+    if (preferredLote) {
+      const match = woCurrentLots.find((l) => l.numero_lote === preferredLote);
+      if (match) lotSel.value = String(match.id);
+    }
+  }
+  updateWriteOffCostPreview();
+}
+
+function setWriteOffFullLot() {
+  const lotSel = document.getElementById('wo-lot-select');
+  const qtyInp = document.getElementById('wo-qty');
+  if (!lotSel || !qtyInp) return;
+  const opt = lotSel.options[lotSel.selectedIndex];
+  const disp = parseInt(opt?.getAttribute('data-disp') || '1', 10) || 1;
+  qtyInp.value = Math.max(1, disp);
+  updateWriteOffCostPreview();
+}
+
+function updateWriteOffCostPreview() {
+  const prodSel = document.getElementById('wo-product-select');
+  const qtyInp = document.getElementById('wo-qty');
+  const prevEl = document.getElementById('wo-cost-preview');
+  if (!prodSel || !qtyInp || !prevEl) return;
+  const pid = parseInt(prodSel.value, 10);
+  const p = (sysState.products || []).find((x) => Number(x.id) === pid);
+  const costo = Number((p && p.precio_costo) || 0);
+  const qty = Math.max(0, parseInt(qtyInp.value || '0', 10) || 0);
+  prevEl.textContent = formatRD(costo * qty);
+}
+
+async function submitLotWriteOff(event) {
+  event.preventDefault();
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  const pid = parseInt(document.getElementById('wo-product-select')?.value || '0', 10);
+  const lotSel = document.getElementById('wo-lot-select');
+  const opt = lotSel ? lotSel.options[lotSel.selectedIndex] : null;
+  const loteId = parseInt(lotSel?.value || '0', 10) || null;
+  const numeroLote = opt?.getAttribute('data-lote') || '';
+  const qty = parseInt(document.getElementById('wo-qty')?.value || '0', 10);
+  const motivoTipo = document.getElementById('wo-motivo-tipo')?.value || 'VENCIDO';
+  const motivoDetalle = document.getElementById('wo-motivo-detalle')?.value?.trim() || '';
+  const responsable = sysState.authenticatedPharmacy.nombre_usuario_actual || sysState.authenticatedPharmacy.usuario_actual || 'Administrador';
+
+  try {
+    const res = await fetch('/api/inventory/merma', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        producto_id: pid,
+        lote_id: loteId,
+        numero_lote: numeroLote,
+        cantidad_unidades: qty,
+        motivo_tipo: motivoTipo,
+        motivo_detalle: motivoDetalle,
+        responsable: responsable,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'No se pudo registrar la baja.', 'error');
+      return;
+    }
+    document.getElementById('wo-motivo-detalle').value = '';
+    await loadSysProducts();
+    await loadSysDashboard();
+    await onWriteOffProductChange();
+    await loadLotWriteOffHistory();
+    showToast(`🗑️ Baja registrada: -${data.record.cantidad_unidades} u. del lote ${data.record.numero_lote} (Pérdida: ${formatRD(data.record.costo_total_perdido_rd)}).`, 'success');
+  } catch (e) {
+    showToast('Error al registrar la baja del lote.', 'error');
+  }
+}
+
+async function loadLotWriteOffHistory() {
+  const listEl = document.getElementById('wo-history-list');
+  const badgeEl = document.getElementById('wo-total-loss-badge');
+  if (!listEl || !sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  try {
+    const res = await fetch(`/api/inventory/mermas?farmacia_id=${fid}`);
+    const data = await res.json();
+    if (!data.ok) return;
+    if (badgeEl) badgeEl.textContent = `Pérdida Total: ${formatRD(data.total_perdido_rd || 0)}`;
+    const recs = data.records || [];
+    if (recs.length === 0) {
+      listEl.innerHTML = '<p class="text-xs text-slate-400 p-4 text-center bg-slate-50 rounded-xl">Sin bajas o mermas registradas en esta farmacia.</p>';
+      return;
+    }
+    listEl.innerHTML = recs.map((r) => `
+      <div class="p-3 rounded-xl border border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-slate-900">${r.producto_nombre}</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800">${r.motivo_tipo}</span>
+          </div>
+          <p class="text-[11px] text-slate-600">Lote: <strong class="font-mono">${r.numero_lote}</strong> • Baja: <strong>-${r.cantidad_unidades} u.</strong> • Resp: ${r.responsable}</p>
+          ${r.motivo_detalle ? `<p class="text-[10px] text-slate-400">${r.motivo_detalle}</p>` : ''}
+        </div>
+        <div class="text-right">
+          <p class="font-mono font-black text-rose-700">-${formatRD(r.costo_total_perdido_rd)}</p>
+          <p class="text-[10px] text-slate-400">${r.fecha_registro}</p>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {}
+}
+
+
+// ============================================================================
+// IMPRESOR DE ETIQUETAS DE PRECIO Y CÓDIGO DE BARRAS ESCANEABLE
+// ============================================================================
+
+function openBarcodeLabelsModal(productId = null) {
+  const modal = document.getElementById('barcode-labels-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  const sel = document.getElementById('lbl-product-select');
+  if (sel) {
+    const prods = sysState.products || [];
+    sel.innerHTML = prods.map((p) => `<option value="${p.id}">${p.nombre_comercial} (${p.codigo_barras || 'FMS-' + p.id})</option>`).join('');
+    if (productId) sel.value = String(productId);
+  }
+  renderBarcodeLabelPreview();
+}
+
+function closeBarcodeLabelsModal() {
+  const modal = document.getElementById('barcode-labels-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function getSelectedLabelData() {
+  const pid = parseInt(document.getElementById('lbl-product-select')?.value || '0', 10);
+  const p = (sysState.products || []).find((x) => Number(x.id) === pid) || (sysState.products || [])[0];
+  if (!p) return null;
+  const pres = document.getElementById('lbl-presentation-select')?.value || 'UNIDAD';
+  const presPrice = (p.precios_presentacion && p.precios_presentacion[pres]) || p.precio_base || 0;
+  const presTag = pres === 'CAJA' ? 'Caja' : (pres === 'BLISTER' ? 'Blíster' : (p.unidad_minima_nombre || 'Unidad'));
+  const barcodeVal = String(p.codigo_barras || `FMS-${p.id}`).trim();
+  const phName = (sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.nombre) || 'Farmacia';
+  const showPh = document.getElementById('lbl-show-pharmacy')?.checked !== false;
+  return {
+    product: p,
+    presTag,
+    priceText: formatRD(presPrice),
+    barcodeVal,
+    phName: showPh ? phName : '',
+  };
+}
+
+function renderBarcodeLabelPreview() {
+  const d = getSelectedLabelData();
+  if (!d) return;
+  const phEl = document.getElementById('lbl-prev-pharmacy');
+  const nameEl = document.getElementById('lbl-prev-name');
+  const priceEl = document.getElementById('lbl-prev-price');
+  const svgEl = document.getElementById('lbl-prev-barcode-svg');
+
+  if (phEl) phEl.textContent = d.phName;
+  if (nameEl) nameEl.textContent = `${d.product.nombre_comercial} (${d.presTag})`;
+  if (priceEl) priceEl.textContent = d.priceText;
+  if (svgEl && typeof JsBarcode !== 'undefined') {
+    try {
+      JsBarcode(svgEl, d.barcodeVal, {
+        format: 'CODE128',
+        width: 1.6,
+        height: 40,
+        displayValue: true,
+        fontSize: 11,
+        margin: 2,
+      });
+    } catch (e) {}
+  }
+}
+
+function printBarcodeLabels() {
+  const d = getSelectedLabelData();
+  if (!d) return;
+  const copies = Math.min(100, Math.max(1, parseInt(document.getElementById('lbl-copies')?.value || '1', 10) || 1));
+  const fmt = document.getElementById('lbl-format-select')?.value || 'TERMICAS';
+  const svgHtml = document.getElementById('lbl-prev-barcode-svg')?.outerHTML || `<div style="font-family:monospace;font-weight:bold;">*${d.barcodeVal}*</div>`;
+
+  const cardHtml = `
+    <div class="label-card">
+      ${d.phName ? `<div class="ph">${d.phName}</div>` : ''}
+      <div class="name">${d.product.nombre_comercial} (${d.presTag})</div>
+      <div class="price">${d.priceText}</div>
+      <div class="bc">${svgHtml}</div>
+    </div>
+  `;
+  const allCards = Array(copies).fill(cardHtml).join('');
+
+  const pageCss = fmt === 'TERMICAS'
+    ? `@page { size: 58mm auto; margin: 2mm; } body { margin: 0; font-family: Arial, sans-serif; } .grid { display: flex; flex-direction: column; gap: 4mm; align-items: center; } .label-card { width: 52mm; text-align: center; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3mm; page-break-inside: avoid; }`
+    : `@page { size: letter; margin: 10mm; } body { margin: 0; font-family: Arial, sans-serif; } .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; } .label-card { border: 1px dashed #94a3b8; border-radius: 6px; padding: 3mm; text-align: center; page-break-inside: avoid; }`;
+
+  const w = window.open('', '_blank', 'width=720,height=640');
+  if (!w) {
+    window.print();
+    return;
+  }
+  w.document.write(`
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      <title>Etiquetas - ${d.product.nombre_comercial}</title>
+      <style>
+        ${pageCss}
+        .ph { font-size: 8px; font-weight: 800; text-transform: uppercase; color: #0f766e; }
+        .name { font-size: 10px; font-weight: 800; color: #0f172a; margin: 1px 0; }
+        .price { font-size: 15px; font-weight: 900; color: #000; margin: 1px 0; }
+        .bc svg { max-width: 100%; height: auto; }
+      </style>
+    </head>
+    <body>
+      <div class="grid">${allCards}</div>
+      <script>setTimeout(function(){ window.print(); }, 250);<\/script>
+    </body>
+    </html>
+  `);
+  w.document.close();
+}
+
+
+// ============================================================================
+// DEVOLUCIÓN PARCIAL POR ARTÍCULO (SIN ANULAR TODA LA FACTURA)
+// ============================================================================
+
+function openPartialReturnModal(txId) {
+  const tx = (sysState.transactions || []).find((t) => Number(t.id) === Number(txId));
+  if (!tx) {
+    showToast('No se encontró la factura seleccionada.', 'error');
+    return;
+  }
+
+  document.getElementById('pr-tx-id').value = tx.id;
+  document.getElementById('pr-order-code').textContent = `#${tx.codigo_orden}`;
+  const listEl = document.getElementById('pr-items-list');
+  const items = Array.isArray(tx.items) ? tx.items : [];
+
+  if (items.length === 0) {
+    listEl.innerHTML = '<p class="text-xs text-slate-500 p-4 text-center bg-slate-50 rounded-xl">Esta factura no tiene artículos activos para devolver.</p>';
+  } else {
+    listEl.innerHTML = items.map((it) => {
+      const cant = Number(it.cantidad_presentacion || 1);
+      const sub = Number(it.subtotal || 0);
+      const unitRefund = cant > 0 ? (sub / cant) : 0;
+      return `
+        <div class="p-3 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+          <div class="space-y-0.5">
+            <p class="font-extrabold text-slate-900">${it.nombre_comercial}</p>
+            <p class="text-[11px] text-slate-600">Facturado: <strong>${cant}x ${it.presentacion}</strong> • Subtotal: <strong class="text-teal-700">${formatRD(sub)}</strong></p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <label class="text-[10px] font-bold text-slate-500 uppercase">Devolver:</label>
+            <input
+              type="number"
+              min="0"
+              max="${cant}"
+              value="0"
+              data-detalle-id="${it.id}"
+              data-unit-refund="${unitRefund.toFixed(4)}"
+              oninput="recalcPartialReturnRefund()"
+              class="pr-qty-input w-16 px-2 py-1.5 rounded-xl border border-slate-300 bg-white font-mono font-black text-center"
+            />
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  recalcPartialReturnRefund();
+  const modal = document.getElementById('partial-return-modal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+
+function closePartialReturnModal() {
+  const modal = document.getElementById('partial-return-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function recalcPartialReturnRefund() {
+  let totalRefund = 0;
+  document.querySelectorAll('.pr-qty-input').forEach((inp) => {
+    const maxQ = parseInt(inp.getAttribute('max') || '0', 10);
+    let q = parseInt(inp.value || '0', 10) || 0;
+    if (q < 0) q = 0;
+    if (q > maxQ) { q = maxQ; inp.value = maxQ; }
+    const uRef = parseFloat(inp.getAttribute('data-unit-refund') || '0') || 0;
+    totalRefund += q * uRef;
+  });
+  const el = document.getElementById('pr-refund-total');
+  if (el) el.textContent = formatRD(totalRefund);
+}
+
+async function submitPartialReturn(event) {
+  event.preventDefault();
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  const txId = parseInt(document.getElementById('pr-tx-id').value, 10);
+  const motivo = document.getElementById('pr-motivo').value.trim() || 'Devolución parcial en mostrador';
+  const usuario = sysState.authenticatedPharmacy.nombre_usuario_actual || sysState.authenticatedPharmacy.usuario_actual || 'Cajero Mostrador';
+
+  const itemsToReturn = [];
+  document.querySelectorAll('.pr-qty-input').forEach((inp) => {
+    const q = parseInt(inp.value || '0', 10) || 0;
+    if (q > 0) {
+      itemsToReturn.push({
+        detalle_id: parseInt(inp.getAttribute('data-detalle-id'), 10),
+        cantidad_presentacion: q,
+      });
+    }
+  });
+
+  if (itemsToReturn.length === 0) {
+    showToast('Indica al menos 1 unidad/artículo a devolver.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/sales/partial-return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmacia_id: fid,
+        transaccion_id: txId,
+        items: itemsToReturn,
+        motivo,
+        usuario,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      showToast(data.error || 'No se pudo procesar la devolución parcial.', 'error');
+      return;
+    }
+    closePartialReturnModal();
+    await loadSysProducts();
+    await loadSysDashboard();
+    if (typeof openPosRecentSalesModal === 'function') {
+      await openPosRecentSalesModal();
+    }
+    showToast(`📦 Devolución parcial procesada en #${data.codigo_orden}: Reembolso ${formatRD(data.monto_devuelto_rd)} (+${data.unidades_reintegradas} u. reintegradas).`, 'success');
+  } catch (e) {
+    showToast('Error al procesar la devolución parcial.', 'error');
+  }
+}
+
+
+// ============================================================================
+// REPORTE DE RENTABILIDAD REAL Y MARGEN DE GANANCIA
+// ============================================================================
+
+async function loadProfitabilityReport() {
+  if (!sysState.authenticatedPharmacy) return;
+  const fid = sysState.authenticatedPharmacy.id || 1;
+  const periodo = document.getElementById('prof-period-select')?.value || 'MES';
+  try {
+    const res = await fetch(`/api/reports/profitability?farmacia_id=${fid}&periodo=${encodeURIComponent(periodo)}`);
+    const data = await res.json();
+    if (!data.ok || !data.report) return;
+    const r = data.report;
+
+    const elV = document.getElementById('prof-kpi-ventas');
+    const elC = document.getElementById('prof-kpi-costo');
+    const elGM = document.getElementById('prof-kpi-gastos-mermas');
+    const elGMSub = document.getElementById('prof-kpi-gastos-sub');
+    const elU = document.getElementById('prof-kpi-utilidad');
+    const elM = document.getElementById('prof-kpi-margen');
+
+    if (elV) elV.textContent = formatRD(r.ventas_rd);
+    if (elC) elC.textContent = formatRD(r.costo_vendido_rd);
+    if (elGM) elGM.textContent = formatRD((r.gastos_caja_rd || 0) + (r.mermas_rd || 0));
+    if (elGMSub) elGMSub.textContent = `Gastos: ${formatRD(r.gastos_caja_rd)} • Mermas: ${formatRD(r.mermas_rd)}`;
+    if (elU) {
+      elU.textContent = formatRD(r.utilidad_neta_real_rd);
+      elU.className = `text-lg font-black mt-1 ${r.utilidad_neta_real_rd >= 0 ? 'text-emerald-800' : 'text-rose-700'}`;
+    }
+    if (elM) elM.textContent = `Margen neto: ${Number(r.margen_neto_pct || 0).toFixed(1)}%`;
+
+    const tbody = document.getElementById('prof-top-products-tbody');
+    if (tbody) {
+      const top = r.top_productos_rentables || [];
+      if (top.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-400">Sin ventas registradas en este periodo.</td></tr>';
+      } else {
+        tbody.innerHTML = top.map((p) => `
+          <tr class="hover:bg-slate-50">
+            <td class="py-2.5 px-3 font-bold text-slate-900">${p.nombre_comercial}</td>
+            <td class="py-2.5 px-3 text-center font-mono">${p.unidades_vendidas}</td>
+            <td class="py-2.5 px-3 text-right font-mono">${formatRD(p.ventas_rd)}</td>
+            <td class="py-2.5 px-3 text-right font-mono text-amber-800">${formatRD(p.costo_rd)}</td>
+            <td class="py-2.5 px-3 text-right font-mono font-black ${p.ganancia_rd >= 0 ? 'text-emerald-700' : 'text-rose-700'}">${formatRD(p.ganancia_rd)}</td>
+            <td class="py-2.5 px-3 text-right font-mono font-extrabold">${Number(p.margen_pct || 0).toFixed(1)}%</td>
+          </tr>
+        `).join('');
+      }
+    }
+  } catch (e) {}
+}
+
+
+// ============================================================================
+// RESPALDO PRIVADO DESCARGABLE POR FARMACIA (.ZIP CON .DB Y .CSV)
+// ============================================================================
+
+async function downloadPharmacyBackupZip() {
+  if (!sysState.authenticatedPharmacy) {
+    showToast('Inicia sesión en la farmacia primero.', 'error');
+    return;
+  }
+  const btn = document.getElementById('btn-download-pharmacy-backup');
+  const prevHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳</span> <span>Generando respaldo...</span>';
+  }
+  try {
+    const res = await fetch('/api/backup/download');
+    if (!res.ok) {
+      let errMsg = 'No se pudo generar el respaldo.';
+      try {
+        const j = await res.json();
+        if (j && j.error) errMsg = j.error;
+      } catch (e) {}
+      showToast(errMsg, 'error');
+      return;
+    }
+
+    const blob = await res.blob();
+    const disp = res.headers.get('Content-Disposition') || '';
+    const match = disp.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : `Respaldo_Farmacia_${sysState.authenticatedPharmacy.id}.zip`;
+    const prodCnt = res.headers.get('X-Backup-Productos') || '0';
+    const ventasCnt = res.headers.get('X-Backup-Ventas-Hoy') || '0';
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    showToast(`💾 Respaldo descargado (${prodCnt} productos, ${ventasCnt} ventas de hoy).`, 'success');
+  } catch (e) {
+    showToast('Error de conexión al descargar el respaldo.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = prevHtml;
+    }
+  }
+}
+
+
+// ============================================================================
+// AUTOCOMPLETADO DE DATOS PERTINENTES POR CÉDULA (APP -> FARMACIA FÍSICA)
+// ============================================================================
+let pcCedulaDebounce = null;
+
+function debouncedLookupPharmaCareByCedula(val) {
+  clearTimeout(pcCedulaDebounce);
+  const digits = String(val || '').replace(/\D/g, '');
+  const stEl = document.getElementById('pc-cedula-lookup-status');
+  if (digits.length < 6) {
+    if (stEl) stEl.classList.add('hidden');
+    return;
+  }
+  pcCedulaDebounce = setTimeout(() => lookupPharmaCareByCedula(val, false), 350);
+}
+
+async function lookupPharmaCareByCedula(cedulaVal, showNotFoundToast = false) {
+  const clean = String(cedulaVal || '').trim();
+  if (!clean) return;
+  const fid = (sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.id) || 1;
+  const stEl = document.getElementById('pc-cedula-lookup-status');
+
+  try {
+    const res = await fetch(`/api/patient/search-checkout?farmacia_id=${fid}&q=${encodeURIComponent(clean)}`);
+    const data = await res.json();
+    if (data && data.ok && data.found && data.paciente) {
+      const p = data.paciente;
+      const nameInp = document.getElementById('pc-patient-name');
+      const phoneInp = document.getElementById('pc-patient-phone');
+      const diagInp = document.getElementById('pc-patient-diag');
+      const medInp = document.getElementById('pc-patient-med');
+
+      if (nameInp && p.nombre) nameInp.value = p.nombre;
+      if (phoneInp && p.telefono) phoneInp.value = p.telefono;
+      if (diagInp && p.diagnostico_cronico && !diagInp.value.trim()) diagInp.value = p.diagnostico_cronico;
+      if (medInp && p.medicamento_cronico && !medInp.value.trim()) medInp.value = p.medicamento_cronico;
+
+      if (stEl) {
+        const extra = (Array.isArray(p.alergias) && p.alergias.length) ? ` • Alergias: ${p.alergias.join(', ')}` : '';
+        stEl.textContent = `✅ Paciente encontrado${p.registrado_en_app ? ' (App)' : ''}${extra}`;
+        stEl.className = 'text-[10px] font-bold text-emerald-700 mt-0.5';
+        stEl.classList.remove('hidden');
+      }
+    } else {
+      if (stEl) {
+        stEl.textContent = 'Paciente nuevo (se registrará evaluación con esta cédula)';
+        stEl.className = 'text-[10px] font-semibold text-slate-500 mt-0.5';
+        stEl.classList.remove('hidden');
+      }
+      if (showNotFoundToast) {
+        showToast('No registrado aún en la App: escribe su nombre para realizarle la evaluación.', 'info');
+      }
+    }
+  } catch (e) {}
+}
+
+
+// ============================================================================
+// BÚSQUEDA POR NOMBRE/CÉDULA E IMPRESIÓN COMPLETA DE ATENCIÓN FARMACÉUTICA
+// ============================================================================
+let pcNameDebounce = null;
+
+function debouncedLookupPharmaCareByName(val) {
+  clearTimeout(pcNameDebounce);
+  const clean = String(val || '').trim();
+  if (clean.length < 4) return;
+  pcNameDebounce = setTimeout(() => lookupPharmaCareByQuery(clean, false), 450);
+}
+
+async function lookupPharmaCareByQuery(queryVal, showNotFoundToast = false) {
+  const clean = String(queryVal || '').trim();
+  if (!clean) return;
+  const fid = (sysState.authenticatedPharmacy && sysState.authenticatedPharmacy.id) || 1;
+  const stEl = document.getElementById('pc-cedula-lookup-status');
+
+  try {
+    const res = await fetch(`/api/patient/search-checkout?farmacia_id=${fid}&q=${encodeURIComponent(clean)}`);
+    const data = await res.json();
+    if (data && data.ok && data.found && data.paciente) {
+      const p = data.paciente;
+      const nameInp = document.getElementById('pc-patient-name');
+      const cedInp = document.getElementById('pc-patient-cedula');
+      const phoneInp = document.getElementById('pc-patient-phone');
+      const diagInp = document.getElementById('pc-patient-diag');
+      const medInp = document.getElementById('pc-patient-med');
+
+      if (nameInp && p.nombre && !nameInp.value.trim()) nameInp.value = p.nombre;
+      else if (nameInp && p.nombre && showNotFoundToast) nameInp.value = p.nombre;
+      if (cedInp && p.cedula && !cedInp.value.trim()) cedInp.value = p.cedula;
+      if (phoneInp && p.telefono && !phoneInp.value.trim()) phoneInp.value = p.telefono;
+      if (diagInp && p.diagnostico_cronico && !diagInp.value.trim()) diagInp.value = p.diagnostico_cronico;
+      if (medInp && p.medicamento_cronico && !medInp.value.trim()) medInp.value = p.medicamento_cronico;
+
+      if (stEl) {
+        const extra = (Array.isArray(p.alergias) && p.alergias.length) ? ` • Alergias: ${p.alergias.join(', ')}` : '';
+        stEl.textContent = `✅ Paciente encontrado: ${p.nombre}${p.registrado_en_app ? ' (App)' : ''}${extra}`;
+        stEl.className = 'text-[10px] font-bold text-emerald-700 mt-0.5';
+        stEl.classList.remove('hidden');
+      }
+    } else if (showNotFoundToast) {
+      showToast('No se encontró paciente registrado con ese nombre. Puedes continuar registrando su evaluación.', 'info');
+    }
+  } catch (e) {}
+}
+
+function printCurrentPharmaCareForm() {
+  const ph = (sysState && sysState.authenticatedPharmacy) || {};
+  const nombre = document.getElementById('pc-patient-name')?.value.trim() || 'Paciente';
+  const cedula = document.getElementById('pc-patient-cedula')?.value.trim() || 'N/A';
+  const tel = document.getElementById('pc-patient-phone')?.value.trim() || 'N/A';
+  const fecha = document.getElementById('pc-date')?.value || '';
+  const hora = document.getElementById('pc-time')?.value || '';
+  const sys = document.getElementById('pc-pa-sys')?.value || '--';
+  const dia = document.getElementById('pc-pa-dia')?.value || '--';
+  const pulso = document.getElementById('pc-pulso')?.value || '--';
+  const glic = document.getElementById('pc-glicemia')?.value || '--';
+  const peso = parseFloat(document.getElementById('pc-peso')?.value || '0');
+  const talla = parseFloat(document.getElementById('pc-talla')?.value || '0');
+  const spo2 = document.getElementById('pc-spo2')?.value || '--';
+  const notas = document.getElementById('pc-notes')?.value.trim() || 'Sin observaciones adicionales';
+  const atendido = document.getElementById('pc-attended-by')?.value.trim() || 'Farmacéutico de Turno';
+
+  let imcTxt = '--';
+  if (peso > 0 && talla > 0) {
+    const hM = talla / 100.0;
+    imcTxt = (peso / (hM * hM)).toFixed(1);
+  }
+
+  const w = window.open('', '_blank', 'width=560,height=720');
+  if (!w) {
+    window.print();
+    return;
+  }
+  w.document.write(`
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      <title>Evaluación Física - ${nombre}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+        .card { max-width: 480px; margin: 0 auto; border: 2px solid #0d9488; border-radius: 16px; padding: 20px; }
+        h1 { font-size: 18px; margin: 0 0 4px; color: #0f766e; }
+        .sub { font-size: 11px; color: #475569; margin-bottom: 14px; }
+        .box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+        th, td { border-bottom: 1px solid #e2e8f0; padding: 7px 4px; text-align: left; }
+        th { color: #475569; font-size: 11px; text-transform: uppercase; }
+        td.val { text-align: right; font-weight: 800; font-family: monospace; }
+        .foot { font-size: 11px; color: #475569; border-top: 1px dashed #94a3b8; padding-top: 10px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>${ph.nombre || 'Farmacia'} — Evaluación Física</h1>
+        <div class="sub">${[ph.direccion || ph.ciudad_sector, ph.telefono].filter(Boolean).join(' • ')}<br/>Fecha: ${fecha} ${hora}</div>
+        <div class="box">
+          <strong>Paciente:</strong> ${nombre}<br/>
+          <strong>Cédula:</strong> ${cedula} &nbsp;|&nbsp; <strong>Tel:</strong> ${tel}
+        </div>
+        <table>
+          <tr><th>Parámetro Evaluado</th><th style="text-align:right;">Resultado</th></tr>
+          <tr><td>Presión Arterial</td><td class="val">${sys} / ${dia} mmHg</td></tr>
+          <tr><td>Pulso Cardíaco</td><td class="val">${pulso} lpm</td></tr>
+          <tr><td>Glicemia Capilar</td><td class="val">${glic} mg/dL</td></tr>
+          <tr><td>Peso Corporal</td><td class="val">${peso > 0 ? peso + ' kg' : '--'}</td></tr>
+          <tr><td>Talla / Estatura</td><td class="val">${talla > 0 ? talla + ' cm' : '--'}</td></tr>
+          <tr><td>IMC Calculado</td><td class="val">${imcTxt} kg/m²</td></tr>
+          <tr><td>Saturación O₂</td><td class="val">${spo2}%</td></tr>
+        </table>
+        <div class="box"><strong>Observaciones:</strong> ${notas}</div>
+        <div class="foot">Atendido por: <strong>${atendido}</strong></div>
+      </div>
+      <script>setTimeout(function(){ window.print(); }, 200);<\/script>
+    </body>
+    </html>
+  `);
+  w.document.close();
 }

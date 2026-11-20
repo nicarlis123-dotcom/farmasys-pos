@@ -144,7 +144,18 @@ async function initAppPharmacies() {
       state.activePharmacyId = paramFid;
     }
 
+    const selWrap = document.getElementById('app-pharmacy-selector-wrap');
     const sel = document.getElementById('app-pharmacy-select');
+    const hasExplicitTarget = (!isNaN(paramFid) && paramFid > 0) || Boolean(paramCode);
+    if (selWrap) {
+      if (list.length > 1 && !hasExplicitTarget) {
+        selWrap.classList.remove('hidden');
+        selWrap.classList.add('flex');
+      } else {
+        selWrap.classList.add('hidden');
+        selWrap.classList.remove('flex');
+      }
+    }
     if (sel) {
       if (list.length === 0) {
         sel.innerHTML = '<option value="1" class="bg-slate-900 text-white">Sin farmacias registradas</option>';
@@ -599,7 +610,15 @@ function renderAppProductsGrid() {
 function addToAppCart(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
-    // Verificación de duplicidad farmacológica en la app del paciente
+
+  // Verificación de alergias registradas por el paciente
+  const allergyHit = checkAppAllergyConflict(product);
+  if (allergyHit) {
+    const okAllergy = confirm(`⚠️ ALERTA DE ALERGIA:\n\nRegistraste alergia a "${allergyHit}".\n"${product.nombre_comercial}" (${product.principio_activo || ''}) puede ser incompatible.\n\n¿Deseas agregarlo de todos modos?`);
+    if (!okAllergy) return;
+  }
+
+  // Verificación de duplicidad farmacológica en la app del paciente
   const paNew = (product.principio_activo || '').trim().toLowerCase();
   if (paNew) {
     const duplicate = state.appCart.find(i => {
@@ -608,7 +627,7 @@ function addToAppCart(productId) {
       return paExist && (paNew === paExist || paNew.includes(paExist) || paExist.includes(paNew));
     });
     if (duplicate) {
-      const ok = confirm(`⚠️ Aviso de Farmacia Davalsi:\n\nYa tienes '${duplicate.product.nombre_comercial}' en tu carrito con el mismo principio activo (${product.principio_activo}).\n\n¿Deseas agregar '${product.nombre_comercial}' de todos modos?`);
+      const ok = confirm(`⚠️ Aviso Farmacéutico:\n\nYa tienes '${duplicate.product.nombre_comercial}' en tu carrito con el mismo principio activo (${product.principio_activo}).\n\n¿Deseas agregar '${product.nombre_comercial}' de todos modos?`);
       if (!ok) return;
     }
   }
@@ -1013,6 +1032,11 @@ async function submitAppOrder() {
   if (!clienteNombre || !clienteTelefono || (effectiveDeliveryMode === 'DOMICILIO' && !clienteDireccion)) {
     showToast('Por favor completa tu nombre, teléfono WhatsApp y dirección de entrega.', 'error');
     return;
+  }
+
+  if (state.pharmacyOpenStatus && state.pharmacyOpenStatus.open === false) {
+    const okClosed = confirm(`🕒 Esta farmacia se encuentra fuera de su horario (${(state.pharmacyConfig && state.pharmacyConfig.horario) || 'cerrada'}).\n\nTu pedido quedará registrado para ser atendido en su apertura. ¿Deseas enviarlo?`);
+    if (!okClosed) return;
   }
 
   if (state.appPaymentMethod === 'TARJETA' && state.pharmacyConfig && state.pharmacyConfig.pago_tarjeta_activo === false) {
@@ -1850,13 +1874,14 @@ async function saveWhatsAppConfig(event) {
 
 // Inicialización al cargar la página
 window.addEventListener('DOMContentLoaded', async () => {
+  checkPatientAuthOnLoad();
   await initAppPharmacies();
   loadAppCartFromStorage();
   await fetchAndApplyLivePharmacyConfig();
   refreshAllData();
-  checkPatientAuthOnLoad();
   refreshActiveOrderBanner();
   startActiveOrderPolling();
+  updateAppAllergiesBadge();
 });
 
 
@@ -1915,7 +1940,7 @@ function updatePatientHeaderUI() {
 }
 
 function checkPatientAuthOnLoad() {
-  const sessionStr = localStorage.getItem('davalsi_patient_session');
+  const sessionStr = sessionStorage.getItem('farmasys_patient_session');
 
   if (sessionStr) {
     try {
@@ -1923,15 +1948,19 @@ function checkPatientAuthOnLoad() {
       prefillPatientData();
       loadAppChronic5DayReminders();
     } catch (e) {
-      localStorage.removeItem('davalsi_patient_session');
+      sessionStorage.removeItem('farmasys_patient_session');
       currentPatient = null;
     }
   } else {
     currentPatient = null;
   }
 
-  // La app permite explorar de inmediato; el modal permanece cerrado por defecto
-  closePatientAuthModal();
+  // Mostrar pantalla de login profesional al abrir la App si no hay sesión activa
+  if (currentPatient && currentPatient.nombre_completo) {
+    closePatientAuthModal();
+  } else {
+    openPatientAuthModal();
+  }
   updatePatientHeaderUI();
 }
 
@@ -1954,20 +1983,21 @@ function prefillPatientData() {
 function switchPatientAuthMode(mode) {
   const loginTab = document.getElementById('tab-patient-login');
   const regTab = document.getElementById('tab-patient-register');
+  const forgotTab = document.getElementById('tab-patient-forgot');
   const loginForm = document.getElementById('form-patient-login');
   const regForm = document.getElementById('form-patient-register');
+  const forgotForm = document.getElementById('form-patient-forgot');
 
-  if (mode === 'login') {
-    if (loginTab) loginTab.className = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
-    if (regTab) regTab.className = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
-    if (loginForm) loginForm.classList.remove('hidden');
-    if (regForm) regForm.classList.add('hidden');
-  } else {
-    if (regTab) regTab.className = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
-    if (loginTab) loginTab.className = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
-    if (regForm) regForm.classList.remove('hidden');
-    if (loginForm) loginForm.classList.add('hidden');
-  }
+  const activeCls = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
+  const idleCls = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
+
+  if (loginTab) loginTab.className = mode === 'login' ? activeCls : idleCls;
+  if (regTab) regTab.className = mode === 'register' ? activeCls : idleCls;
+  if (forgotTab) forgotTab.className = mode === 'forgot' ? activeCls : idleCls;
+
+  if (loginForm) loginForm.classList.toggle('hidden', mode !== 'login');
+  if (regForm) regForm.classList.toggle('hidden', mode !== 'register');
+  if (forgotForm) forgotForm.classList.toggle('hidden', mode !== 'forgot');
 }
 
 async function handlePatientLogin(event) {
@@ -1993,7 +2023,7 @@ async function handlePatientLogin(event) {
     }
 
     currentPatient = data.patient;
-    localStorage.setItem('davalsi_patient_session', JSON.stringify(data.patient));
+    sessionStorage.setItem('farmasys_patient_session', JSON.stringify(data.patient));
     closePatientAuthModal();
     updatePatientHeaderUI();
     prefillPatientData();
@@ -2010,6 +2040,7 @@ async function handlePatientLogin(event) {
 async function handlePatientRegister(event) {
   if (event && event.preventDefault) event.preventDefault();
   const nombre = document.getElementById('pac-reg-nombre').value.trim();
+  const email = document.getElementById('pac-reg-email')?.value.trim() || '';
   const tel = document.getElementById('pac-reg-tel').value.trim();
   const cedula = document.getElementById('pac-reg-cedula').value.trim();
   const clave = document.getElementById('pac-reg-clave').value.trim();
@@ -2023,6 +2054,7 @@ async function handlePatientRegister(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         nombre_completo: nombre,
+        email: email,
         telefono: tel,
         cedula: cedula,
         clave_acceso: clave,
@@ -2039,7 +2071,7 @@ async function handlePatientRegister(event) {
     }
 
     currentPatient = data.patient;
-    localStorage.setItem('davalsi_patient_session', JSON.stringify(data.patient));
+    sessionStorage.setItem('farmasys_patient_session', JSON.stringify(data.patient));
     closePatientAuthModal();
     updatePatientHeaderUI();
     prefillPatientData();
@@ -2055,7 +2087,7 @@ async function handlePatientRegister(event) {
 
 function handlePatientLogout() {
   currentPatient = null;
-  localStorage.removeItem('davalsi_patient_session');
+  sessionStorage.removeItem('farmasys_patient_session');
   localStorage.removeItem('davalsi_chronic_phone');
 
   // Limpiar campos de cliente para que no queden datos expuestos
@@ -2079,9 +2111,9 @@ function handlePatientLogout() {
   if (typeof updateFloatingCartUI === 'function') updateFloatingCartUI();
   if (typeof updateAppCartUI === 'function') updateAppCartUI();
 
-  closePatientAuthModal();
+  openPatientAuthModal();
   updatePatientHeaderUI();
-  showToast('Has cerrado sesión en tu cuenta. Datos protegidos.');
+  showToast('Has cerrado sesión en tu cuenta. Inicia sesión para continuar.');
 }
 
 window.openPatientAuthModal = openPatientAuthModal;
@@ -2169,7 +2201,17 @@ function applyPatientAppServiceConfig(cfg) {
   const infoPhoneLink = document.getElementById('app-info-phone-link');
   if (infoPhoneLink && cfg.telefono) infoPhoneLink.href = `tel:${String(cfg.telefono).replace(/[^0-9+]/g, '')}`;
   const infoHours = document.getElementById('app-info-hours');
-  if (infoHours) infoHours.textContent = cfg.horario || 'Lun-Dom 7:00 AM - 11:00 PM';
+  const horarioText = cfg.horario || 'Lun-Dom 7:00 AM - 11:00 PM';
+  if (infoHours) infoHours.textContent = horarioText;
+  const openStatus = evaluatePharmacyOpenStatus(horarioText);
+  state.pharmacyOpenStatus = openStatus;
+  const openBadge = document.getElementById('app-open-status-badge');
+  if (openBadge) {
+    openBadge.textContent = openStatus.label;
+    openBadge.className = openStatus.open
+      ? 'ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300'
+      : 'ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300';
+  }
   const heroTitle = document.getElementById('app-hero-pharmacy-title');
   if (heroTitle) heroTitle.textContent = `Tu salud a un toque en ${phName}`;
   const checkoutTitle = document.getElementById('app-checkout-pharmacy-title');
@@ -5250,5 +5292,249 @@ async function completeCourierDelivery(orderCode) {
     showToast(`✅ Pedido #${orderCode} marcado como ENTREGADO.`, 'success');
   } catch (e) {
     showToast('Error al marcar entrega.', 'error');
+  }
+}
+
+
+// ============================================================================
+// ALERGIAS DEL PACIENTE + INDICADOR EN VIVO ABIERTO / CERRADO
+// ============================================================================
+
+function getPatientAllergiesStorageKey() {
+  const tel = (currentPatient && currentPatient.telefono) || document.getElementById('app-client-phone')?.value || 'guest';
+  const clean = String(tel).replace(/\D/g, '') || 'guest';
+  return `farmasys_patient_allergies_${clean}`;
+}
+
+function getPatientAllergies() {
+  try {
+    const raw = localStorage.getItem(getPatientAllergiesStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function savePatientAllergies(list) {
+  try {
+    localStorage.setItem(getPatientAllergiesStorageKey(), JSON.stringify(list || []));
+  } catch (e) {}
+  updateAppAllergiesBadge();
+}
+
+function updateAppAllergiesBadge() {
+  const badge = document.getElementById('app-allergies-count-badge');
+  if (!badge) return;
+  const cnt = getPatientAllergies().length;
+  badge.textContent = String(cnt);
+  if (cnt > 0) badge.classList.remove('hidden');
+  else badge.classList.add('hidden');
+}
+
+function openPatientAllergiesModal() {
+  const modal = document.getElementById('patient-allergies-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  renderPatientAllergiesList();
+}
+
+function closePatientAllergiesModal() {
+  const modal = document.getElementById('patient-allergies-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function handleAddAllergySubmit(event) {
+  event.preventDefault();
+  const inp = document.getElementById('app-allergy-input');
+  const val = (inp ? inp.value : '').trim();
+  if (!val) return;
+  addPatientAllergy(val);
+  if (inp) inp.value = '';
+}
+
+function addPatientAllergy(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return;
+  const list = getPatientAllergies();
+  if (!list.some((a) => a.toLowerCase() === clean.toLowerCase())) {
+    list.push(clean);
+    savePatientAllergies(list);
+    showToast(`⚠️ Alergia "${clean}" guardada en tu perfil.`, 'info');
+  }
+  renderPatientAllergiesList();
+}
+
+function removePatientAllergy(idx) {
+  const list = getPatientAllergies();
+  list.splice(idx, 1);
+  savePatientAllergies(list);
+  renderPatientAllergiesList();
+}
+
+function renderPatientAllergiesList() {
+  const container = document.getElementById('app-allergies-list');
+  if (!container) return;
+  const list = getPatientAllergies();
+  if (list.length === 0) {
+    container.innerHTML = '<p class="p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-500 text-center">No has registrado alergias todavía.</p>';
+    return;
+  }
+  container.innerHTML = list.map((al, idx) => `
+    <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+      <span class="font-extrabold text-rose-900">⚠️ ${al}</span>
+      <button type="button" onclick="removePatientAllergy(${idx})" class="text-xs font-bold text-rose-600 hover:underline cursor-pointer">Quitar</button>
+    </div>
+  `).join('');
+}
+
+function checkAppAllergyConflict(product) {
+  const allergies = getPatientAllergies();
+  if (!allergies.length || !product) return null;
+  const hay = `${product.nombre_comercial || ''} ${product.principio_activo || ''} ${product.categoria || ''}`.toLowerCase();
+
+  const crossGroups = [
+    ['penicilina', 'amoxicilina', 'ampicilina', 'amoxil', 'clavulanico'],
+    ['aine', 'ibuprofeno', 'diclofenac', 'naproxeno', 'ketorolaco', 'meloxicam', 'aspirina'],
+    ['sulfa', 'sulfametoxazol', 'trimetoprim'],
+    ['paracetamol', 'acetaminofen'],
+    ['dipirona', 'metamizol'],
+  ];
+
+  for (const al of allergies) {
+    const alLow = al.toLowerCase();
+    const tokens = alLow.split(/[\s/,+]+/).filter((t) => t.length >= 4);
+    for (const tok of tokens) {
+      if (hay.includes(tok)) return al;
+      for (const grp of crossGroups) {
+        if (grp.some((g) => tok.includes(g) || g.includes(tok)) && grp.some((g) => hay.includes(g))) {
+          return al;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function evaluatePharmacyOpenStatus(horarioStr) {
+  const raw = String(horarioStr || '').trim();
+  const low = raw.toLowerCase();
+  if (!raw || low.includes('24')) {
+    return { open: true, label: low.includes('24') ? '🟢 Abierto 24h' : '🟢 Abierto ahora' };
+  }
+
+  const now = new Date();
+  const day = now.getDay();
+  if (low.includes('lun-vie') && (day === 0 || day === 6)) {
+    return { open: false, label: '🔴 Cerrado hoy' };
+  }
+  if ((low.includes('lun-sab') || low.includes('lun-sáb')) && day === 0) {
+    return { open: false, label: '🔴 Cerrado hoy' };
+  }
+
+  const timeMatches = [...raw.matchAll(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/gi)];
+  if (timeMatches.length >= 2) {
+    const toMins = (m) => {
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2] || '0', 10);
+      const ampm = (m[3] || '').toLowerCase();
+      if (ampm === 'pm' && h < 12) h += 12;
+      if (ampm === 'am' && h === 12) h = 0;
+      return h * 60 + min;
+    };
+    const startM = toMins(timeMatches[0]);
+    const endM = toMins(timeMatches[1]);
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const isOpen = endM >= startM ? (nowM >= startM && nowM <= endM) : (nowM >= startM || nowM <= endM);
+    return isOpen
+      ? { open: true, label: '🟢 Abierto ahora' }
+      : { open: false, label: '🔴 Cerrado ahora' };
+  }
+
+  return { open: true, label: '🟢 Abierto' };
+}
+
+
+// ============================================================================
+// RECUPERACIÓN / CAMBIO DE CONTRASEÑA DE PACIENTE POR CORREO ELECTRÓNICO
+// ============================================================================
+
+async function handlePatientForgotSendCode(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const email = document.getElementById('pac-forgot-email')?.value.trim() || '';
+  const infoEl = document.getElementById('pac-forgot-info');
+  const errEl = document.getElementById('pac-forgot-error');
+  if (infoEl) infoEl.classList.add('hidden');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/patient/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'No se pudo enviar el código de verificación.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    if (infoEl) {
+      infoEl.textContent = data.smtp_sent
+        ? `📧 Código enviado a ${email}. Revisa tu bandeja de entrada.`
+        : `📧 Código de verificación generado para ${email}: ${data.verification_code}`;
+      infoEl.classList.remove('hidden');
+    }
+    if (data.verification_code) {
+      const codeInp = document.getElementById('pac-forgot-code');
+      if (codeInp && !codeInp.value) codeInp.value = data.verification_code;
+    }
+    showToast('Código de verificación listo.', 'success');
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = 'Error de conexión al solicitar código.';
+      errEl.classList.remove('hidden');
+    }
+  }
+}
+
+async function handlePatientResetPassword(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const email = document.getElementById('pac-forgot-email')?.value.trim() || '';
+  const code = document.getElementById('pac-forgot-code')?.value.trim() || '';
+  const newPwd = document.getElementById('pac-forgot-new-password')?.value.trim() || '';
+  const errEl = document.getElementById('pac-forgot-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/patient/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, new_password: newPwd }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'No se pudo cambiar la contraseña.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    showToast('✅ Contraseña actualizada. Inicia sesión con tu nueva clave.', 'success');
+    const loginIdInp = document.getElementById('pac-login-id');
+    const loginPwdInp = document.getElementById('pac-login-password');
+    if (loginIdInp) loginIdInp.value = email;
+    if (loginPwdInp) loginPwdInp.value = '';
+    switchPatientAuthMode('login');
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = 'Error de conexión al actualizar la contraseña.';
+      errEl.classList.remove('hidden');
+    }
   }
 }

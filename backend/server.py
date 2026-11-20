@@ -31,8 +31,13 @@ else:
     PROJECT_ROOT = os.path.dirname(BASE_DIR)
     STATIC_DIR = os.path.join(PROJECT_ROOT, "frontend")
 
-UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads", "recetas")
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "farmacia_davalsi.db")
+PERSISTENT_DATA_DIR = (
+    os.environ.get("FARMASYS_DATA_DIR")
+    or os.environ.get("DATA_DIR")
+    or os.path.join(PROJECT_ROOT, "data")
+).strip()
+UPLOADS_DIR = os.path.join(PERSISTENT_DATA_DIR, "uploads", "recetas") if (os.environ.get("FARMASYS_DATA_DIR") or os.environ.get("DATA_DIR")) else os.path.join(PROJECT_ROOT, "uploads", "recetas")
+DB_PATH = os.path.join(PERSISTENT_DATA_DIR, "farmacia_davalsi.db")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 sys.path.insert(0, BASE_DIR)
@@ -189,6 +194,24 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
             return SimpleJWT.decode(auth_header)
         except Exception:
             return None
+
+    def _require_pharmacy_auth(self, farmacia_id: int) -> bool:
+        """Exige token JWT válido de farmacia y verifica que coincida con farmacia_id."""
+        user = self._get_authenticated_user()
+        if not user:
+            self._send_json(401, {"ok": False, "error": "Sesión requerida. Inicia sesión en la farmacia."})
+            return False
+        if user.get("role") != "ROL_ADMIN_CAJA":
+            self._send_json(403, {"ok": False, "error": "Acceso denegado: requiere sesión autorizada de farmacia."})
+            return False
+        try:
+            token_fid = int(user.get("farmacia_id") or user.get("sub") or 0)
+        except (ValueError, TypeError):
+            token_fid = 0
+        if token_fid != int(farmacia_id):
+            self._send_json(403, {"ok": False, "error": "Acceso denegado: no puedes acceder a datos de otra farmacia."})
+            return False
+        return True
 
     """Manejador HTTP omnicanal para API REST Multi-Farmacia y aplicaciones separadas."""
 
@@ -434,18 +457,81 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/accounts/usage":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 report = db.get_accounts_usage_report(farmacia_id=farmacia_id)
                 self._send_json(200, {"ok": True, "report": report})
                 return
 
             if path == "/api/staff":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 staff = db.list_staff(farmacia_id=farmacia_id)
                 self._send_json(200, {"ok": True, "staff": staff})
                 return
 
+            if path == "/api/inventory/mermas":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                res = db.list_lot_shrinkage_records(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, **res})
+                return
+
+            if path == "/api/inventory/merma":
+                farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                rec = db.write_off_lot_shrinkage(
+                    farmacia_id=farmacia_id,
+                    producto_id=int(body.get("producto_id", 0)),
+                    lote_id=int(body["lote_id"]) if body.get("lote_id") else None,
+                    numero_lote=str(body.get("numero_lote", "")),
+                    cantidad_unidades=int(body.get("cantidad_unidades", 0)),
+                    motivo_tipo=str(body.get("motivo_tipo", "VENCIDO")),
+                    motivo_detalle=str(body.get("motivo_detalle", "")),
+                    responsable=str(body.get("responsable", "Administrador")),
+                )
+                self._send_json(201, {"ok": True, "record": rec})
+                return
+
+            if path == "/api/suppliers":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                suppliers = db.list_suppliers(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "suppliers": suppliers})
+                return
+
+            if path == "/api/purchases":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                invoices = db.list_purchase_invoices(farmacia_id=farmacia_id)
+                self._send_json(200, {"ok": True, "invoices": invoices})
+                return
+
+            if path == "/api/suppliers":
+                farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                sup = db.create_supplier(farmacia_id, body)
+                self._send_json(201, {"ok": True, "supplier": sup})
+                return
+
+            if path == "/api/purchases/pay":
+                farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                inv = db.mark_purchase_invoice_paid(farmacia_id, int(body.get("invoice_id", 0)))
+                self._send_json(200, {"ok": True, "invoice": inv})
+                return
+
             if path == "/api/debtors":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 debtors = db.list_debtors(farmacia_id=farmacia_id)
                 self._send_json(200, {"ok": True, "debtors": debtors})
                 return
@@ -717,6 +803,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path in ("/api/admin/users", "/api/staff/users"):
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 current_user = self._get_authenticated_user()
                 # Verificar rol de administración
                 users = db.list_staff_users(farmacia_id=farmacia_id)
@@ -725,6 +813,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/admin/config":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 current_user = self._get_authenticated_user()
                 cfg = db.get_pharmacy_config(farmacia_id)
                 self._send_json(200, {"ok": True, "config": cfg})
@@ -820,6 +910,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/transactions":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 canal = query.get("canal", [None])[0]
                 periodo = query.get("periodo", ["TODO"])[0]
                 fecha_dia = query.get("fecha_dia", [None])[0]
@@ -836,14 +928,27 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "transactions": transactions})
                 return
 
+            if path == "/api/reports/profitability":
+                farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                periodo = query.get("periodo", ["MES"])[0]
+                rep = db.get_profitability_report(farmacia_id=farmacia_id, periodo=periodo)
+                self._send_json(200, {"ok": True, "report": rep})
+                return
+
             if path == "/api/sales/comparative-stats":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 stats = db.get_comparative_sales_stats(farmacia_id=farmacia_id)
                 self._send_json(200, stats)
                 return
 
             if path == "/api/whatsapp/logs":
                 farmacia_id = int(query.get("farmacia_id", ["1"])[0])
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 logs = db.list_whatsapp_notifications(farmacia_id=farmacia_id)
                 cfg = db.get_pharmacy_config(farmacia_id=farmacia_id)
                 self._send_json(200, {"ok": True, "logs": logs, "config": cfg})
@@ -952,12 +1057,21 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/auth/login":
-                farmacia_id = safe_farmacia_id(body, 1)
+                ident = str(body.get("farmacia_identificador", "")).strip()
+                if ident:
+                    resolved_id = db.resolve_pharmacy_id_by_identifier(ident)
+                    if not resolved_id:
+                        self._send_json(400, {"ok": False, "error": "No se encontró ninguna farmacia registrada con ese código o nombre. Verifica los datos de registro."})
+                        return
+                    farmacia_id = resolved_id
+                else:
+                    farmacia_id = safe_farmacia_id(body, 1)
                 clave = str(body.get("clave_acceso", ""))
                 username = str(body.get("username", ""))
                 pharmacy_profile = db.authenticate_pharmacy(
                     farmacia_id=farmacia_id, clave_acceso=clave, username=username
                 )
+                farmacia_id = int(pharmacy_profile.get("id") or farmacia_id)
                 jwt_payload = {
                     "sub": str(farmacia_id),
                     "farmacia_id": farmacia_id,
@@ -1003,6 +1117,20 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                     "role": "ROL_PACIENTE_APP",
                     "patient": paciente_record
                 })
+                return
+
+            if path == "/api/patient/auth/forgot-password":
+                email = str(body.get("email", "")).strip()
+                res = db.request_patient_password_reset(email)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/patient/auth/reset-password":
+                email = str(body.get("email", "")).strip()
+                code = str(body.get("code", "")).strip()
+                new_pwd = str(body.get("new_password", "")).strip()
+                res = db.reset_patient_password_with_code(email, code, new_pwd)
+                self._send_json(200, res)
                 return
 
             if path == "/api/patient/auth/register":
@@ -1093,12 +1221,16 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/staff":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 new_seller = db.create_seller(farmacia_id, body)
                 self._send_json(201, {"ok": True, "seller": new_seller})
                 return
 
             if path == "/api/accounts/delete":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 tipo = str(body.get("tipo", "staff")).strip()
                 account_id = body.get("account_id")
                 db.delete_account(tipo=tipo, account_id=account_id, farmacia_id=farmacia_id)
@@ -1107,6 +1239,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/staff/delete":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 staff_id = int(body.get("staff_id", 0))
                 db.delete_seller(farmacia_id, staff_id)
                 self._send_json(200, {"ok": True})
@@ -1114,6 +1248,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/debtors":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 new_debtor = db.create_debtor(farmacia_id, body)
                 self._send_json(201, {"ok": True, "debtor": new_debtor})
                 return
@@ -1495,6 +1631,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/delivery/asignar-repartidor":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 order_code = str(body.get("codigo_orden", "")).strip()
                 rep_nombre = str(body.get("repartidor_nombre", "")).strip()
                 rep_tel = str(body.get("repartidor_telefono", "")).strip()
@@ -1615,6 +1753,8 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/api/pharmacy/config":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 updated_cfg = db.update_pharmacy_config(farmacia_id, body)
                 self._send_json(200, {"ok": True, "config": updated_cfg})
                 return
@@ -1645,8 +1785,24 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, "receta_imagen_url": public_url})
                 return
 
+            if path == "/api/sales/partial-return":
+                farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
+                res = db.partial_return_pos_items(
+                    farmacia_id=farmacia_id,
+                    transaccion_id=int(body.get("transaccion_id", 0)),
+                    items_to_return=body.get("items", []),
+                    motivo=str(body.get("motivo", "Devolución parcial en mostrador")),
+                    usuario=str(body.get("usuario", "Cajero Mostrador")),
+                )
+                self._send_json(200, res)
+                return
+
             if path == "/api/sales/annul":
                 farmacia_id = safe_farmacia_id(body, 1)
+                if not self._require_pharmacy_auth(farmacia_id):
+                    return
                 tx_id = int(body.get("transaccion_id", 0))
                 motivo = str(body.get("motivo", "Devolución / Anulación rápida en mostrador"))
                 usuario = str(body.get("usuario", "Cajero Mostrador"))
@@ -1771,6 +1927,11 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                     costo_compra=float(body["costo_compra"]) if "costo_compra" in body and body["costo_compra"] is not None else None,
                     motivo=str(body.get("motivo", "Entrada de nueva compra / Abastecimiento")),
                     usuario=str(body.get("usuario", "Lic. Farmacéutico Sucursal")),
+                    proveedor_id=int(body["proveedor_id"]) if body.get("proveedor_id") else None,
+                    proveedor_nombre=str(body.get("proveedor_nombre", "")),
+                    numero_factura=str(body.get("numero_factura", "")),
+                    condicion_pago=str(body.get("condicion_pago", "CONTADO")),
+                    costo_total_rd=float(body["costo_total_rd"]) if body.get("costo_total_rd") not in (None, "") else None,
                 )
                 self._send_json(200, {"ok": True, "product": updated_product})
                 return
