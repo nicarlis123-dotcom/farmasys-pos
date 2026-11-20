@@ -1863,11 +1863,11 @@ async function saveWhatsAppConfig(event) {
 
 // Inicialización al cargar la página
 window.addEventListener('DOMContentLoaded', async () => {
+  checkPatientAuthOnLoad();
   await initAppPharmacies();
   loadAppCartFromStorage();
   await fetchAndApplyLivePharmacyConfig();
   refreshAllData();
-  checkPatientAuthOnLoad();
   refreshActiveOrderBanner();
   startActiveOrderPolling();
   updateAppAllergiesBadge();

@@ -1,6 +1,6 @@
 // Service Worker — Farmacia Davalsi PWA v3.2
 // Soporte de Carga Instantánea, Cache-First y Funcionamiento Offline de Emergencia
-const CACHE_NAME = 'farmacia-davalsi-pwa-v3.2';
+const CACHE_NAME = 'farmasys-pwa-v4.0-20261120';
 const STATIC_ASSETS = [
   '/',
   '/app',
