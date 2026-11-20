@@ -1119,6 +1119,20 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 })
                 return
 
+            if path == "/api/patient/auth/forgot-password":
+                email = str(body.get("email", "")).strip()
+                res = db.request_patient_password_reset(email)
+                self._send_json(200, res)
+                return
+
+            if path == "/api/patient/auth/reset-password":
+                email = str(body.get("email", "")).strip()
+                code = str(body.get("code", "")).strip()
+                new_pwd = str(body.get("new_password", "")).strip()
+                res = db.reset_patient_password_with_code(email, code, new_pwd)
+                self._send_json(200, res)
+                return
+
             if path == "/api/patient/auth/register":
                 patient = db.register_patient(body)
                 paciente_record = db.get_or_register_paciente({

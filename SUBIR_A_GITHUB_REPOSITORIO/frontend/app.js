@@ -1944,8 +1944,12 @@ function checkPatientAuthOnLoad() {
     currentPatient = null;
   }
 
-  // La app permite explorar de inmediato; el modal permanece cerrado por defecto
-  closePatientAuthModal();
+  // Mostrar pantalla de login profesional al abrir la App si no hay sesión activa
+  if (currentPatient && currentPatient.nombre_completo) {
+    closePatientAuthModal();
+  } else {
+    openPatientAuthModal();
+  }
   updatePatientHeaderUI();
 }
 
@@ -1968,20 +1972,21 @@ function prefillPatientData() {
 function switchPatientAuthMode(mode) {
   const loginTab = document.getElementById('tab-patient-login');
   const regTab = document.getElementById('tab-patient-register');
+  const forgotTab = document.getElementById('tab-patient-forgot');
   const loginForm = document.getElementById('form-patient-login');
   const regForm = document.getElementById('form-patient-register');
+  const forgotForm = document.getElementById('form-patient-forgot');
 
-  if (mode === 'login') {
-    if (loginTab) loginTab.className = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
-    if (regTab) regTab.className = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
-    if (loginForm) loginForm.classList.remove('hidden');
-    if (regForm) regForm.classList.add('hidden');
-  } else {
-    if (regTab) regTab.className = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
-    if (loginTab) loginTab.className = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
-    if (regForm) regForm.classList.remove('hidden');
-    if (loginForm) loginForm.classList.add('hidden');
-  }
+  const activeCls = 'flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition font-bold cursor-pointer';
+  const idleCls = 'flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition font-bold cursor-pointer';
+
+  if (loginTab) loginTab.className = mode === 'login' ? activeCls : idleCls;
+  if (regTab) regTab.className = mode === 'register' ? activeCls : idleCls;
+  if (forgotTab) forgotTab.className = mode === 'forgot' ? activeCls : idleCls;
+
+  if (loginForm) loginForm.classList.toggle('hidden', mode !== 'login');
+  if (regForm) regForm.classList.toggle('hidden', mode !== 'register');
+  if (forgotForm) forgotForm.classList.toggle('hidden', mode !== 'forgot');
 }
 
 async function handlePatientLogin(event) {
@@ -2024,6 +2029,7 @@ async function handlePatientLogin(event) {
 async function handlePatientRegister(event) {
   if (event && event.preventDefault) event.preventDefault();
   const nombre = document.getElementById('pac-reg-nombre').value.trim();
+  const email = document.getElementById('pac-reg-email')?.value.trim() || '';
   const tel = document.getElementById('pac-reg-tel').value.trim();
   const cedula = document.getElementById('pac-reg-cedula').value.trim();
   const clave = document.getElementById('pac-reg-clave').value.trim();
@@ -2037,6 +2043,7 @@ async function handlePatientRegister(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         nombre_completo: nombre,
+        email: email,
         telefono: tel,
         cedula: cedula,
         clave_acceso: clave,
@@ -5437,4 +5444,86 @@ function evaluatePharmacyOpenStatus(horarioStr) {
   }
 
   return { open: true, label: '🟢 Abierto' };
+}
+
+
+// ============================================================================
+// RECUPERACIÓN / CAMBIO DE CONTRASEÑA DE PACIENTE POR CORREO ELECTRÓNICO
+// ============================================================================
+
+async function handlePatientForgotSendCode(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const email = document.getElementById('pac-forgot-email')?.value.trim() || '';
+  const infoEl = document.getElementById('pac-forgot-info');
+  const errEl = document.getElementById('pac-forgot-error');
+  if (infoEl) infoEl.classList.add('hidden');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/patient/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'No se pudo enviar el código de verificación.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    if (infoEl) {
+      infoEl.textContent = data.smtp_sent
+        ? `📧 Código enviado a ${email}. Revisa tu bandeja de entrada.`
+        : `📧 Código de verificación generado para ${email}: ${data.verification_code}`;
+      infoEl.classList.remove('hidden');
+    }
+    if (data.verification_code) {
+      const codeInp = document.getElementById('pac-forgot-code');
+      if (codeInp && !codeInp.value) codeInp.value = data.verification_code;
+    }
+    showToast('Código de verificación listo.', 'success');
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = 'Error de conexión al solicitar código.';
+      errEl.classList.remove('hidden');
+    }
+  }
+}
+
+async function handlePatientResetPassword(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const email = document.getElementById('pac-forgot-email')?.value.trim() || '';
+  const code = document.getElementById('pac-forgot-code')?.value.trim() || '';
+  const newPwd = document.getElementById('pac-forgot-new-password')?.value.trim() || '';
+  const errEl = document.getElementById('pac-forgot-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/patient/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, new_password: newPwd }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'No se pudo cambiar la contraseña.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+    showToast('✅ Contraseña actualizada. Inicia sesión con tu nueva clave.', 'success');
+    const loginIdInp = document.getElementById('pac-login-id');
+    const loginPwdInp = document.getElementById('pac-login-password');
+    if (loginIdInp) loginIdInp.value = email;
+    if (loginPwdInp) loginPwdInp.value = '';
+    switchPatientAuthMode('login');
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = 'Error de conexión al actualizar la contraseña.';
+      errEl.classList.remove('hidden');
+    }
+  }
 }

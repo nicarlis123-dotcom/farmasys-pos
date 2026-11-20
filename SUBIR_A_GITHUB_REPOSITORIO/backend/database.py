@@ -6368,7 +6368,7 @@ class DatabaseManager:
 
             for row in rows:
 
-                if row["clave_hash"] == hashed or (row["pista_clave"] and row["pista_clave"].strip() == clave_clean):
+                if row["clave_hash"] == hashed:
 
                     matched = row
 
@@ -6444,7 +6444,15 @@ class DatabaseManager:
 
             if existing:
 
-                raise ValueError("Ya existe una cuenta de paciente registrada con este nmero de telfono.")
+                raise ValueError("Ya existe una cuenta de paciente registrada con este número de teléfono.")
+
+            if email:
+                existing_em = conn.execute(
+                    "SELECT id FROM pacientes_usuarios WHERE LOWER(email) = LOWER(?)",
+                    (email,),
+                ).fetchone()
+                if existing_em:
+                    raise ValueError("Ya existe una cuenta de paciente registrada con este correo electrónico.")
 
 
 
@@ -11401,3 +11409,113 @@ class DatabaseManager:
                 "margen_neto_pct": margen_neto_pct,
                 "top_productos_rentables": ranking[:10],
             }
+
+
+    def _ensure_patient_reset_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pacientes_reset_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                code TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+        """)
+
+    def request_patient_password_reset(self, email: str) -> Dict[str, Any]:
+        """Genera un código de verificación de 6 dígitos y lo envía al correo del paciente (si hay SMTP configurado)."""
+        import random
+        import smtplib
+        from email.message import EmailMessage
+
+        em = str(email or "").strip().lower()
+        if not em or "@" not in em:
+            raise ValueError("Ingresa un correo electrónico válido.")
+
+        now = datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        exp_str = (now + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+        code = f"{random.randint(100000, 999999)}"
+
+        with self._get_connection() as conn:
+            self._ensure_patient_reset_table(conn)
+            pac = conn.execute(
+                "SELECT id, nombre_completo, email FROM pacientes_usuarios WHERE LOWER(email) = ? AND activo = 1 LIMIT 1",
+                (em,),
+            ).fetchone()
+            if not pac:
+                raise ValueError("No existe ninguna cuenta de cliente registrada con ese correo electrónico.")
+
+            conn.execute("UPDATE pacientes_reset_codes SET used = 1 WHERE LOWER(email) = ?", (em,))
+            conn.execute(
+                "INSERT INTO pacientes_reset_codes (email, code, expires_at, used, created_at) VALUES (?, ?, ?, 0, ?)",
+                (em, code, exp_str, now_str),
+            )
+
+        smtp_host = os.environ.get("SMTP_HOST", "").strip()
+        smtp_port = int(os.environ.get("SMTP_PORT", "587") or 587)
+        smtp_user = os.environ.get("SMTP_USER", "").strip()
+        smtp_pass = os.environ.get("SMTP_PASS", "").strip()
+        smtp_from = os.environ.get("SMTP_FROM", smtp_user or "no-reply@farmasys.app").strip()
+
+        smtp_sent = False
+        if smtp_host and smtp_user and smtp_pass:
+            try:
+                msg = EmailMessage()
+                msg["Subject"] = "Código para cambiar tu contraseña - FarmaSys"
+                msg["From"] = smtp_from
+                msg["To"] = em
+                msg.set_content(
+                    f"Hola {pac['nombre_completo']},\n\n"
+                    f"Tu código de verificación para restablecer tu contraseña es: {code}\n"
+                    f"Este código expira en 15 minutos.\n\n"
+                    f"Si no solicitaste este cambio, ignora este correo."
+                )
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+                smtp_sent = True
+            except Exception as e_mail:
+                print(f"[SMTP] No se pudo enviar correo a {em}: {e_mail}")
+
+        resp: Dict[str, Any] = {
+            "ok": True,
+            "smtp_sent": smtp_sent,
+            "message": f"Código enviado a {em}." if smtp_sent else f"Código generado para {em} (SMTP no configurado en el servidor).",
+        }
+        if not smtp_sent:
+            resp["verification_code"] = code
+        return resp
+
+    def reset_patient_password_with_code(self, email: str, code: str, new_password: str) -> Dict[str, Any]:
+        """Valida el código de verificación recibido por correo y actualiza la contraseña del paciente."""
+        em = str(email or "").strip().lower()
+        code_clean = str(code or "").strip()
+        pwd = str(new_password or "").strip()
+        if not em or not code_clean or len(pwd) < 4:
+            raise ValueError("Ingresa correo, código válido y nueva contraseña (mínimo 4 caracteres).")
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_connection() as conn:
+            self._ensure_patient_reset_table(conn)
+            row = conn.execute(
+                """
+                SELECT id, expires_at FROM pacientes_reset_codes
+                WHERE LOWER(email) = ? AND code = ? AND used = 0
+                ORDER BY id DESC LIMIT 1
+                """,
+                (em, code_clean),
+            ).fetchone()
+            if not row:
+                raise ValueError("El código de verificación es incorrecto o ya fue utilizado.")
+            if str(row["expires_at"]) < now_str:
+                raise ValueError("El código de verificación ha expirado. Solicita uno nuevo.")
+
+            conn.execute(
+                "UPDATE pacientes_usuarios SET clave_hash = ?, pista_clave = '' WHERE LOWER(email) = ?",
+                (hash_password(pwd), em),
+            )
+            conn.execute("UPDATE pacientes_reset_codes SET used = 1 WHERE id = ?", (row["id"],))
+            return {"ok": True, "message": "Contraseña actualizada con éxito. Ya puedes iniciar sesión."}

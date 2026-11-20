@@ -239,46 +239,49 @@
   <!-- =====================================================================
        PANTALLA DE ACCESO POR CLAVE PARA PACIENTES (PATIENT LOGIN MODAL)
        ===================================================================== -->
-  <div id="patient-auth-gate-screen" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 overflow-y-auto" style="display: none;">
+  <div id="patient-auth-gate-screen" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md hidden items-center justify-center p-4 overflow-y-auto" style="display: none;">
     <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200 relative animate-in fade-in zoom-in-95 duration-200">
-      <!-- Botón de Cerrar Modal (Para entrar y navegar libremente como invitado) -->
-      <button type="button" onclick="closePatientAuthModal()" class="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-black/25 hover:bg-black/40 text-white font-black flex items-center justify-center text-sm transition cursor-pointer" title="Cerrar y continuar a la app">
-        ✕
-      </button>
-
-      <div class="bg-gradient-to-r from-teal-700 via-teal-600 to-emerald-600 text-white p-6 text-center relative">
-        <div class="w-12 h-12 mx-auto rounded-2xl bg-white/20 flex items-center justify-center mb-3 shadow">
-          <span class="text-2xl">🔐</span>
+      <div class="bg-gradient-to-br from-slate-900 via-teal-900 to-emerald-800 text-white p-6 text-center relative">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center mb-3 shadow-lg">
+          <span class="text-3xl">💊</span>
         </div>
-        <h2 class="text-xl font-extrabold tracking-tight">Acceso Seguro de Pacientes</h2>
-        <p class="text-xs text-teal-100 mt-1"><span class="app-dynamic-pharmacy-name">FarmaSys</span> • App Móvil de Salud</p>
+        <h2 class="text-xl font-black tracking-tight">Bienvenido a <span class="app-dynamic-pharmacy-name">FarmaSys</span></h2>
+        <p class="text-xs text-teal-200 mt-1">Inicia sesión o crea tu cuenta para comprar, ver pedidos y recibir atención farmacéutica</p>
       </div>
 
       <div class="p-6 space-y-4">
-        <!-- Selector Modo: Iniciar Sesión vs Registro -->
-        <div class="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+        <!-- Selector Modo: Iniciar Sesión vs Registro vs Recuperar Clave -->
+        <div class="flex rounded-xl bg-slate-100 p-1 text-[11px] font-bold gap-1">
           <button type="button" id="tab-patient-login" onclick="switchPatientAuthMode('login')" class="flex-1 py-2 rounded-lg bg-white text-teal-800 shadow transition cursor-pointer">
             Iniciar Sesión
           </button>
           <button type="button" id="tab-patient-register" onclick="switchPatientAuthMode('register')" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition cursor-pointer">
-            Crear Cuenta Nueva
+            Crear Cuenta
+          </button>
+          <button type="button" id="tab-patient-forgot" onclick="switchPatientAuthMode('forgot')" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition cursor-pointer">
+            Recuperar Clave
           </button>
         </div>
 
         <!-- Formulario Iniciar Sesión -->
         <form id="form-patient-login" onsubmit="handlePatientLogin(event)" class="space-y-3.5">
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Teléfono Móvil o Cédula *</label>
-            <input id="pac-login-id" type="text" required placeholder="Ej. 8095558490" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Correo Electrónico, Teléfono o Cédula *</label>
+            <input id="pac-login-id" type="text" required placeholder="tu@correo.com o 8095551234" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
           </div>
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Clave de Acceso o PIN *</label>
-            <input id="pac-login-password" type="password" required placeholder="Ingresa tu clave secreta..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Contraseña *</label>
+            <input id="pac-login-password" type="password" required placeholder="Ingresa tu contraseña..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold" />
           </div>
           <div id="pac-login-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
           <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow transition cursor-pointer">
-            Entrar a la App ➜
+            🔓 Entrar a la App ➜
           </button>
+          <div class="text-center">
+            <button type="button" onclick="switchPatientAuthMode('forgot')" class="text-xs font-bold text-teal-700 hover:underline cursor-pointer">
+              🔑 ¿Olvidaste tu contraseña? Cámbiala usando tu correo
+            </button>
+          </div>
         </form>
 
         <!-- Formulario Crear Cuenta -->
@@ -286,6 +289,10 @@
           <div>
             <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Nombre Completo *</label>
             <input id="pac-reg-nombre" type="text" required placeholder="Ej. Juan Pérez" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Correo Electrónico * (Para recuperar clave)</label>
+            <input id="pac-reg-email" type="email" required placeholder="correo@ejemplo.com" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
@@ -298,8 +305,8 @@
             </div>
           </div>
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Clave de Acceso o PIN *</label>
-            <input id="pac-reg-clave" type="password" required placeholder="Mínimo 4 caracteres" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Contraseña *</label>
+            <input id="pac-reg-clave" type="password" required minlength="4" placeholder="Mínimo 4 caracteres" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
           </div>
           <div>
             <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">Dirección de Entrega</label>
@@ -307,15 +314,40 @@
           </div>
           <div id="pac-reg-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
           <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow transition cursor-pointer">
-            Registrarme y Entrar
+            ✅ Crear Cuenta y Entrar
           </button>
         </form>
 
-        <!-- Botón para cerrar y continuar explorando sin login obligatorio -->
-        <div class="pt-2 text-center border-t border-slate-100">
-          <button type="button" onclick="closePatientAuthModal()" class="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer">
-            <span>🛍️</span> <span>Continuar a la tienda sin iniciar sesión</span>
-          </button>
+        <!-- Formulario Recuperar / Cambiar Contraseña por Correo -->
+        <div id="form-patient-forgot" class="hidden space-y-3">
+          <form onsubmit="handlePatientForgotSendCode(event)" class="space-y-2.5">
+            <div>
+              <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">1. Correo Electrónico Registrado *</label>
+              <div class="flex gap-1.5">
+                <input id="pac-forgot-email" type="email" required placeholder="tu@correo.com" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+                <button type="submit" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-teal-700 text-white font-extrabold text-xs cursor-pointer shrink-0">
+                  📧 Enviar Código
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <div id="pac-forgot-info" class="hidden p-2.5 rounded-xl bg-teal-50 border border-teal-200 text-xs font-bold text-teal-900"></div>
+
+          <form id="form-patient-reset-step2" onsubmit="handlePatientResetPassword(event)" class="space-y-2.5 pt-2 border-t border-slate-100">
+            <div>
+              <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">2. Código de Verificación (6 dígitos) *</label>
+              <input id="pac-forgot-code" type="text" required placeholder="Ej. 482910" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-xs" />
+            </div>
+            <div>
+              <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">3. Nueva Contraseña *</label>
+              <input id="pac-forgot-new-password" type="password" required minlength="4" placeholder="Mínimo 4 caracteres" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            </div>
+            <div id="pac-forgot-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700"></div>
+            <button type="submit" class="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs shadow transition cursor-pointer">
+              ✅ Cambiar Contraseña e Iniciar Sesión
+            </button>
+          </form>
         </div>
       </div>
     </div>
