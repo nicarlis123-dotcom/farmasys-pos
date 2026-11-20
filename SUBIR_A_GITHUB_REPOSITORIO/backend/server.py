@@ -31,8 +31,13 @@ else:
     PROJECT_ROOT = os.path.dirname(BASE_DIR)
     STATIC_DIR = os.path.join(PROJECT_ROOT, "frontend")
 
-UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads", "recetas")
-DB_PATH = os.path.join(PROJECT_ROOT, "data", "farmacia_davalsi.db")
+PERSISTENT_DATA_DIR = (
+    os.environ.get("FARMASYS_DATA_DIR")
+    or os.environ.get("DATA_DIR")
+    or os.path.join(PROJECT_ROOT, "data")
+).strip()
+UPLOADS_DIR = os.path.join(PERSISTENT_DATA_DIR, "uploads", "recetas") if (os.environ.get("FARMASYS_DATA_DIR") or os.environ.get("DATA_DIR")) else os.path.join(PROJECT_ROOT, "uploads", "recetas")
+DB_PATH = os.path.join(PERSISTENT_DATA_DIR, "farmacia_davalsi.db")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 sys.path.insert(0, BASE_DIR)
@@ -1052,12 +1057,21 @@ class DavalsiRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/auth/login":
-                farmacia_id = safe_farmacia_id(body, 1)
+                ident = str(body.get("farmacia_identificador", "")).strip()
+                if ident:
+                    resolved_id = db.resolve_pharmacy_id_by_identifier(ident)
+                    if not resolved_id:
+                        self._send_json(400, {"ok": False, "error": "No se encontró ninguna farmacia registrada con ese código o nombre. Verifica los datos de registro."})
+                        return
+                    farmacia_id = resolved_id
+                else:
+                    farmacia_id = safe_farmacia_id(body, 1)
                 clave = str(body.get("clave_acceso", ""))
                 username = str(body.get("username", ""))
                 pharmacy_profile = db.authenticate_pharmacy(
                     farmacia_id=farmacia_id, clave_acceso=clave, username=username
                 )
+                farmacia_id = int(pharmacy_profile.get("id") or farmacia_id)
                 jwt_payload = {
                     "sub": str(farmacia_id),
                     "farmacia_id": farmacia_id,

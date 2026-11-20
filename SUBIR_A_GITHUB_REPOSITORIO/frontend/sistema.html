@@ -328,22 +328,23 @@
 
         <form onsubmit="handlePharmacyLogin(event)" class="space-y-3.5">
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">1. Seleccionar Farmacia / Sucursal</label>
-            <select
-              id="login-pharmacy-select"
-              class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-bold bg-slate-50"
-            >
-              <option value="1">Farmacia Davalsi • Sede Principal (RD$)</option>
-            </select>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">1. Código o Nombre de Tu Farmacia *</label>
+            <input
+              id="login-pharmacy-identifier"
+              type="text"
+              required
+              placeholder="Ej. FARM-01 o Nombre de la Farmacia"
+              class="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-bold bg-white"
+            />
           </div>
 
           <div>
-            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">2. Usuario</label>
+            <label class="block text-xs font-extrabold uppercase text-slate-600 mb-1">2. Usuario de Registro *</label>
             <input
               id="login-username-input"
               type="text"
-              value="admin"
-              placeholder="Ej. admin o regente o cajero"
+              required
+              placeholder="Ej. admin o tu usuario registrado"
               class="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-teal-600 focus:outline-none text-sm font-semibold bg-white"
             />
           </div>

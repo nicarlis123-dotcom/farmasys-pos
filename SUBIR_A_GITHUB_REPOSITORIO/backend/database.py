@@ -1616,6 +1616,40 @@ class DatabaseManager:
                 out.append(d)
             return out
 
+    def resolve_pharmacy_id_by_identifier(self, identifier: str) -> Optional[int]:
+        """Resuelve el ID de una farmacia por su código, nombre comercial o ID numérico (sin exponer listado)."""
+        raw = str(identifier or "").strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            fid_num = int(raw)
+            with self._get_connection() as conn:
+                r = conn.execute("SELECT id FROM farmacias_directorio WHERE id = ? AND activa = 1", (fid_num,)).fetchone()
+                if r:
+                    return int(r["id"])
+        raw_upper = raw.upper()
+        raw_lower = raw.lower()
+        with self._get_connection() as conn:
+            try:
+                r = conn.execute(
+                    "SELECT id FROM farmacias_directorio WHERE activa = 1 AND (UPPER(codigo) = ? OR LOWER(nombre) = ?) LIMIT 1",
+                    (raw_upper, raw_lower),
+                ).fetchone()
+                if r:
+                    return int(r["id"])
+            except Exception:
+                pass
+            try:
+                r2 = conn.execute(
+                    "SELECT id FROM farmacias WHERE activa = 1 AND (UPPER(codigo) = ? OR LOWER(nombre) = ?) LIMIT 1",
+                    (raw_upper, raw_lower),
+                ).fetchone()
+                if r2:
+                    return int(r2["id"])
+            except Exception:
+                pass
+        return None
+
     def authenticate_pharmacy(
         self, farmacia_id: int, clave_acceso: str, username: str = ""
     ) -> Dict[str, Any]:

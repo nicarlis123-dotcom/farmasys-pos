@@ -516,24 +516,29 @@ function fillDemoLogin(farmaciaId, username, clave) {
 
 async function handlePharmacyLogin(event) {
   if (event) event.preventDefault();
-  const selEl = document.getElementById('login-pharmacy-select');
-  let farmaciaId = selEl ? parseInt(selEl.value, 10) : 1;
-  if (!farmaciaId || isNaN(farmaciaId) || farmaciaId <= 0) {
-    farmaciaId = (sysState.pharmacies && sysState.pharmacies.length > 0) ? sysState.pharmacies[0].id : 1;
-  }
+  const idInput = document.getElementById('login-pharmacy-identifier');
+  const farmaciaIdent = (idInput ? idInput.value : '').trim();
   const uInput = document.getElementById('login-username-input');
   const pInput = document.getElementById('login-password-input');
-  const username = (uInput ? uInput.value : 'admin').trim() || 'admin';
-  const clave = (pInput ? pInput.value : '123456').trim() || '123456';
+  const username = (uInput ? uInput.value : '').trim();
+  const clave = (pInput ? pInput.value : '').trim();
   const errEl = document.getElementById('login-error-msg');
   if (errEl) errEl.classList.add('hidden');
+
+  if (!farmaciaIdent || !username || !clave) {
+    if (errEl) {
+      errEl.textContent = 'Ingresa el código o nombre de la farmacia, tu usuario y tu clave de acceso.';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
 
   let data;
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ farmacia_id: farmaciaId, username, clave_acceso: clave }),
+      body: JSON.stringify({ farmacia_identificador: farmaciaIdent, username, clave_acceso: clave }),
     });
     data = await res.json();
   } catch (netErr) {
@@ -582,8 +587,12 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
     gate.style.display = 'none';
   }
 
+  const phDisplayName = pharmacy.nombre || 'Farmacia';
+  const phCodeTag = pharmacy.codigo ? ` (${pharmacy.codigo})` : '';
+  document.title = `${phDisplayName} — FarmaSys POS`;
+
   const nameEl = document.getElementById('sys-header-pharmacy-name');
-  if (nameEl) nameEl.textContent = pharmacy.nombre || 'Farmacia Davalsi';
+  if (nameEl) nameEl.textContent = `${phDisplayName}${phCodeTag}`;
 
   const r = (pharmacy.rol_actual || 'ADMINISTRADOR').toUpperCase();
   const roleIcon = (r === 'CAJERO' || r === 'VENDEDOR') ? '👤' : (r.includes('REGENTE') ? '🩺' : '🛡️');
@@ -591,7 +600,7 @@ function enterAuthenticatedWorkspace(pharmacy, token) {
   if (badgeEl) badgeEl.textContent = `${roleIcon} ${pharmacy.usuario_actual || pharmacy.usuario_admin || 'admin'} (${r})`;
 
   const subEl = document.getElementById('sys-header-pharmacy-sub');
-  if (subEl) subEl.textContent = `📍 ${pharmacy.direccion || 'Sede Principal'} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp || '809-555-0900'}`;
+  if (subEl) subEl.textContent = `🏥 Farmacia Activa • 📍 ${pharmacy.direccion || pharmacy.ciudad_sector || 'Sede Principal'} • Tel: ${pharmacy.telefono || pharmacy.telefono_whatsapp || ''}`;
 
   try { applyRolePermissions(r); } catch (e) { console.error('Error en applyRolePermissions:', e); }
   try { applyOperationalServiceFlags(pharmacy); } catch (e) { console.error('Error en applyOperationalServiceFlags:', e); }
