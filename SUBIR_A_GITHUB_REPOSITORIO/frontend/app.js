@@ -1929,7 +1929,7 @@ function updatePatientHeaderUI() {
 }
 
 function checkPatientAuthOnLoad() {
-  const sessionStr = localStorage.getItem('davalsi_patient_session');
+  const sessionStr = sessionStorage.getItem('farmasys_patient_session');
 
   if (sessionStr) {
     try {
@@ -1937,7 +1937,7 @@ function checkPatientAuthOnLoad() {
       prefillPatientData();
       loadAppChronic5DayReminders();
     } catch (e) {
-      localStorage.removeItem('davalsi_patient_session');
+      sessionStorage.removeItem('farmasys_patient_session');
       currentPatient = null;
     }
   } else {
@@ -2012,7 +2012,7 @@ async function handlePatientLogin(event) {
     }
 
     currentPatient = data.patient;
-    localStorage.setItem('davalsi_patient_session', JSON.stringify(data.patient));
+    sessionStorage.setItem('farmasys_patient_session', JSON.stringify(data.patient));
     closePatientAuthModal();
     updatePatientHeaderUI();
     prefillPatientData();
@@ -2060,7 +2060,7 @@ async function handlePatientRegister(event) {
     }
 
     currentPatient = data.patient;
-    localStorage.setItem('davalsi_patient_session', JSON.stringify(data.patient));
+    sessionStorage.setItem('farmasys_patient_session', JSON.stringify(data.patient));
     closePatientAuthModal();
     updatePatientHeaderUI();
     prefillPatientData();
@@ -2076,7 +2076,7 @@ async function handlePatientRegister(event) {
 
 function handlePatientLogout() {
   currentPatient = null;
-  localStorage.removeItem('davalsi_patient_session');
+  sessionStorage.removeItem('farmasys_patient_session');
   localStorage.removeItem('davalsi_chronic_phone');
 
   // Limpiar campos de cliente para que no queden datos expuestos
@@ -2100,9 +2100,9 @@ function handlePatientLogout() {
   if (typeof updateFloatingCartUI === 'function') updateFloatingCartUI();
   if (typeof updateAppCartUI === 'function') updateAppCartUI();
 
-  closePatientAuthModal();
+  openPatientAuthModal();
   updatePatientHeaderUI();
-  showToast('Has cerrado sesión en tu cuenta. Datos protegidos.');
+  showToast('Has cerrado sesión en tu cuenta. Inicia sesión para continuar.');
 }
 
 window.openPatientAuthModal = openPatientAuthModal;
