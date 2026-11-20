@@ -599,7 +599,15 @@ function renderAppProductsGrid() {
 function addToAppCart(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
-    // Verificación de duplicidad farmacológica en la app del paciente
+
+  // Verificación de alergias registradas por el paciente
+  const allergyHit = checkAppAllergyConflict(product);
+  if (allergyHit) {
+    const okAllergy = confirm(`⚠️ ALERTA DE ALERGIA:\n\nRegistraste alergia a "${allergyHit}".\n"${product.nombre_comercial}" (${product.principio_activo || ''}) puede ser incompatible.\n\n¿Deseas agregarlo de todos modos?`);
+    if (!okAllergy) return;
+  }
+
+  // Verificación de duplicidad farmacológica en la app del paciente
   const paNew = (product.principio_activo || '').trim().toLowerCase();
   if (paNew) {
     const duplicate = state.appCart.find(i => {
@@ -608,7 +616,7 @@ function addToAppCart(productId) {
       return paExist && (paNew === paExist || paNew.includes(paExist) || paExist.includes(paNew));
     });
     if (duplicate) {
-      const ok = confirm(`⚠️ Aviso de Farmacia Davalsi:\n\nYa tienes '${duplicate.product.nombre_comercial}' en tu carrito con el mismo principio activo (${product.principio_activo}).\n\n¿Deseas agregar '${product.nombre_comercial}' de todos modos?`);
+      const ok = confirm(`⚠️ Aviso Farmacéutico:\n\nYa tienes '${duplicate.product.nombre_comercial}' en tu carrito con el mismo principio activo (${product.principio_activo}).\n\n¿Deseas agregar '${product.nombre_comercial}' de todos modos?`);
       if (!ok) return;
     }
   }
@@ -1013,6 +1021,11 @@ async function submitAppOrder() {
   if (!clienteNombre || !clienteTelefono || (effectiveDeliveryMode === 'DOMICILIO' && !clienteDireccion)) {
     showToast('Por favor completa tu nombre, teléfono WhatsApp y dirección de entrega.', 'error');
     return;
+  }
+
+  if (state.pharmacyOpenStatus && state.pharmacyOpenStatus.open === false) {
+    const okClosed = confirm(`🕒 Esta farmacia se encuentra fuera de su horario (${(state.pharmacyConfig && state.pharmacyConfig.horario) || 'cerrada'}).\n\nTu pedido quedará registrado para ser atendido en su apertura. ¿Deseas enviarlo?`);
+    if (!okClosed) return;
   }
 
   if (state.appPaymentMethod === 'TARJETA' && state.pharmacyConfig && state.pharmacyConfig.pago_tarjeta_activo === false) {
@@ -1857,6 +1870,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   checkPatientAuthOnLoad();
   refreshActiveOrderBanner();
   startActiveOrderPolling();
+  updateAppAllergiesBadge();
 });
 
 
@@ -2169,7 +2183,17 @@ function applyPatientAppServiceConfig(cfg) {
   const infoPhoneLink = document.getElementById('app-info-phone-link');
   if (infoPhoneLink && cfg.telefono) infoPhoneLink.href = `tel:${String(cfg.telefono).replace(/[^0-9+]/g, '')}`;
   const infoHours = document.getElementById('app-info-hours');
-  if (infoHours) infoHours.textContent = cfg.horario || 'Lun-Dom 7:00 AM - 11:00 PM';
+  const horarioText = cfg.horario || 'Lun-Dom 7:00 AM - 11:00 PM';
+  if (infoHours) infoHours.textContent = horarioText;
+  const openStatus = evaluatePharmacyOpenStatus(horarioText);
+  state.pharmacyOpenStatus = openStatus;
+  const openBadge = document.getElementById('app-open-status-badge');
+  if (openBadge) {
+    openBadge.textContent = openStatus.label;
+    openBadge.className = openStatus.open
+      ? 'ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300'
+      : 'ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300';
+  }
   const heroTitle = document.getElementById('app-hero-pharmacy-title');
   if (heroTitle) heroTitle.textContent = `Tu salud a un toque en ${phName}`;
   const checkoutTitle = document.getElementById('app-checkout-pharmacy-title');
@@ -5251,4 +5275,166 @@ async function completeCourierDelivery(orderCode) {
   } catch (e) {
     showToast('Error al marcar entrega.', 'error');
   }
+}
+
+
+// ============================================================================
+// ALERGIAS DEL PACIENTE + INDICADOR EN VIVO ABIERTO / CERRADO
+// ============================================================================
+
+function getPatientAllergiesStorageKey() {
+  const tel = (currentPatient && currentPatient.telefono) || document.getElementById('app-client-phone')?.value || 'guest';
+  const clean = String(tel).replace(/\D/g, '') || 'guest';
+  return `farmasys_patient_allergies_${clean}`;
+}
+
+function getPatientAllergies() {
+  try {
+    const raw = localStorage.getItem(getPatientAllergiesStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function savePatientAllergies(list) {
+  try {
+    localStorage.setItem(getPatientAllergiesStorageKey(), JSON.stringify(list || []));
+  } catch (e) {}
+  updateAppAllergiesBadge();
+}
+
+function updateAppAllergiesBadge() {
+  const badge = document.getElementById('app-allergies-count-badge');
+  if (!badge) return;
+  const cnt = getPatientAllergies().length;
+  badge.textContent = String(cnt);
+  if (cnt > 0) badge.classList.remove('hidden');
+  else badge.classList.add('hidden');
+}
+
+function openPatientAllergiesModal() {
+  const modal = document.getElementById('patient-allergies-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  renderPatientAllergiesList();
+}
+
+function closePatientAllergiesModal() {
+  const modal = document.getElementById('patient-allergies-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function handleAddAllergySubmit(event) {
+  event.preventDefault();
+  const inp = document.getElementById('app-allergy-input');
+  const val = (inp ? inp.value : '').trim();
+  if (!val) return;
+  addPatientAllergy(val);
+  if (inp) inp.value = '';
+}
+
+function addPatientAllergy(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return;
+  const list = getPatientAllergies();
+  if (!list.some((a) => a.toLowerCase() === clean.toLowerCase())) {
+    list.push(clean);
+    savePatientAllergies(list);
+    showToast(`⚠️ Alergia "${clean}" guardada en tu perfil.`, 'info');
+  }
+  renderPatientAllergiesList();
+}
+
+function removePatientAllergy(idx) {
+  const list = getPatientAllergies();
+  list.splice(idx, 1);
+  savePatientAllergies(list);
+  renderPatientAllergiesList();
+}
+
+function renderPatientAllergiesList() {
+  const container = document.getElementById('app-allergies-list');
+  if (!container) return;
+  const list = getPatientAllergies();
+  if (list.length === 0) {
+    container.innerHTML = '<p class="p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-500 text-center">No has registrado alergias todavía.</p>';
+    return;
+  }
+  container.innerHTML = list.map((al, idx) => `
+    <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+      <span class="font-extrabold text-rose-900">⚠️ ${al}</span>
+      <button type="button" onclick="removePatientAllergy(${idx})" class="text-xs font-bold text-rose-600 hover:underline cursor-pointer">Quitar</button>
+    </div>
+  `).join('');
+}
+
+function checkAppAllergyConflict(product) {
+  const allergies = getPatientAllergies();
+  if (!allergies.length || !product) return null;
+  const hay = `${product.nombre_comercial || ''} ${product.principio_activo || ''} ${product.categoria || ''}`.toLowerCase();
+
+  const crossGroups = [
+    ['penicilina', 'amoxicilina', 'ampicilina', 'amoxil', 'clavulanico'],
+    ['aine', 'ibuprofeno', 'diclofenac', 'naproxeno', 'ketorolaco', 'meloxicam', 'aspirina'],
+    ['sulfa', 'sulfametoxazol', 'trimetoprim'],
+    ['paracetamol', 'acetaminofen'],
+    ['dipirona', 'metamizol'],
+  ];
+
+  for (const al of allergies) {
+    const alLow = al.toLowerCase();
+    const tokens = alLow.split(/[\s/,+]+/).filter((t) => t.length >= 4);
+    for (const tok of tokens) {
+      if (hay.includes(tok)) return al;
+      for (const grp of crossGroups) {
+        if (grp.some((g) => tok.includes(g) || g.includes(tok)) && grp.some((g) => hay.includes(g))) {
+          return al;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function evaluatePharmacyOpenStatus(horarioStr) {
+  const raw = String(horarioStr || '').trim();
+  const low = raw.toLowerCase();
+  if (!raw || low.includes('24')) {
+    return { open: true, label: low.includes('24') ? '🟢 Abierto 24h' : '🟢 Abierto ahora' };
+  }
+
+  const now = new Date();
+  const day = now.getDay();
+  if (low.includes('lun-vie') && (day === 0 || day === 6)) {
+    return { open: false, label: '🔴 Cerrado hoy' };
+  }
+  if ((low.includes('lun-sab') || low.includes('lun-sáb')) && day === 0) {
+    return { open: false, label: '🔴 Cerrado hoy' };
+  }
+
+  const timeMatches = [...raw.matchAll(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/gi)];
+  if (timeMatches.length >= 2) {
+    const toMins = (m) => {
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2] || '0', 10);
+      const ampm = (m[3] || '').toLowerCase();
+      if (ampm === 'pm' && h < 12) h += 12;
+      if (ampm === 'am' && h === 12) h = 0;
+      return h * 60 + min;
+    };
+    const startM = toMins(timeMatches[0]);
+    const endM = toMins(timeMatches[1]);
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const isOpen = endM >= startM ? (nowM >= startM && nowM <= endM) : (nowM >= startM || nowM <= endM);
+    return isOpen
+      ? { open: true, label: '🟢 Abierto ahora' }
+      : { open: false, label: '🔴 Cerrado ahora' };
+  }
+
+  return { open: true, label: '🟢 Abierto' };
 }

@@ -4029,14 +4029,19 @@ class DatabaseManager:
         qty = int(unidades_devolver)
         if qty <= 0:
             return
+        today_iso = datetime.now().strftime("%Y-%m-%d")
         lot = conn.execute(
             """
             SELECT id FROM inventario_lotes
             WHERE farmacia_id = ? AND producto_id = ?
-            ORDER BY fecha_vencimiento ASC, id ASC
+            ORDER BY
+                (CASE WHEN fecha_vencimiento >= ? THEN 0 ELSE 1 END) ASC,
+                (CASE WHEN cantidad_disponible > 0 THEN 0 ELSE 1 END) ASC,
+                fecha_vencimiento ASC,
+                id ASC
             LIMIT 1
             """,
-            (fid, pid),
+            (fid, pid, today_iso),
         ).fetchone()
         if lot:
             conn.execute(
@@ -4100,6 +4105,16 @@ class DatabaseManager:
         motivo: str = "Entrada de nueva compra / Abastecimiento",
 
         usuario: str = "Lic. Farmacéutico Sucursal",
+
+        proveedor_id: Optional[int] = None,
+
+        proveedor_nombre: str = "",
+
+        numero_factura: str = "",
+
+        condicion_pago: str = "CONTADO",
+
+        costo_total_rd: Optional[float] = None,
 
     ) -> Dict[str, Any]:
 
@@ -4321,6 +4336,52 @@ class DatabaseManager:
                 ),
 
             )
+
+            num_fac_clean = str(numero_factura or "").strip()
+            prov_nom_clean = str(proveedor_nombre or "").strip()
+            if num_fac_clean or prov_nom_clean or proveedor_id:
+                self._ensure_suppliers_tables(conn)
+                if proveedor_id and not prov_nom_clean:
+                    prow = conn.execute(
+                        "SELECT nombre FROM proveedores WHERE id = ? AND farmacia_id = ?",
+                        (int(proveedor_id), int(farmacia_id)),
+                    ).fetchone()
+                    if prow:
+                        prov_nom_clean = prow["nombre"]
+                cond_clean = "CREDITO" if str(condicion_pago or "").strip().upper() == "CREDITO" else "CONTADO"
+                est_pago = "PENDIENTE" if cond_clean == "CREDITO" else "PAGADA"
+                cant_fac = max(0, int(cambio_unidades))
+                if costo_total_rd is not None:
+                    tot_fac = round(max(0.0, float(costo_total_rd)), 2)
+                elif costo_compra is not None and cant_fac > 0:
+                    tot_fac = round(max(0.0, float(costo_compra)) * cant_fac, 2)
+                else:
+                    tot_fac = 0.0
+                conn.execute(
+                    """
+                    INSERT INTO compras_facturas (
+                        farmacia_id, proveedor_id, proveedor_nombre, numero_factura,
+                        producto_id, producto_nombre, lote, fecha_vencimiento,
+                        cantidad_unidades, costo_total_rd, condicion_pago, estado_pago, notas, fecha_registro
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(farmacia_id),
+                        int(proveedor_id) if proveedor_id else None,
+                        prov_nom_clean or "Proveedor General",
+                        num_fac_clean or f"ENT-{datetime.now().strftime('%Y%m%d%H%M')}",
+                        int(producto_id),
+                        row["nombre_comercial"],
+                        nuevo_lote,
+                        nueva_fecha_venc,
+                        cant_fac,
+                        tot_fac,
+                        cond_clean,
+                        est_pago,
+                        motivo,
+                        now_str,
+                    ),
+                )
 
 
 
@@ -5340,6 +5401,161 @@ class DatabaseManager:
                 "codigo_orden": tx["codigo_orden"],
                 "unidades_reintegradas": total_unidades_reintegradas,
                 "estado_pedido": "ANULADO",
+            }
+
+    def partial_return_pos_items(
+        self,
+        farmacia_id: int,
+        transaccion_id: int,
+        items_to_return: List[Dict[str, Any]],
+        motivo: str = "Devolución parcial en mostrador",
+        usuario: str = "Cajero Mostrador",
+    ) -> Dict[str, Any]:
+        """Devuelve únicamente los artículos/cantidades seleccionados de una factura, reintegrando a inventario_lotes y ajustando el total neto."""
+        fid = int(farmacia_id or 1)
+        tid = int(transaccion_id)
+        if not items_to_return:
+            raise ValueError("Debe seleccionar al menos un artículo y cantidad para devolver.")
+
+        motivo_clean = str(motivo or "Devolución parcial en mostrador").strip()
+        usuario_clean = str(usuario or "Cajero Mostrador").strip()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            tx = conn.execute(
+                "SELECT * FROM transacciones WHERE id = ? AND farmacia_id = ?",
+                (tid, fid),
+            ).fetchone()
+            if not tx:
+                raise ValueError("Transacción no encontrada en esta farmacia.")
+            if str(tx["estado_pedido"] or "").upper() == "ANULADO":
+                raise ValueError("Esta factura ya se encuentra anulada por completo.")
+
+            detalles = conn.execute(
+                "SELECT * FROM detalle_transacciones WHERE transaccion_id = ?",
+                (tid,),
+            ).fetchall()
+            det_map = {int(d["id"]): dict(d) for d in detalles}
+
+            total_unidades_reintegradas = 0
+            monto_devuelto_total = 0.0
+            devueltos_desc = []
+
+            for req_it in items_to_return:
+                det_id = int(req_it.get("detalle_id", 0))
+                if det_id not in det_map:
+                    continue
+                det = det_map[det_id]
+                cant_actual = int(det["cantidad_presentacion"] or 0)
+                if cant_actual <= 0:
+                    continue
+                qty_dev = int(req_it.get("cantidad_presentacion", 0) or 0)
+                if qty_dev <= 0:
+                    continue
+                qty_dev = min(qty_dev, cant_actual)
+
+                unid_orig = int(det["unidades_minimas_descontadas"] or 0)
+                unid_por_pres = max(1, round(unid_orig / cant_actual)) if cant_actual > 0 else 1
+                unid_reintegrar = min(unid_orig, max(1, qty_dev * unid_por_pres))
+
+                sub_orig = float(det["subtotal"] or 0.0)
+                monto_linea = round(sub_orig * (qty_dev / cant_actual), 2) if cant_actual > 0 else 0.0
+
+                prod_id = int(det["producto_id"] or 0)
+                if prod_id > 0 and unid_reintegrar > 0:
+                    p_row = conn.execute(
+                        "SELECT id, stock_total_unidades FROM productos WHERE id = ? AND farmacia_id = ?",
+                        (prod_id, fid),
+                    ).fetchone()
+                    if p_row:
+                        stock_antes = int(p_row["stock_total_unidades"] or 0)
+                        stock_despues = stock_antes + unid_reintegrar
+                        conn.execute(
+                            "UPDATE productos SET stock_total_unidades = ? WHERE id = ?",
+                            (stock_despues, prod_id),
+                        )
+                        try:
+                            self._restore_fefo_lots(conn, fid, prod_id, unid_reintegrar)
+                        except Exception:
+                            pass
+                        conn.execute(
+                            """
+                            INSERT INTO movimientos_inventario (
+                                farmacia_id, fecha_hora, producto_id, tipo_movimiento,
+                                presentacion_operada, cantidad_presentacion, cambio_unidades_minimas,
+                                stock_anterior, stock_resultante, referencia_orden, usuario
+                            ) VALUES (?, ?, ?, 'DEVOLUCION_PARCIAL', ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                fid,
+                                now_str,
+                                prod_id,
+                                str(det["presentacion"] or "UNIDAD"),
+                                qty_dev,
+                                unid_reintegrar,
+                                stock_antes,
+                                stock_despues,
+                                tx["codigo_orden"],
+                                usuario_clean,
+                            ),
+                        )
+                        total_unidades_reintegradas += unid_reintegrar
+
+                nueva_cant = cant_actual - qty_dev
+                nuevas_unid = max(0, unid_orig - unid_reintegrar)
+                nuevo_sub = max(0.0, round(sub_orig - monto_linea, 2))
+                if nueva_cant <= 0:
+                    conn.execute("DELETE FROM detalle_transacciones WHERE id = ?", (det_id,))
+                else:
+                    conn.execute(
+                        """
+                        UPDATE detalle_transacciones
+                        SET cantidad_presentacion = ?, unidades_minimas_descontadas = ?, subtotal = ?
+                        WHERE id = ?
+                        """,
+                        (nueva_cant, nuevas_unid, nuevo_sub, det_id),
+                    )
+
+                monto_devuelto_total = round(monto_devuelto_total + monto_linea, 2)
+                devueltos_desc.append(f"{qty_dev}x {det['nombre_comercial']}")
+
+            if total_unidades_reintegradas <= 0 and monto_devuelto_total <= 0:
+                raise ValueError("No se seleccionó ninguna cantidad válida para devolver.")
+
+            rem_row = conn.execute(
+                "SELECT COALESCE(SUM(subtotal), 0.0) AS rem_sub, COUNT(*) AS rem_cnt FROM detalle_transacciones WHERE transaccion_id = ?",
+                (tid,),
+            ).fetchone()
+            rem_cnt = int(rem_row["rem_cnt"] or 0)
+            nuevo_subtotal = round(float(rem_row["rem_sub"] or 0.0), 2)
+            nuevo_total = max(0.0, round(float(tx["total"] or 0.0) - monto_devuelto_total, 2))
+
+            nota_nueva = f"[DEV. PARCIAL {now_str} por {usuario_clean}: {', '.join(devueltos_desc)} (-RD$ {monto_devuelto_total:.2f}) | {motivo_clean}]"
+            nota_prev = str(tx["notas_farmaceutico"] or "").strip()
+            nota_final = f"{nota_prev} {nota_nueva}".strip()
+
+            if rem_cnt == 0:
+                conn.execute(
+                    "UPDATE transacciones SET subtotal = 0.0, total = 0.0, estado_pedido = 'ANULADO', notas_farmaceutico = ? WHERE id = ?",
+                    (nota_final, tid),
+                )
+                nuevo_estado = "ANULADO"
+            else:
+                conn.execute(
+                    "UPDATE transacciones SET subtotal = ?, total = ?, notas_farmaceutico = ? WHERE id = ?",
+                    (nuevo_subtotal, nuevo_total, nota_final, tid),
+                )
+                nuevo_estado = tx["estado_pedido"]
+
+            return {
+                "ok": True,
+                "transaccion_id": tid,
+                "codigo_orden": tx["codigo_orden"],
+                "unidades_reintegradas": total_unidades_reintegradas,
+                "monto_devuelto_rd": monto_devuelto_total,
+                "nuevo_total_rd": 0.0 if rem_cnt == 0 else nuevo_total,
+                "estado_pedido": nuevo_estado,
             }
 
     def get_patient_orders(
@@ -7323,16 +7539,25 @@ class DatabaseManager:
             descuento_pct = 5.0
             puntos = 0
 
-            if p_row:
+            p_dict = dict(p_row) if p_row else {}
+            if p_dict:
+                if p_dict.get("plan_nombre"):
+                    plan_nombre = p_dict["plan_nombre"]
+                if p_dict.get("descuento_bonificacion_pct"):
+                    descuento_pct = float(p_dict["descuento_bonificacion_pct"])
+                if p_dict.get("puntos_acumulados"):
+                    puntos = int(p_dict["puntos_acumulados"])
+
+            alergias_list = []
+            if cedula:
                 try:
-                    if p_row.get("plan_nombre"):
-                        plan_nombre = p_row["plan_nombre"]
-                    if p_row.get("descuento_bonificacion_pct"):
-                        descuento_pct = float(p_row["descuento_bonificacion_pct"])
-                    if p_row.get("puntos_acumulados"):
-                        puntos = int(p_row["puntos_acumulados"])
+                    al_rows = conn.execute(
+                        "SELECT alergia_nombre FROM pacientes_alergias WHERE farmacia_id = ? AND REPLACE(REPLACE(cedula, '-', ''), ' ', '') = ?",
+                        (fid, "".join(filter(str.isdigit, str(cedula)))),
+                    ).fetchall()
+                    alergias_list = [r["alergia_nombre"] for r in al_rows if r["alergia_nombre"]]
                 except Exception:
-                    pass
+                    alergias_list = []
 
             # Si es paciente crónico, bonificación mejorada automática
             es_cronico = bool(c_row)
@@ -7353,7 +7578,9 @@ class DatabaseManager:
                     "puntos_acumulados": puntos,
                     "es_cronico": es_cronico,
                     "diagnostico_cronico": diagnostico_cronico,
-                    "medicamento_cronico": (c_row["medicamento_nombre"] if c_row else "")
+                    "medicamento_cronico": (c_row["medicamento_nombre"] if c_row else ""),
+                    "alergias": alergias_list,
+                    "registrado_en_app": bool(p_row),
                 }
             }
 
@@ -10658,10 +10885,13 @@ class DatabaseManager:
             with self._get_connection(farmacia_id=fid) as conn:
                 try:
                     prods = conn.execute("""
-                        SELECT id, codigo_barras, nombre_comercial, principio_activo, concentracion, categoria,
-                               laboratorio, lote, fecha_vencimiento, stock_total_unidades, precio_costo,
-                               precio_base, ubicacion_anaquel, activo
-                        FROM productos WHERE farmacia_id = ? ORDER BY nombre_comercial
+                        SELECT p.id, p.codigo_barras, p.nombre_comercial, p.principio_activo, p.concentracion, p.categoria,
+                               p.laboratorio, p.lote, p.fecha_vencimiento, p.stock_total_unidades,
+                               COALESCE(pf.precio_costo, p.precio_base * 0.7) AS precio_costo,
+                               p.precio_base, p.ubicacion_anaquel, p.activo
+                        FROM productos p
+                        LEFT JOIN productos_farmaceuticos pf ON pf.farmacia_id = p.farmacia_id AND pf.codigo_barras = p.codigo_barras
+                        WHERE p.farmacia_id = ? ORDER BY p.nombre_comercial
                     """, (fid,)).fetchall()
                     stats["productos"] = len(prods)
                     zf.writestr("inventario.csv", self._rows_to_csv_bytes(prods))
@@ -10734,3 +10964,406 @@ class DatabaseManager:
             except OSError:
                 pass
         return path
+
+
+    def _ensure_suppliers_tables(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS proveedores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                nombre TEXT NOT NULL,
+                rnc TEXT DEFAULT '',
+                telefono TEXT DEFAULT '',
+                contacto TEXT DEFAULT '',
+                dias_credito INTEGER NOT NULL DEFAULT 0,
+                fecha_creacion TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS compras_facturas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                proveedor_id INTEGER DEFAULT NULL,
+                proveedor_nombre TEXT NOT NULL DEFAULT 'Proveedor General',
+                numero_factura TEXT NOT NULL,
+                producto_id INTEGER NOT NULL,
+                producto_nombre TEXT NOT NULL,
+                lote TEXT DEFAULT '',
+                fecha_vencimiento TEXT DEFAULT '',
+                cantidad_unidades INTEGER NOT NULL DEFAULT 0,
+                costo_total_rd REAL NOT NULL DEFAULT 0.0,
+                condicion_pago TEXT NOT NULL DEFAULT 'CONTADO',
+                estado_pago TEXT NOT NULL DEFAULT 'PAGADA',
+                notas TEXT DEFAULT '',
+                fecha_registro TEXT NOT NULL
+            );
+        """)
+
+    def list_suppliers(self, farmacia_id: int = 1) -> List[Dict[str, Any]]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_suppliers_tables(conn)
+            rows = conn.execute(
+                "SELECT * FROM proveedores WHERE farmacia_id = ? ORDER BY nombre ASC",
+                (fid,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def create_supplier(self, farmacia_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        fid = int(farmacia_id or 1)
+        nombre = str(data.get("nombre", "")).strip()
+        if not nombre:
+            raise ValueError("El nombre del proveedor o distribuidora es obligatorio.")
+        rnc = str(data.get("rnc", "")).strip()
+        telefono = str(data.get("telefono", "")).strip()
+        contacto = str(data.get("contacto", "")).strip()
+        dias_credito = max(0, int(data.get("dias_credito", 0) or 0))
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_suppliers_tables(conn)
+            cur = conn.execute(
+                """
+                INSERT INTO proveedores (farmacia_id, nombre, rnc, telefono, contacto, dias_credito, fecha_creacion)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (fid, nombre, rnc, telefono, contacto, dias_credito, now_str),
+            )
+            row = conn.execute("SELECT * FROM proveedores WHERE id = ?", (cur.lastrowid,)).fetchone()
+            return dict(row)
+
+    def list_purchase_invoices(self, farmacia_id: int = 1, limit: int = 100) -> List[Dict[str, Any]]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_suppliers_tables(conn)
+            rows = conn.execute(
+                "SELECT * FROM compras_facturas WHERE farmacia_id = ? ORDER BY id DESC LIMIT ?",
+                (fid, int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def mark_purchase_invoice_paid(self, farmacia_id: int, invoice_id: int) -> Dict[str, Any]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_suppliers_tables(conn)
+            conn.execute(
+                "UPDATE compras_facturas SET estado_pago = 'PAGADA' WHERE id = ? AND farmacia_id = ?",
+                (int(invoice_id), fid),
+            )
+            row = conn.execute(
+                "SELECT * FROM compras_facturas WHERE id = ? AND farmacia_id = ?",
+                (int(invoice_id), fid),
+            ).fetchone()
+            if not row:
+                raise ValueError("Factura de compra no encontrada.")
+            return dict(row)
+
+
+    def _ensure_mermas_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inventario_mermas_bajas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                farmacia_id INTEGER NOT NULL DEFAULT 1,
+                producto_id INTEGER NOT NULL,
+                producto_nombre TEXT NOT NULL,
+                lote_id INTEGER DEFAULT NULL,
+                numero_lote TEXT DEFAULT '',
+                fecha_vencimiento TEXT DEFAULT '',
+                cantidad_unidades INTEGER NOT NULL DEFAULT 0,
+                motivo_tipo TEXT NOT NULL DEFAULT 'VENCIDO',
+                motivo_detalle TEXT DEFAULT '',
+                costo_unitario_rd REAL NOT NULL DEFAULT 0.0,
+                costo_total_perdido_rd REAL NOT NULL DEFAULT 0.0,
+                responsable TEXT DEFAULT 'Administrador',
+                fecha_registro TEXT NOT NULL
+            );
+        """)
+
+    def write_off_lot_shrinkage(
+        self,
+        farmacia_id: int,
+        producto_id: int,
+        lote_id: Optional[int] = None,
+        numero_lote: str = "",
+        cantidad_unidades: int = 0,
+        motivo_tipo: str = "VENCIDO",
+        motivo_detalle: str = "",
+        responsable: str = "Administrador",
+    ) -> Dict[str, Any]:
+        """Da de baja unidades de un lote específico por vencimiento, rotura o merma, descontando inventario_lotes y productos."""
+        fid = int(farmacia_id or 1)
+        pid = int(producto_id)
+        qty_req = int(cantidad_unidades or 0)
+        if qty_req <= 0:
+            raise ValueError("La cantidad a dar de baja debe ser mayor a 0.")
+
+        motivo_code = str(motivo_tipo or "VENCIDO").strip().upper()
+        if motivo_code not in ("VENCIDO", "ROTURA_DANO", "EXTRAVIO", "MERMA_OTRA"):
+            motivo_code = "MERMA_OTRA"
+        detalle_clean = str(motivo_detalle or "").strip()
+        resp_clean = str(responsable or "").strip() or "Administrador"
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_mermas_table(conn)
+
+            prod = conn.execute(
+                "SELECT * FROM productos WHERE id = ? AND farmacia_id = ?",
+                (pid, fid),
+            ).fetchone()
+            if not prod:
+                raise ValueError(f"Producto ID #{pid} no encontrado en esta farmacia.")
+
+            stock_antes = int(prod["stock_total_unidades"] or 0)
+            lot_row = None
+            if lote_id:
+                lot_row = conn.execute(
+                    "SELECT * FROM inventario_lotes WHERE id = ? AND farmacia_id = ? AND producto_id = ?",
+                    (int(lote_id), fid, pid),
+                ).fetchone()
+            if not lot_row and numero_lote:
+                lot_row = conn.execute(
+                    "SELECT * FROM inventario_lotes WHERE farmacia_id = ? AND producto_id = ? AND numero_lote = ? ORDER BY cantidad_disponible DESC LIMIT 1",
+                    (fid, pid, str(numero_lote).strip()),
+                ).fetchone()
+            if not lot_row:
+                lot_row = conn.execute(
+                    "SELECT * FROM inventario_lotes WHERE farmacia_id = ? AND producto_id = ? AND cantidad_disponible > 0 ORDER BY fecha_vencimiento ASC LIMIT 1",
+                    (fid, pid),
+                ).fetchone()
+
+            lote_num_final = str(numero_lote or prod["lote"] or "SIN-LOTE").strip()
+            vence_final = str(prod["fecha_vencimiento"] or "")
+            lote_id_final = None
+
+            if lot_row:
+                lote_id_final = lot_row["id"]
+                lote_num_final = lot_row["numero_lote"]
+                vence_final = lot_row["fecha_vencimiento"]
+                disp_lote = int(lot_row["cantidad_disponible"] or 0)
+                qty_baja = min(qty_req, max(0, disp_lote)) if disp_lote > 0 else min(qty_req, stock_antes)
+                if qty_baja <= 0:
+                    raise ValueError(f"El lote {lote_num_final} no tiene unidades disponibles para dar de baja.")
+                nuevo_disp_lote = max(0, disp_lote - qty_baja)
+                conn.execute(
+                    "UPDATE inventario_lotes SET cantidad_disponible = ? WHERE id = ?",
+                    (nuevo_disp_lote, lote_id_final),
+                )
+            else:
+                qty_baja = min(qty_req, max(0, stock_antes))
+                if qty_baja <= 0:
+                    raise ValueError("El producto no tiene unidades disponibles para dar de baja.")
+
+            stock_nuevo = max(0, stock_antes - qty_baja)
+
+            # Actualizar lote/vencimiento principal de productos al siguiente lote FEFO activo si existe
+            next_lot = conn.execute(
+                """
+                SELECT numero_lote, fecha_vencimiento
+                FROM inventario_lotes
+                WHERE farmacia_id = ? AND producto_id = ? AND cantidad_disponible > 0
+                ORDER BY fecha_vencimiento ASC, id ASC
+                LIMIT 1
+                """,
+                (fid, pid),
+            ).fetchone()
+            if next_lot:
+                conn.execute(
+                    "UPDATE productos SET stock_total_unidades = ?, lote = ?, fecha_vencimiento = ? WHERE id = ? AND farmacia_id = ?",
+                    (stock_nuevo, next_lot["numero_lote"], next_lot["fecha_vencimiento"], pid, fid),
+                )
+            else:
+                conn.execute(
+                    "UPDATE productos SET stock_total_unidades = ? WHERE id = ? AND farmacia_id = ?",
+                    (stock_nuevo, pid, fid),
+                )
+
+            pf_row = conn.execute(
+                "SELECT precio_costo FROM productos_farmaceuticos WHERE farmacia_id = ? AND codigo_barras = ? LIMIT 1",
+                (fid, prod["codigo_barras"]),
+            ).fetchone()
+            raw_costo = pf_row["precio_costo"] if (pf_row and pf_row["precio_costo"] is not None) else (float(prod["precio_base"] or 0.0) * 0.7)
+            costo_unit = round(float(raw_costo or 0.0), 2)
+            costo_perdido = round(costo_unit * qty_baja, 2)
+
+            cur = conn.execute(
+                """
+                INSERT INTO inventario_mermas_bajas (
+                    farmacia_id, producto_id, producto_nombre, lote_id, numero_lote,
+                    fecha_vencimiento, cantidad_unidades, motivo_tipo, motivo_detalle,
+                    costo_unitario_rd, costo_total_perdido_rd, responsable, fecha_registro
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fid, pid, prod["nombre_comercial"], lote_id_final, lote_num_final,
+                    vence_final, qty_baja, motivo_code, detalle_clean,
+                    costo_unit, costo_perdido, resp_clean, now_str,
+                ),
+            )
+
+            conn.execute(
+                """
+                INSERT INTO movimientos_inventario (
+                    farmacia_id, fecha_hora, producto_id, tipo_movimiento, presentacion_operada,
+                    cantidad_presentacion, cambio_unidades_minimas, stock_anterior,
+                    stock_resultante, referencia_orden, usuario
+                ) VALUES (?, ?, ?, 'MERMA', 'UNIDAD', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fid, now_str, pid, qty_baja, -qty_baja, stock_antes, stock_nuevo,
+                    f"BAJA:{motivo_code} LOTE:{lote_num_final} {detalle_clean}".strip(), resp_clean,
+                ),
+            )
+
+            rec = conn.execute("SELECT * FROM inventario_mermas_bajas WHERE id = ?", (cur.lastrowid,)).fetchone()
+            return dict(rec)
+
+    def list_lot_shrinkage_records(self, farmacia_id: int = 1, limit: int = 100) -> Dict[str, Any]:
+        fid = int(farmacia_id or 1)
+        with self._get_connection(farmacia_id=fid) as conn:
+            self._ensure_mermas_table(conn)
+            rows = conn.execute(
+                "SELECT * FROM inventario_mermas_bajas WHERE farmacia_id = ? ORDER BY id DESC LIMIT ?",
+                (fid, int(limit)),
+            ).fetchall()
+            records = [dict(r) for r in rows]
+            total_perdido = round(sum(float(r.get("costo_total_perdido_rd") or 0.0) for r in records), 2)
+            total_unidades = sum(int(r.get("cantidad_unidades") or 0) for r in records)
+            return {
+                "records": records,
+                "total_perdido_rd": total_perdido,
+                "total_unidades": total_unidades,
+            }
+
+
+    def get_profitability_report(self, farmacia_id: int = 1, periodo: str = "MES") -> Dict[str, Any]:
+        """Calcula rentabilidad real: Ventas - Costo de lo Vendido - Gastos de Caja - Mermas, y Top 10 productos más rentables."""
+        fid = int(farmacia_id or 1)
+        per = str(periodo or "MES").strip().upper()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        month_str = datetime.now().strftime("%Y-%m")
+
+        with self._get_connection(farmacia_id=fid) as conn:
+            where_tx = "t.farmacia_id = ? AND UPPER(COALESCE(t.estado_pedido, '')) NOT IN ('ANULADO', 'CANCELADO', 'RECHAZADO_RECETA')"
+            params_tx: List[Any] = [fid]
+            if per == "HOY":
+                where_tx += " AND t.fecha_dia = ?"
+                params_tx.append(today_str)
+            elif per == "MES":
+                where_tx += " AND t.fecha_mes = ?"
+                params_tx.append(month_str)
+
+            tx_sum_row = conn.execute(
+                f"SELECT COALESCE(SUM(t.total), 0.0) AS ventas_totales, COUNT(*) AS num_tx FROM transacciones t WHERE {where_tx}",
+                tuple(params_tx),
+            ).fetchone()
+            ventas_rd = round(float(tx_sum_row["ventas_totales"] or 0.0), 2)
+            num_tx = int(tx_sum_row["num_tx"] or 0)
+
+            det_rows = conn.execute(
+                f"""
+                SELECT dt.producto_id, dt.nombre_comercial, dt.unidades_minimas_descontadas, dt.subtotal,
+                       COALESCE(pf.precio_costo, p.precio_base * 0.7, 0.0) AS costo_unitario
+                FROM detalle_transacciones dt
+                INNER JOIN transacciones t ON t.id = dt.transaccion_id
+                LEFT JOIN productos p ON p.id = dt.producto_id
+                LEFT JOIN productos_farmaceuticos pf ON pf.farmacia_id = t.farmacia_id AND pf.codigo_barras = p.codigo_barras
+                WHERE {where_tx}
+                """,
+                tuple(params_tx),
+            ).fetchall()
+
+            costo_vendido_rd = 0.0
+            prod_stats: Dict[int, Dict[str, Any]] = {}
+            for r in det_rows:
+                pid = int(r["producto_id"] or 0)
+                unid = int(r["unidades_minimas_descontadas"] or 0)
+                sub = float(r["subtotal"] or 0.0)
+                c_unit = float(r["costo_unitario"] or 0.0)
+                c_linea = round(unid * c_unit, 2)
+                costo_vendido_rd += c_linea
+
+                if pid not in prod_stats:
+                    prod_stats[pid] = {
+                        "producto_id": pid,
+                        "nombre_comercial": r["nombre_comercial"] or "Producto",
+                        "unidades_vendidas": 0,
+                        "ventas_rd": 0.0,
+                        "costo_rd": 0.0,
+                    }
+                prod_stats[pid]["unidades_vendidas"] += unid
+                prod_stats[pid]["ventas_rd"] = round(prod_stats[pid]["ventas_rd"] + sub, 2)
+                prod_stats[pid]["costo_rd"] = round(prod_stats[pid]["costo_rd"] + c_linea, 2)
+
+            costo_vendido_rd = round(costo_vendido_rd, 2)
+
+            # Gastos de caja
+            gastos_caja_rd = 0.0
+            try:
+                if per == "HOY":
+                    g_row = conn.execute(
+                        "SELECT COALESCE(SUM(monto_rd), 0.0) AS tot FROM caja_salidas_gastos WHERE farmacia_id = ? AND substr(fecha_hora, 1, 10) = ?",
+                        (fid, today_str),
+                    ).fetchone()
+                elif per == "MES":
+                    g_row = conn.execute(
+                        "SELECT COALESCE(SUM(monto_rd), 0.0) AS tot FROM caja_salidas_gastos WHERE farmacia_id = ? AND substr(fecha_hora, 1, 7) = ?",
+                        (fid, month_str),
+                    ).fetchone()
+                else:
+                    g_row = conn.execute(
+                        "SELECT COALESCE(SUM(monto_rd), 0.0) AS tot FROM caja_salidas_gastos WHERE farmacia_id = ?",
+                        (fid,),
+                    ).fetchone()
+                if g_row:
+                    gastos_caja_rd = round(float(g_row["tot"] or 0.0), 2)
+            except Exception:
+                gastos_caja_rd = 0.0
+
+            # Mermas y bajas de lotes
+            mermas_rd = 0.0
+            try:
+                self._ensure_mermas_table(conn)
+                if per == "HOY":
+                    m_row = conn.execute(
+                        "SELECT COALESCE(SUM(costo_total_perdido_rd), 0.0) AS tot FROM inventario_mermas_bajas WHERE farmacia_id = ? AND substr(fecha_registro, 1, 10) = ?",
+                        (fid, today_str),
+                    ).fetchone()
+                elif per == "MES":
+                    m_row = conn.execute(
+                        "SELECT COALESCE(SUM(costo_total_perdido_rd), 0.0) AS tot FROM inventario_mermas_bajas WHERE farmacia_id = ? AND substr(fecha_registro, 1, 7) = ?",
+                        (fid, month_str),
+                    ).fetchone()
+                else:
+                    m_row = conn.execute(
+                        "SELECT COALESCE(SUM(costo_total_perdido_rd), 0.0) AS tot FROM inventario_mermas_bajas WHERE farmacia_id = ?",
+                        (fid,),
+                    ).fetchone()
+                if m_row:
+                    mermas_rd = round(float(m_row["tot"] or 0.0), 2)
+            except Exception:
+                mermas_rd = 0.0
+
+            utilidad_bruta_rd = round(ventas_rd - costo_vendido_rd, 2)
+            utilidad_neta_real_rd = round(ventas_rd - costo_vendido_rd - gastos_caja_rd - mermas_rd, 2)
+            margen_neto_pct = round((utilidad_neta_real_rd / ventas_rd) * 100.0, 1) if ventas_rd > 0 else 0.0
+
+            ranking = []
+            for item in prod_stats.values():
+                gan = round(item["ventas_rd"] - item["costo_rd"], 2)
+                mg = round((gan / item["ventas_rd"]) * 100.0, 1) if item["ventas_rd"] > 0 else 0.0
+                ranking.append({**item, "ganancia_rd": gan, "margen_pct": mg})
+            ranking.sort(key=lambda x: x["ganancia_rd"], reverse=True)
+
+            return {
+                "periodo": per,
+                "num_transacciones": num_tx,
+                "ventas_rd": ventas_rd,
+                "costo_vendido_rd": costo_vendido_rd,
+                "gastos_caja_rd": gastos_caja_rd,
+                "mermas_rd": mermas_rd,
+                "utilidad_bruta_rd": utilidad_bruta_rd,
+                "utilidad_neta_real_rd": utilidad_neta_real_rd,
+                "margen_neto_pct": margen_neto_pct,
+                "top_productos_rentables": ranking[:10],
+            }

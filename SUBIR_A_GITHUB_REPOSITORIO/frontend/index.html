@@ -370,6 +370,11 @@
 
 
       <div class="flex items-center gap-2">
+        <!-- MIS ALERGIAS -->
+        <button type="button" id="btn-app-allergies" onclick="openPatientAllergiesModal()" title="Registrar tus alergias a medicamentos para recibir alertas automáticas" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 text-xs font-extrabold border border-rose-400/40 flex items-center gap-1 transition cursor-pointer">
+          <span>⚠️</span> <span class="hidden md:inline">Mis Alergias</span><span id="app-allergies-count-badge" class="hidden px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">0</span>
+        </button>
+
         <!-- MIS PEDIDOS E HISTORIAL -->
         <button type="button" onclick="openPatientOrdersModal()" title="Ver mis pedidos anteriores y repetir compra" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 text-xs font-extrabold border border-indigo-400/40 flex items-center gap-1.5 transition cursor-pointer">
           <span>📦</span> <span class="hidden sm:inline">Mis Pedidos</span>
@@ -490,6 +495,7 @@
           <span class="flex items-center gap-1 font-semibold text-slate-600">
             <span>🕒</span>
             <span id="app-info-hours">--</span>
+            <span id="app-open-status-badge" class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">🟢 Abierto</span>
           </span>
         </div>
         <button type="button" onclick="openDirectPharmacyWhatsAppHelp()" class="px-3 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-[11px] cursor-pointer flex items-center gap-1">
@@ -2058,6 +2064,47 @@ function dismissPwaBanner() {
 
         <div id="courier-orders-list" class="space-y-2.5">
           <p class="text-xs text-slate-500 text-center py-6">Cargando pedidos a domicilio...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ALERGIAS DEL PACIENTE (ALERTAS PREVENTIVAS EN CARRITO) -->
+  <div id="patient-allergies-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/75 backdrop-blur-xs p-3 sm:p-4">
+    <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between">
+        <div>
+          <h3 class="text-base sm:text-lg font-extrabold flex items-center gap-2">
+            <span>⚠️</span> <span>Mis Alergias a Medicamentos</span>
+          </h3>
+          <p class="text-[11px] text-rose-300">Recibirás una alerta automática si intentas agregar un medicamento incompatible.</p>
+        </div>
+        <button type="button" onclick="closePatientAllergiesModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold cursor-pointer">✕</button>
+      </div>
+
+      <div class="p-4 sm:p-5 space-y-4 overflow-y-auto text-xs">
+        <form onsubmit="handleAddAllergySubmit(event)" class="flex gap-2">
+          <input id="app-allergy-input" type="text" required placeholder="Ej. Penicilina, Ibuprofeno, Sulfa..." class="flex-1 px-3 py-2.5 rounded-xl border border-slate-300 font-semibold focus:border-rose-500 focus:outline-none" />
+          <button type="submit" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold cursor-pointer">
+            + Agregar
+          </button>
+        </form>
+
+        <div class="space-y-1.5">
+          <p class="text-[10px] font-extrabold uppercase text-slate-500">Alergias frecuentes (1 clic):</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" onclick="addPatientAllergy('Penicilina')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Penicilina</button>
+            <button type="button" onclick="addPatientAllergy('Ibuprofeno / AINEs')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Ibuprofeno / AINEs</button>
+            <button type="button" onclick="addPatientAllergy('Aspirina')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Aspirina</button>
+            <button type="button" onclick="addPatientAllergy('Sulfas')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Sulfas</button>
+            <button type="button" onclick="addPatientAllergy('Paracetamol')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Paracetamol</button>
+            <button type="button" onclick="addPatientAllergy('Dipirona')" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-800 font-bold cursor-pointer">+ Dipirona</button>
+          </div>
+        </div>
+
+        <div class="space-y-1.5">
+          <p class="text-[10px] font-extrabold uppercase text-slate-500">Tus alergias registradas:</p>
+          <div id="app-allergies-list" class="space-y-2"></div>
         </div>
       </div>
     </div>
